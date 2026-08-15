@@ -52,50 +52,83 @@ describe('BeamedClientDB local operations', () => {
     expect(remaining[0].title).toBe('Read paper');
   });
 
-  it('should record local changes into outbox', async () => {
+  it('should perform atomic bulk operations (putAll, deleteAll, getAll with ids)', async () => {
     const todos = db.table<{ title: string }>('todos');
-    await todos.put('task-1', { title: 'Write tests' });
-    await todos.delete('task-1');
 
-    const outbox = await db.idbManager.getPendingOutbox();
-    expect(outbox).toHaveLength(2);
-    expect(outbox[0].change.op).toBe(OperationType.Put);
-    expect(outbox[0].change.id).toBe('task-1');
-    expect(outbox[1].change.op).toBe(OperationType.Delete);
-    expect(outbox[1].change.id).toBe('task-1');
+    // Bulk put
+    const items = [
+      { id: 'b1', data: { title: 'Bulk 1' } },
+      { id: 'b2', data: { title: 'Bulk 2' } },
+      { id: 'b3', data: { title: 'Bulk 3' } },
+    ];
+    const saved = await todos.putAll(items);
+    expect(saved).toHaveLength(3);
+
+    // Filtered getAll
+    const subset = await todos.getAll(['b1', 'b3', 'nonexistent']);
+    expect(subset).toHaveLength(2);
+    expect(subset).toEqual([{ title: 'Bulk 1' }, { title: 'Bulk 3' }]);
+
+    // Bulk delete
+    const deletedCount = await todos.deleteAll(['b1', 'b2']);
+    expect(deletedCount).toBe(2);
+
+    const remaining = await todos.getAll();
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].title).toBe('Bulk 3');
   });
 
-  it('should trigger change subscriptions', async () => {
-    const notes = db.table<{ text: string }>('notes');
-    const events: Array<{
-      op: OperationType;
-      id: string;
-      data?: { text: string };
-      isRemote?: boolean;
-    }> = [];
+  it('should record local changes into outbox in batch', async () => {
+    const todos = db.table<{ title: string }>('todos');
+    await todos.putAll([
+      { id: 'task-1', data: { title: 'Write tests' } },
+      { id: 'task-2', data: { title: 'Refactor' } },
+    ]);
+    await todos.deleteAll(['task-1']);
 
-    const unsubscribe = notes.subscribe((e) => {
-      events.push(e);
+    const outbox = await db.idbManager.getPendingOutbox();
+    expect(outbox).toHaveLength(3);
+    expect(outbox[0].change.op).toBe(OperationType.Put);
+    expect(outbox[0].change.id).toBe('task-1');
+    expect(outbox[1].change.op).toBe(OperationType.Put);
+    expect(outbox[1].change.id).toBe('task-2');
+    expect(outbox[2].change.op).toBe(OperationType.Delete);
+    expect(outbox[2].change.id).toBe('task-1');
+  });
+
+  it('should trigger change subscriptions with event lists for single and bulk operations', async () => {
+    const notes = db.table<{ text: string }>('notes');
+    const eventBatches: Array<Array<{ op: OperationType; id: string }>> = [];
+
+    const unsubscribe = notes.subscribe((events) => {
+      eventBatches.push(events.map((e) => ({ op: e.op, id: e.id })));
     });
 
+    // Single put
     await notes.put('n1', { text: 'Hello' });
-    await notes.delete('n1');
+    // Bulk put
+    await notes.putAll([
+      { id: 'n2', data: { text: 'World' } },
+      { id: 'n3', data: { text: 'Bulk' } },
+    ]);
+    // Bulk delete
+    await notes.deleteAll(['n1', 'n2']);
 
     unsubscribe();
-    await notes.put('n2', { text: 'Unsubscribed' });
+    await notes.put('n4', { text: 'Unsubscribed' });
 
-    expect(events).toHaveLength(2);
-    expect(events[0]).toEqual({
-      op: OperationType.Put,
-      id: 'n1',
-      data: { text: 'Hello' },
-      isRemote: false,
-    });
-    expect(events[1]).toEqual({
-      op: OperationType.Delete,
-      id: 'n1',
-      data: undefined,
-      isRemote: false,
-    });
+    expect(eventBatches).toHaveLength(3);
+    // Batch 1: single put
+    expect(eventBatches[0]).toEqual([{ op: OperationType.Put, id: 'n1' }]);
+    // Batch 2: bulk put of 2 items
+    expect(eventBatches[1]).toEqual([
+      { op: OperationType.Put, id: 'n2' },
+      { op: OperationType.Put, id: 'n3' },
+    ]);
+    // Batch 3: bulk delete of 2 items
+    expect(eventBatches[2]).toEqual([
+      { op: OperationType.Delete, id: 'n1' },
+      { op: OperationType.Delete, id: 'n2' },
+    ]);
   });
 });

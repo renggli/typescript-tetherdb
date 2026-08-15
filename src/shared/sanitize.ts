@@ -1,6 +1,7 @@
 /**
  * Security, input validation, and sanitization utilities.
  * Protects server-side storage and synchronization from injection and traversal attacks.
+ * Formats errors with exact user and table context for precise debugging and monitoring.
  *
  * @module beameddb/shared/sanitize
  */
@@ -11,7 +12,7 @@
 const SAFE_IDENTIFIER_REGEX = /^[a-zA-Z0-9_-]{2,128}$/;
 
 /**
- * Regex for valid table/store names (alphanumeric, underscores, hyphens, and single internal dots).
+ * Regex for valid table/store names (alphanumeric, underscores, hyphens).
  */
 const SAFE_STORE_REGEX = /^[a-zA-Z0-9_-]{1,64}$/;
 
@@ -55,26 +56,31 @@ export function validateUserId(userId: string): string {
 
 /**
  * Validates a store/table name ensuring it is safe from path traversal and not reserved.
+ * Includes user context in errors when provided.
  *
  * @param storeName - The table/store name to validate.
  * @param allowedStores - Optional allowlist of permitted table names.
+ * @param userId - Optional target user ID for contextual error reporting.
  * @returns The validated store name.
  * @throws Error if the store name is invalid, reserved, or not in the allowlist.
  */
 export function validateStoreName(
   storeName: string,
   allowedStores?: ReadonlySet<string> | readonly string[],
+  userId?: string,
 ): string {
+  const userSuffix = userId ? ` for user "${userId}"` : '';
+
   if (typeof storeName !== 'string' || !SAFE_STORE_REGEX.test(storeName)) {
     throw new Error(
-      `Invalid store name: "${storeName}". Store names must be 1-64 alphanumeric characters, hyphens, or underscores.`,
+      `Invalid table name: "${storeName}"${userSuffix}. Table names must be 1-64 alphanumeric characters, hyphens, or underscores.`,
     );
   }
 
   const normalized = storeName.toLowerCase();
   if (RESERVED_STORE_NAMES.has(normalized)) {
     throw new Error(
-      `Store name "${storeName}" is a reserved system keyword and cannot be used.`,
+      `Table name "${storeName}" is a reserved system keyword and cannot be used${userSuffix}.`,
     );
   }
 
@@ -86,7 +92,7 @@ export function validateStoreName(
         : (allowedStores as ReadonlySet<string>).has(storeName);
     if (!isAllowed) {
       throw new Error(
-        `Store "${storeName}" is not in the allowed stores list.`,
+        `Table "${storeName}" is not in the allowed tables list${userSuffix}.`,
       );
     }
   }
@@ -96,20 +102,33 @@ export function validateStoreName(
 
 /**
  * Validates a record ID ensuring it is a non-empty string within size limits and contains no null bytes.
+ * Includes table and user context in errors when provided.
  *
  * @param id - The record identifier to validate.
+ * @param storeName - Optional table name context.
+ * @param userId - Optional user ID context.
  * @returns The validated record ID.
  * @throws Error if the record ID is invalid or exceeds max length.
  */
-export function validateRecordId(id: string): string {
+export function validateRecordId(
+  id: string,
+  storeName?: string,
+  userId?: string,
+): string {
+  const contextParts: string[] = [];
+  if (storeName) contextParts.push(`table: "${storeName}"`);
+  if (userId) contextParts.push(`user: "${userId}"`);
+  const contextSuffix =
+    contextParts.length > 0 ? ` (${contextParts.join(', ')})` : '';
+
   if (typeof id !== 'string' || id.length === 0 || id.length > 512) {
     throw new Error(
-      `Invalid record ID: Record IDs must be non-empty strings up to 512 characters.`,
+      `Invalid record ID: Record IDs must be non-empty strings up to 512 characters${contextSuffix}.`,
     );
   }
   if (id.includes('\0') || id === '__proto__' || id === 'prototype') {
     throw new Error(
-      `Invalid record ID: Contains forbidden characters or keys.`,
+      `Invalid record ID "${id}": Contains forbidden characters or keys${contextSuffix}.`,
     );
   }
   return id;
@@ -144,12 +163,19 @@ export function validateUsername(username: string): string {
  * Validates a client correlation or batch ID.
  *
  * @param id - The batch or client identifier.
+ * @param name - Identifier type description (e.g. 'batchId', 'clientId').
+ * @param userId - Optional user context.
  * @returns The validated ID.
  */
-export function validateIdentifier(id: string, name = 'Identifier'): string {
+export function validateIdentifier(
+  id: string,
+  name = 'Identifier',
+  userId?: string,
+): string {
+  const userSuffix = userId ? ` for user "${userId}"` : '';
   if (typeof id !== 'string' || !SAFE_IDENTIFIER_REGEX.test(id)) {
     throw new Error(
-      `Invalid ${name}: "${id}". Must be 2-128 alphanumeric characters, hyphens, or underscores.`,
+      `Invalid ${name}: "${id}"${userSuffix}. Must be 2-128 alphanumeric characters, hyphens, or underscores.`,
     );
   }
   return id;

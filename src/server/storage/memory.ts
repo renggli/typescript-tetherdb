@@ -75,8 +75,8 @@ export class MemoryStorageAdapter implements StorageAdapter {
     store: string,
     id: string,
   ): Promise<StoredRecord | undefined> {
-    validateStoreName(store, this.limits.allowedStores);
-    validateRecordId(id);
+    validateStoreName(store, this.limits.allowedStores, userId);
+    validateRecordId(id, store, userId);
     const userState = this.getUserState(userId);
     const storeMap = userState.stores.get(store);
     return storeMap?.get(id);
@@ -94,7 +94,7 @@ export class MemoryStorageAdapter implements StorageAdapter {
     store?: string,
   ): Promise<RecordSnapshotItem[]> {
     if (store !== undefined) {
-      validateStoreName(store, this.limits.allowedStores);
+      validateStoreName(store, this.limits.allowedStores, userId);
     }
     const userState = this.getUserState(userId);
     const items: RecordSnapshotItem[] = [];
@@ -147,15 +147,16 @@ export class MemoryStorageAdapter implements StorageAdapter {
       const storeName = validateStoreName(
         change.store,
         this.limits.allowedStores,
+        userId,
       );
-      const recordId = validateRecordId(change.id);
+      const recordId = validateRecordId(change.id, change.store, userId);
 
       if (
         !userState.stores.has(storeName) &&
         userState.stores.size >= maxStores
       ) {
         throw new Error(
-          `Store limit reached. Maximum ${maxStores} tables allowed per user.`,
+          `Store limit reached. Maximum ${maxStores} tables allowed for user "${userId}".`,
         );
       }
 
@@ -169,17 +170,25 @@ export class MemoryStorageAdapter implements StorageAdapter {
         const payloadSize = calculateByteSize(change.data);
         if (payloadSize > maxRecordSize) {
           throw new Error(
-            `Record size (${payloadSize} bytes) exceeds maximum allowed size of ${maxRecordSize} bytes.`,
+            `Record size (${payloadSize} bytes) for record "${recordId}" in table "${storeName}" exceeds maximum allowed size of ${maxRecordSize} bytes for user "${userId}".`,
           );
         }
       }
 
       const existing = storeMap.get(recordId);
+      const isInsertingActive =
+        (!existing || existing.deleted) &&
+        !change.deleted &&
+        change.op !== OperationType.Delete;
 
-      if (!existing && !change.deleted && change.op !== OperationType.Delete) {
-        if (storeMap.size >= maxRecords) {
+      if (isInsertingActive) {
+        let activeCount = 0;
+        for (const r of storeMap.values()) {
+          if (!r.deleted) activeCount++;
+        }
+        if (activeCount >= maxRecords) {
           throw new Error(
-            `Table "${storeName}" has reached the maximum capacity of ${maxRecords} records.`,
+            `Table "${storeName}" has reached the maximum capacity of ${maxRecords} records for user "${userId}".`,
           );
         }
       }

@@ -49,8 +49,18 @@ export class SyncHub {
    *
    * @param ws - Active WebSocket connection.
    */
+  /**
+   * Handles an incoming WebSocket connection, binding message, error, and disconnection events.
+   *
+   * @param ws - Active WebSocket connection.
+   */
   handleConnection(ws: WebSocket): void {
     ws.on('message', async (data) => {
+      const client = this.wsToClient.get(ws);
+      const userContext = client
+        ? ` (user: "${client.userId}", client: "${client.clientId}")`
+        : '';
+
       try {
         const raw = typeof data === 'string' ? data : data.toString();
         const msg: ClientMessage = JSON.parse(raw);
@@ -58,10 +68,13 @@ export class SyncHub {
       } catch (err) {
         const errorMsg =
           err instanceof Error ? err.message : 'Invalid message format';
-        console.error('[BeamedServer] WebSocket message error:', errorMsg);
+        console.error(
+          `[BeamedServer] WebSocket message error${userContext}:`,
+          errorMsg,
+        );
         this.send(ws, {
           type: ServerMessageType.Error,
-          message: errorMsg,
+          message: `${errorMsg}${userContext}`,
         });
       }
     });
@@ -71,7 +84,14 @@ export class SyncHub {
     });
 
     ws.on('error', (err) => {
-      console.error('[BeamedServer] WebSocket client error:', err);
+      const client = this.wsToClient.get(ws);
+      const userContext = client
+        ? ` (user: "${client.userId}", client: "${client.clientId}")`
+        : '';
+      console.error(
+        `[BeamedServer] WebSocket client error${userContext}:`,
+        err,
+      );
       this.handleDisconnect(ws);
     });
   }
@@ -130,6 +150,7 @@ export class SyncHub {
         const clientId = validateIdentifier(
           msg.clientId ?? 'client_anon',
           'clientId',
+          session.userId,
         );
         const client: ActiveClient = {
           ws,
@@ -181,18 +202,24 @@ export class SyncHub {
         }
 
         if (!Array.isArray(msg.changes)) {
-          throw new Error('Invalid change batch: changes must be an array.');
+          throw new Error(
+            `Invalid change batch: changes must be an array for user "${client.userId}".`,
+          );
         }
 
         const maxBatchSize = this.limits.maxBatchSizeBytes ?? 5 * 1024 * 1024;
         const batchBytes = calculateByteSize(msg.changes);
         if (batchBytes > maxBatchSize) {
           throw new Error(
-            `Change batch size (${batchBytes} bytes) exceeds maximum allowed size of ${maxBatchSize} bytes.`,
+            `Change batch size (${batchBytes} bytes) exceeds maximum allowed size of ${maxBatchSize} bytes for user "${client.userId}".`,
           );
         }
 
-        const batchId = validateIdentifier(msg.batchId, 'batchId');
+        const batchId = validateIdentifier(
+          msg.batchId,
+          'batchId',
+          client.userId,
+        );
 
         const { applied, newSeq } = await this.storage.applyChanges(
           client.userId,
@@ -250,7 +277,8 @@ export class SyncHub {
       const { changes, currentSeq, requiresSnapshot } =
         await this.storage.getChangesSince(client.userId, seq);
 
-      if (requiresSnapshot) {
+      // If changelog was pruned OR diff is large (> 50 changes), deliver full snapshot for maximum efficiency
+      if (requiresSnapshot || changes.length > 50) {
         const snapshot = await this.storage.getAllRecords(client.userId);
         this.send(client.ws, {
           type: ServerMessageType.SyncSnapshot,

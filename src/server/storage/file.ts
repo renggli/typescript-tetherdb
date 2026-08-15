@@ -109,17 +109,23 @@ export class FileStorageAdapter implements StorageAdapter {
    * @param storeName - Store name to validate and resolve.
    * @returns Absolute path to store JSON file.
    */
-  private getStoreFilePath(userDir: string, storeName: string): string {
+  private getStoreFilePath(
+    userDir: string,
+    storeName: string,
+    userId?: string,
+  ): string {
     const safeStoreName = validateStoreName(
       storeName,
       this.limits.allowedStores,
+      userId,
     );
     const storesDir = path.resolve(userDir, 'stores');
     const filePath = path.resolve(storesDir, `${safeStoreName}.json`);
 
     if (!filePath.startsWith(storesDir + path.sep)) {
+      const userSuffix = userId ? ` (user: "${userId}")` : '';
       throw new Error(
-        `Path traversal attempt detected for store: "${storeName}"`,
+        `Path traversal attempt detected for table: "${storeName}"${userSuffix}`,
       );
     }
     return filePath;
@@ -161,7 +167,7 @@ export class FileStorageAdapter implements StorageAdapter {
         if (file.endsWith('.json')) {
           const storeName = path.basename(file, '.json');
           try {
-            validateStoreName(storeName, this.limits.allowedStores);
+            validateStoreName(storeName, this.limits.allowedStores, userId);
           } catch {
             continue; // Skip invalid or non-allowlisted store files
           }
@@ -219,7 +225,7 @@ export class FileStorageAdapter implements StorageAdapter {
 
     // Save stores
     for (const [storeName, map] of cached.stores.entries()) {
-      const filePath = this.getStoreFilePath(userDir, storeName);
+      const filePath = this.getStoreFilePath(userDir, storeName, userId);
       const obj: Record<string, StoredRecord> = Object.create(null);
       for (const [id, record] of map.entries()) {
         obj[id] = record;
@@ -248,8 +254,8 @@ export class FileStorageAdapter implements StorageAdapter {
     store: string,
     id: string,
   ): Promise<StoredRecord | undefined> {
-    validateStoreName(store, this.limits.allowedStores);
-    validateRecordId(id);
+    validateStoreName(store, this.limits.allowedStores, userId);
+    validateRecordId(id, store, userId);
     return this.withUserLock(userId, async () => {
       const user = await this.loadUser(userId);
       const storeMap = user.stores.get(store);
@@ -269,7 +275,7 @@ export class FileStorageAdapter implements StorageAdapter {
     store?: string,
   ): Promise<RecordSnapshotItem[]> {
     if (store !== undefined) {
-      validateStoreName(store, this.limits.allowedStores);
+      validateStoreName(store, this.limits.allowedStores, userId);
     }
     return this.withUserLock(userId, async () => {
       const user = await this.loadUser(userId);
@@ -322,13 +328,14 @@ export class FileStorageAdapter implements StorageAdapter {
         const storeName = validateStoreName(
           change.store,
           this.limits.allowedStores,
+          userId,
         );
-        const recordId = validateRecordId(change.id);
+        const recordId = validateRecordId(change.id, change.store, userId);
 
         // Enforce max stores per user
         if (!user.stores.has(storeName) && user.stores.size >= maxStores) {
           throw new Error(
-            `Store limit reached. Maximum ${maxStores} tables allowed per user.`,
+            `Store limit reached. Maximum ${maxStores} tables allowed for user "${userId}".`,
           );
         }
 
@@ -343,22 +350,26 @@ export class FileStorageAdapter implements StorageAdapter {
           const payloadSize = calculateByteSize(change.data);
           if (payloadSize > maxRecordSize) {
             throw new Error(
-              `Record size (${payloadSize} bytes) exceeds maximum allowed size of ${maxRecordSize} bytes.`,
+              `Record size (${payloadSize} bytes) for record "${recordId}" in table "${storeName}" exceeds maximum allowed size of ${maxRecordSize} bytes for user "${userId}".`,
             );
           }
         }
 
         const existing = storeMap.get(recordId);
-
-        // Enforce max records per store on new insertions
-        if (
-          !existing &&
+        const isInsertingActive =
+          (!existing || existing.deleted) &&
           !change.deleted &&
-          change.op !== OperationType.Delete
-        ) {
-          if (storeMap.size >= maxRecords) {
+          change.op !== OperationType.Delete;
+
+        // Enforce max records per store on active record insertions
+        if (isInsertingActive) {
+          let activeCount = 0;
+          for (const r of storeMap.values()) {
+            if (!r.deleted) activeCount++;
+          }
+          if (activeCount >= maxRecords) {
             throw new Error(
-              `Table "${storeName}" has reached the maximum capacity of ${maxRecords} records.`,
+              `Table "${storeName}" has reached the maximum capacity of ${maxRecords} records for user "${userId}".`,
             );
           }
         }

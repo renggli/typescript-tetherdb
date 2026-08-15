@@ -147,8 +147,8 @@ describe('End-to-End WebSocket Sync', () => {
       data?: { text: string };
       isRemote?: boolean;
     }> = [];
-    messagesB.subscribe((event) => {
-      receivedEvents.push(event);
+    messagesB.subscribe((events) => {
+      receivedEvents.push(...events);
     });
 
     const messagesA = clientA.table<{ text: string }>('messages');
@@ -265,5 +265,90 @@ describe('End-to-End WebSocket Sync', () => {
 
     await clientUser1.close();
     await clientUser2.close();
+  });
+
+  it('should deliver snapshot and update local database in batch when diff is large', async () => {
+    // Populate 60 changes in server storage for user
+    const session = server.auth.verifyToken(userToken);
+    const userId = session?.userId ?? '';
+
+    const changes = [];
+    for (let i = 1; i <= 60; i++) {
+      changes.push({
+        store: 'tasks',
+        id: `task-${i}`,
+        op: OperationType.Put,
+        data: { title: `Task ${i}` },
+        timestamp: Date.now() + i,
+        clientId: 'prepop',
+      });
+    }
+    await server.storageAdapter.applyChanges(userId, changes);
+
+    // New client connects with lastSyncSeq: 1 (so 59 changes diff > 50 threshold)
+    const client = new BeamedClientDB({
+      name: `client-bulk-${Math.random().toString(36).substring(2, 8)}`,
+      stores: ['tasks'],
+      sync: {
+        url: wsUrl,
+        token: userToken,
+        WebSocketClass: WebSocket,
+      },
+    });
+
+    const tasksTable = client.table<{ title: string }>('tasks');
+    await delay(300);
+
+    const allTasks = await tasksTable.getAll();
+    expect(allTasks).toHaveLength(60);
+
+    await client.close();
+  });
+
+  it('should batch rapid local mutations and beam them to remote clients cohesively', async () => {
+    const clientA = new BeamedClientDB({
+      name: `client-a-bulk-${Math.random().toString(36).substring(2, 8)}`,
+      stores: ['items'],
+      sync: {
+        url: wsUrl,
+        token: userToken,
+        WebSocketClass: WebSocket,
+      },
+    });
+
+    const clientB = new BeamedClientDB({
+      name: `client-b-bulk-${Math.random().toString(36).substring(2, 8)}`,
+      stores: ['items'],
+      sync: {
+        url: wsUrl,
+        token: userToken,
+        WebSocketClass: WebSocket,
+      },
+    });
+
+    await delay(150);
+
+    const itemsB = clientB.table<{ title: string }>('items');
+    const receivedBatches: Array<Array<{ op: OperationType; id: string }>> = [];
+    itemsB.subscribe((events) => {
+      receivedBatches.push(events.map((e) => ({ op: e.op, id: e.id })));
+    });
+
+    const itemsA = clientA.table<{ title: string }>('items');
+    // Bulk put from Client A
+    await itemsA.putAll([
+      { id: 'item-1', data: { title: 'Batch Item 1' } },
+      { id: 'item-2', data: { title: 'Batch Item 2' } },
+      { id: 'item-3', data: { title: 'Batch Item 3' } },
+    ]);
+
+    await delay(250);
+
+    const allOnB = await itemsB.getAll();
+    expect(allOnB).toHaveLength(3);
+    expect(receivedBatches.length).toBeGreaterThanOrEqual(1);
+
+    await clientA.close();
+    await clientB.close();
   });
 });

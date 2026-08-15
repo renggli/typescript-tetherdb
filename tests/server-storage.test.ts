@@ -139,7 +139,9 @@ describe('Storage Adapters', () => {
             timestamp: 100,
           },
         ]),
-      ).rejects.toThrow('not in the allowed stores list');
+      ).rejects.toThrow(
+        'Table "secrets" is not in the allowed tables list for user "user-limits"',
+      );
 
       // Oversized record
       await expect(
@@ -152,7 +154,72 @@ describe('Storage Adapters', () => {
             timestamp: 100,
           },
         ]),
-      ).rejects.toThrow('Record size');
+      ).rejects.toThrow(
+        'Record size (111 bytes) for record "1" in table "todos" exceeds maximum allowed size of 50 bytes for user "user-limits"',
+      );
+    });
+
+    it('should count only active records towards maxRecordsPerStore and allow new inserts after delete', async () => {
+      const capAdapter = new FileStorageAdapter({
+        baseDir: tmpDir,
+        limits: { maxRecordsPerStore: 2 },
+      });
+
+      // Insert 2 records (reaches limit)
+      await capAdapter.applyChanges('user-cap', [
+        {
+          store: 'todos',
+          id: '1',
+          op: OperationType.Put,
+          data: 'one',
+          timestamp: 100,
+        },
+        {
+          store: 'todos',
+          id: '2',
+          op: OperationType.Put,
+          data: 'two',
+          timestamp: 101,
+        },
+      ]);
+
+      // 3rd record should be rejected
+      await expect(
+        capAdapter.applyChanges('user-cap', [
+          {
+            store: 'todos',
+            id: '3',
+            op: OperationType.Put,
+            data: 'three',
+            timestamp: 102,
+          },
+        ]),
+      ).rejects.toThrow(
+        'Table "todos" has reached the maximum capacity of 2 records for user "user-cap"',
+      );
+
+      // Delete record 1 (tombstone created)
+      await capAdapter.applyChanges('user-cap', [
+        {
+          store: 'todos',
+          id: '1',
+          op: OperationType.Delete,
+          deleted: true,
+          timestamp: 103,
+        },
+      ]);
+
+      // Inserting record 3 should now succeed because active count is 1
+      const res = await capAdapter.applyChanges('user-cap', [
+        {
+          store: 'todos',
+          id: '3',
+          op: OperationType.Put,
+          data: 'three',
+          timestamp: 104,
+        },
+      ]);
+      expect(res.applied).toHaveLength(1);
     });
   });
 });

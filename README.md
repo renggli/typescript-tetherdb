@@ -72,9 +72,11 @@ const db = new BeamedClientDB({
 
 const todos = db.table<Todo>("todos");
 
-// Reactive subscription to local & remote changes
-const unsubscribe = todos.subscribe(({ op, id, data, isRemote }) => {
-  console.log(`Change (${op}) on ${id}, isRemote: ${isRemote}:`, data);
+// Reactive subscription to local & remote changes (receives a list of TableChangeEvent)
+const unsubscribe = todos.subscribe((events) => {
+  for (const { op, id, data, isRemote } of events) {
+    console.log(`Change (${op}) on ${id}, isRemote: ${isRemote}:`, data);
+  }
 });
 
 // Put an item (saved locally in IndexedDB and synced to server)

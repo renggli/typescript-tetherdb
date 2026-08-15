@@ -25,8 +25,23 @@ export interface OutboxEntry {
 }
 
 /**
+ * Mutation item payload passed to `IDBManager.applyLocalChanges`.
+ */
+export interface LocalMutationItem<T = unknown> {
+  /** Target record identifier. */
+  id: string;
+  /** Mutation operation type. */
+  op: OperationType;
+  /** Record data payload (defined on put). */
+  data?: T;
+  /** Correlated changelog entry to queue in outbox. */
+  change: ChangeRecord<T>;
+}
+
+/**
  * Atomic transaction coordinator managing user object stores alongside
  * internal outbox changelogs and sync metadata stores.
+ * All mutations and ingestion workflows are batched by default.
  */
 export class IDBManager {
   private dbPromise: Promise<IDBDatabase> | null = null;
@@ -84,23 +99,35 @@ export class IDBManager {
   }
 
   /**
-   * Dynamically ensures that an application object store exists in IndexedDB,
-   * performing a version upgrade if necessary.
+   * Dynamically ensures that multiple application object stores exist in IndexedDB.
    *
-   * @param storeName - Name of the table/object store to ensure.
+   * @param storeNames - Array of table/object store names to ensure.
    */
-  async ensureStore(storeName: string): Promise<void> {
-    if (this.storeNames.has(storeName)) return;
-    this.storeNames.add(storeName);
+  async ensureStores(storeNames: string[]): Promise<void> {
+    const missing = storeNames.filter((s) => !this.storeNames.has(s));
+    if (missing.length === 0) return;
+
+    for (const s of missing) {
+      this.storeNames.add(s);
+    }
 
     const db = await this.getDB();
-    if (db.objectStoreNames.contains(storeName)) return;
+    const needsUpgrade = missing.some((s) => !db.objectStoreNames.contains(s));
+    if (!needsUpgrade) return;
 
-    // Upgrade DB version to add new store
     db.close();
     this.version += 1;
     this.dbPromise = null;
     await this.getDB();
+  }
+
+  /**
+   * Ensures a single application object store exists in IndexedDB.
+   *
+   * @param storeName - Name of the store to ensure.
+   */
+  async ensureStore(storeName: string): Promise<void> {
+    await this.ensureStores([storeName]);
   }
 
   /**
@@ -140,12 +167,12 @@ export class IDBManager {
   }
 
   /**
-   * Retrieves a single record by identifier from a specified table.
+   * Retrieves a single stored record by table and identifier.
    *
-   * @typeParam T - Data payload type.
+   * @typeParam T - Expected payload type.
    * @param storeName - Table/store name.
    * @param id - Record identifier.
-   * @returns Stored record with metadata, or `undefined` if not found.
+   * @returns Stored record or `undefined` if not found.
    */
   async getRecord<T = unknown>(
     storeName: string,
@@ -159,6 +186,41 @@ export class IDBManager {
       const req = store.get(id);
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
+    });
+  }
+
+  /**
+   * Retrieves multiple stored records by their identifiers in a single readonly transaction.
+   *
+   * @typeParam T - Expected payload type.
+   * @param storeName - Table/store name.
+   * @param ids - Array of record identifiers.
+   * @returns Map of found stored records keyed by id.
+   */
+  async getRecords<T = unknown>(
+    storeName: string,
+    ids: string[],
+  ): Promise<Map<string, StoredRecord<T>>> {
+    if (ids.length === 0) return new Map();
+    await this.ensureStore(storeName);
+    const db = await this.getDB();
+
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, 'readonly');
+      const store = tx.objectStore(storeName);
+      const results = new Map<string, StoredRecord<T>>();
+
+      for (const id of ids) {
+        const req = store.get(id);
+        req.onsuccess = () => {
+          if (req.result) {
+            results.set(id, req.result);
+          }
+        };
+      }
+
+      tx.oncomplete = () => resolve(results);
+      tx.onerror = () => reject(tx.error);
     });
   }
 
@@ -187,24 +249,19 @@ export class IDBManager {
   }
 
   /**
-   * Atomically persists a local record mutation alongside an outbox changelog entry
+   * Atomically persists a batch of local mutations alongside outbox changelog entries
    * within a single IndexedDB transaction.
    *
    * @typeParam T - Data payload type.
-   * @param storeName - Table/store name.
-   * @param id - Record identifier.
-   * @param op - Operation type (`OperationType.Put` or `OperationType.Delete`).
-   * @param data - Record data payload for 'put' operations.
-   * @param change - Change record to queue in the outbox.
-   * @returns The newly stored record with metadata.
+   * @param storeName - Target table name.
+   * @param mutations - List of mutations to apply and queue into outbox.
+   * @returns Array of newly stored records with updated metadata.
    */
-  async applyLocalChange<T = unknown>(
+  async applyLocalChanges<T = unknown>(
     storeName: string,
-    id: string,
-    op: OperationType,
-    data: T | undefined,
-    change: ChangeRecord<T>,
-  ): Promise<StoredRecord<T>> {
+    mutations: LocalMutationItem<T>[],
+  ): Promise<StoredRecord<T>[]> {
+    if (mutations.length === 0) return [];
     await this.ensureStore(storeName);
     const db = await this.getDB();
 
@@ -212,44 +269,136 @@ export class IDBManager {
       const tx = db.transaction([storeName, OUTBOX_STORE], 'readwrite');
       const dataStore = tx.objectStore(storeName);
       const outboxStore = tx.objectStore(OUTBOX_STORE);
+      const records: StoredRecord<T>[] = [];
+      const now = Date.now();
 
-      const record: StoredRecord<T> = {
-        id,
-        data: (data ?? null) as T,
-        timestamp: change.timestamp,
-        version: change.version ?? 1,
-        deleted: op === OperationType.Delete,
-      };
+      for (const item of mutations) {
+        const isDelete = item.op === OperationType.Delete;
+        const record: StoredRecord<T> = {
+          id: item.id,
+          data: (item.data ?? null) as T,
+          timestamp: item.change.timestamp,
+          version: item.change.version ?? 1,
+          deleted: isDelete,
+        };
 
-      dataStore.put(record);
-      outboxStore.add({
-        change,
-        createdAt: Date.now(),
-      });
+        dataStore.put(record);
+        outboxStore.add({
+          change: item.change,
+          createdAt: now,
+        });
+        records.push(record);
+      }
 
-      tx.oncomplete = () => resolve(record);
+      tx.oncomplete = () => resolve(records);
       tx.onerror = () => reject(tx.error);
     });
   }
 
   /**
-   * Applies a remote record received from synchronization without creating an outbox entry.
+   * Ingests a complete snapshot of records across tables in a single atomic IndexedDB transaction.
    *
-   * @typeParam T - Data payload type.
-   * @param storeName - Table/store name.
-   * @param record - Remote record to store locally.
+   * @param snapshot - All active snapshot record items across stores.
+   * @param seq - Global sequence number corresponding to the snapshot.
    */
-  async applyRemoteRecord<T = unknown>(
-    storeName: string,
-    record: StoredRecord<T>,
+  async applySnapshotBatch(
+    snapshot: Array<{
+      store: string;
+      id: string;
+      data: unknown;
+      timestamp: number;
+      version: number;
+      deleted?: boolean;
+    }>,
+    seq: number,
   ): Promise<void> {
-    await this.ensureStore(storeName);
+    if (snapshot.length === 0) {
+      await this.setMeta('lastSyncSeq', seq);
+      return;
+    }
+
+    const storesInSnapshot = Array.from(new Set(snapshot.map((s) => s.store)));
+    await this.ensureStores(storesInSnapshot);
     const db = await this.getDB();
 
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(storeName, 'readwrite');
-      const store = tx.objectStore(storeName);
-      store.put(record);
+      const txStores = [...storesInSnapshot, META_STORE];
+      const tx = db.transaction(txStores, 'readwrite');
+
+      const storeObjects = new Map<string, IDBObjectStore>();
+      for (const s of storesInSnapshot) {
+        storeObjects.set(s, tx.objectStore(s));
+      }
+
+      for (const item of snapshot) {
+        const objStore = storeObjects.get(item.store);
+        if (objStore) {
+          const record: StoredRecord = {
+            id: item.id,
+            data: item.data,
+            timestamp: item.timestamp,
+            version: item.version,
+            deleted: item.deleted ?? false,
+          };
+          objStore.put(record);
+        }
+      }
+
+      const metaStore = tx.objectStore(META_STORE);
+      metaStore.put({ key: 'lastSyncSeq', value: seq });
+
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  /**
+   * Ingests an array of remote change diff operations in a single atomic IndexedDB transaction.
+   *
+   * @param changes - Array of change records received from server.
+   * @param seq - New sequence number to store in metadata.
+   */
+  async applyRemoteChangesBatch(
+    changes: ChangeRecord[],
+    seq: number,
+  ): Promise<void> {
+    if (changes.length === 0) {
+      await this.setMeta('lastSyncSeq', seq);
+      return;
+    }
+
+    const storesInChanges = Array.from(new Set(changes.map((c) => c.store)));
+    await this.ensureStores(storesInChanges);
+    const db = await this.getDB();
+
+    return new Promise((resolve, reject) => {
+      const txStores = [...storesInChanges, META_STORE];
+      const tx = db.transaction(txStores, 'readwrite');
+
+      const storeObjects = new Map<string, IDBObjectStore>();
+      for (const s of storesInChanges) {
+        storeObjects.set(s, tx.objectStore(s));
+      }
+
+      for (const change of changes) {
+        const objStore = storeObjects.get(change.store);
+        if (objStore) {
+          const isDelete =
+            change.op === OperationType.Delete || Boolean(change.deleted);
+          const record: StoredRecord = {
+            id: change.id,
+            data: change.data,
+            timestamp: change.timestamp,
+            version: change.version ?? 1,
+            deleted: isDelete,
+          };
+          objStore.put(record);
+        }
+      }
+
+      const metaStore = tx.objectStore(META_STORE);
+      metaStore.put({ key: 'lastSyncSeq', value: seq });
+
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -258,14 +407,15 @@ export class IDBManager {
   /**
    * Retrieves all queued entries currently awaiting synchronization from the outbox.
    *
+   * @param limit - Optional maximum number of entries to retrieve.
    * @returns Array of outbox queue entries.
    */
-  async getPendingOutbox(): Promise<OutboxEntry[]> {
+  async getPendingOutbox(limit?: number): Promise<OutboxEntry[]> {
     const db = await this.getDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(OUTBOX_STORE, 'readonly');
       const store = tx.objectStore(OUTBOX_STORE);
-      const req = store.getAll();
+      const req = store.getAll(undefined, limit);
       req.onsuccess = () => resolve(req.result ?? []);
       req.onerror = () => reject(req.error);
     });

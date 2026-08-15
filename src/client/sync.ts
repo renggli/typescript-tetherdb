@@ -6,7 +6,6 @@ import {
   type RecordSnapshotItem,
   type ServerMessage,
   ServerMessageType,
-  type StoredRecord,
 } from '../shared/types.js';
 import type { IDBManager } from './idb.js';
 import type { ITable } from './table.js';
@@ -15,45 +14,43 @@ import type { ITable } from './table.js';
  * Operational state of the synchronization coordinator.
  */
 export enum SyncStatus {
-  /** Not connected to the server. */
+  /** Disconnected from the remote synchronization server. */
   Disconnected = 'disconnected',
-  /** Currently attempting to establish a WebSocket connection. */
+  /** Currently establishing a WebSocket connection. */
   Connecting = 'connecting',
-  /** Authenticated and connected in real time. */
+  /** Authenticated and actively synchronizing in real time. */
   Connected = 'connected',
-  /** Actively synchronizing dataset or changes. */
-  Syncing = 'syncing',
-  /** An error occurred with the connection or authentication. */
+  /** Synchronization halted due to an unrecoverable error (e.g. invalid auth token). */
   Error = 'error',
 }
 
 /**
- * Constructor signature for injectable WebSocket implementations (browser or Node.js).
+ * Constructor signature for WebSocket implementations (native browser WebSocket or 'ws' package).
  */
 export type WebSocketConstructor = new (
-  url: string | URL,
+  url: string,
   protocols?: string | string[],
 ) => WebSocket;
 
 /**
- * Options for configuring synchronization behavior.
+ * Configuration options for BeamedSyncClient.
  */
 export interface SyncOptions {
-  /** The WebSocket endpoint URL (e.g., 'ws://localhost:8080/sync'). */
+  /** WebSocket URL of the sync endpoint (e.g. 'ws://localhost:8080/sync'). */
   url: string;
-  /** Authentication session token for the user account. */
+  /** Signed authentication session token. */
   token: string;
-  /** Whether to automatically connect upon initialization (defaults to true). */
+  /** Whether to automatically connect on creation (defaults to `true`). */
   autoConnect?: boolean;
-  /** Interval in milliseconds between reconnection attempts (defaults to 2000ms). */
+  /** Interval in milliseconds to wait before attempting auto-reconnect (defaults to 2000). */
   reconnectIntervalMs?: number;
-  /** Custom WebSocket constructor (useful for Node.js test environments). */
+  /** Custom WebSocket constructor for Node.js environments. */
   WebSocketClass?: WebSocketConstructor;
 }
 
 /**
  * Two-way WebSocket sync coordinator managing initial snapshot / diff downloads,
- * outbox queue flushing, acknowledgments, and auto-reconnect backoff.
+ * batched outbox queue flushing, acknowledgments, and auto-reconnect backoff.
  */
 export class BeamedSyncClient {
   private idb: IDBManager;
@@ -64,6 +61,7 @@ export class BeamedSyncClient {
   private status: SyncStatus = SyncStatus.Disconnected;
   private statusListeners: Set<(status: SyncStatus) => void> = new Set();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private pushTimer: ReturnType<typeof setTimeout> | null = null;
   private isPushing = false;
   private isDestroyed = false;
   private pendingBatches: Map<string, number[]> = new Map(); // batchId -> localIds
@@ -97,7 +95,7 @@ export class BeamedSyncClient {
   }
 
   /**
-   * Retrieves the current synchronization connection status.
+   * Retrieves the current operational status of the sync coordinator.
    *
    * @returns Current `SyncStatus` value.
    */
@@ -180,18 +178,23 @@ export class BeamedSyncClient {
       }
     };
 
-    this.ws.onerror = () => {
-      this.setStatus(SyncStatus.Error);
+    this.ws.onerror = (err) => {
+      console.error('[BeamedDB] WebSocket error:', err);
+      this.ws?.close();
     };
   }
 
   /**
-   * Closes the active WebSocket connection and enters the disconnected state.
+   * Disconnects the active WebSocket connection without marking the client as destroyed.
    */
   disconnect(): void {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
+    }
+    if (this.pushTimer) {
+      clearTimeout(this.pushTimer);
+      this.pushTimer = null;
     }
     if (this.ws) {
       this.ws.close();
@@ -201,7 +204,7 @@ export class BeamedSyncClient {
   }
 
   /**
-   * Permanently tears down the sync client, cancelling pending retries and closing connections.
+   * Permanently tears down the sync coordinator and cancels reconnection timers.
    */
   destroy(): void {
     this.isDestroyed = true;
@@ -210,24 +213,11 @@ export class BeamedSyncClient {
   }
 
   private scheduleReconnect(): void {
-    if (this.reconnectTimer || this.isDestroyed) return;
+    if (this.isDestroyed || this.reconnectTimer) return;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      if (!this.isDestroyed) {
-        this.connect();
-      }
-    }, this.options.reconnectIntervalMs);
-  }
-
-  private async sendAuth(): Promise<void> {
-    const lastSyncSeq = (await this.idb.getMeta<number>('lastSyncSeq')) ?? 0;
-    const authMsg: ClientMessage = {
-      type: ClientMessageType.Auth,
-      token: this.options.token,
-      clientId: this.getClientId(),
-      lastSyncSeq,
-    };
-    this.send(authMsg);
+      this.connect();
+    }, this.options.reconnectIntervalMs ?? 2000);
   }
 
   private send(msg: ClientMessage): void {
@@ -236,12 +226,22 @@ export class BeamedSyncClient {
     }
   }
 
+  private async sendAuth(): Promise<void> {
+    const lastSyncSeq = (await this.idb.getMeta<number>('lastSyncSeq')) ?? 0;
+    const msg: ClientMessage = {
+      type: ClientMessageType.Auth,
+      token: this.options.token,
+      clientId: this.getClientId(),
+      lastSyncSeq,
+    };
+    this.send(msg);
+  }
+
   private async handleServerMessage(msg: ServerMessage): Promise<void> {
     switch (msg.type) {
       case ServerMessageType.AuthSuccess: {
         this.setStatus(SyncStatus.Connected);
-        // Push any local changes queued in outbox
-        await this.pushOutbox();
+        this.schedulePush(0);
         break;
       }
 
@@ -254,11 +254,13 @@ export class BeamedSyncClient {
 
       case ServerMessageType.SyncSnapshot: {
         await this.applySnapshot(msg.snapshot, msg.seq);
+        this.schedulePush(0);
         break;
       }
 
       case ServerMessageType.SyncDiff: {
         await this.applyChanges(msg.changes, msg.toSeq);
+        this.schedulePush(0);
         break;
       }
 
@@ -276,6 +278,8 @@ export class BeamedSyncClient {
         if (msg.appliedSeq) {
           await this.idb.setMeta('lastSyncSeq', msg.appliedSeq);
         }
+        // Drain any pending entries that arrived while the previous batch was in-flight
+        this.schedulePush(0);
         break;
       }
 
@@ -292,47 +296,104 @@ export class BeamedSyncClient {
     snapshot: RecordSnapshotItem[],
     seq: number,
   ): Promise<void> {
+    await this.idb.applySnapshotBatch(snapshot, seq);
+
+    const eventsByStore = new Map<
+      string,
+      Array<{
+        op: OperationType;
+        id: string;
+        data?: unknown;
+        isRemote?: boolean;
+      }>
+    >();
+
     for (const item of snapshot) {
-      const table = this.getTable(item.store);
-      const record: StoredRecord = {
+      let list = eventsByStore.get(item.store);
+      if (!list) {
+        list = [];
+        eventsByStore.set(item.store, list);
+      }
+      list.push({
+        op: item.deleted ? OperationType.Delete : OperationType.Put,
         id: item.id,
-        data: item.data,
-        timestamp: item.timestamp,
-        version: item.version,
-        deleted: item.deleted,
-      };
-      await table.applyRemoteRecord(record);
+        data: item.deleted ? undefined : item.data,
+        isRemote: true,
+      });
     }
-    await this.idb.setMeta('lastSyncSeq', seq);
+
+    for (const [storeName, events] of eventsByStore.entries()) {
+      const table = this.getTable(storeName);
+      table.notifyRemoteChanges(events);
+    }
   }
 
   private async applyChanges(
     changes: ChangeRecord[],
     seq: number,
   ): Promise<void> {
+    await this.idb.applyRemoteChangesBatch(changes, seq);
+
+    const eventsByStore = new Map<
+      string,
+      Array<{
+        op: OperationType;
+        id: string;
+        data?: unknown;
+        isRemote?: boolean;
+      }>
+    >();
+
     for (const change of changes) {
-      const table = this.getTable(change.store);
-      const record: StoredRecord = {
+      let list = eventsByStore.get(change.store);
+      if (!list) {
+        list = [];
+        eventsByStore.set(change.store, list);
+      }
+      const isDelete =
+        change.op === OperationType.Delete || Boolean(change.deleted);
+      list.push({
+        op: isDelete ? OperationType.Delete : OperationType.Put,
         id: change.id,
-        data: change.data,
-        timestamp: change.timestamp,
-        version: change.version ?? 1,
-        deleted: change.op === OperationType.Delete || change.deleted,
-      };
-      await table.applyRemoteRecord(record);
+        data: isDelete ? undefined : change.data,
+        isRemote: true,
+      });
     }
-    await this.idb.setMeta('lastSyncSeq', seq);
+
+    for (const [storeName, events] of eventsByStore.entries()) {
+      const table = this.getTable(storeName);
+      table.notifyRemoteChanges(events);
+    }
+  }
+
+  /**
+   * Schedules an outbox push, debouncing rapid mutations into a single cohesive batch.
+   *
+   * @param delayMs - Debounce delay in milliseconds (defaults to 10ms).
+   */
+  schedulePush(delayMs = 10): void {
+    if (this.isDestroyed || !this.ws || this.ws.readyState !== 1) return;
+    if (this.pushTimer !== null) return;
+
+    this.pushTimer = setTimeout(() => {
+      this.pushTimer = null;
+      this.pushOutbox();
+    }, delayMs);
   }
 
   /**
    * Pushes un-synced outbox changes to the server in a correlated batch.
    */
   async pushOutbox(): Promise<void> {
+    if (this.pushTimer !== null) {
+      clearTimeout(this.pushTimer);
+      this.pushTimer = null;
+    }
     if (this.isPushing || !this.ws || this.ws.readyState !== 1) return;
     this.isPushing = true;
 
     try {
-      const pending = await this.idb.getPendingOutbox();
+      const pending = await this.idb.getPendingOutbox(500);
       if (pending.length === 0) return;
 
       const batchId = `batch_${Math.random().toString(36).substring(2, 10)}`;

@@ -1,8 +1,8 @@
 import {
   BeamedClientDB,
-  type OperationType,
   SyncStatus,
   type Table,
+  type TableChangeEvent,
 } from 'beameddb';
 
 /**
@@ -195,25 +195,15 @@ async function setupDatabase(): Promise<void> {
   logEvent(LogCategory.Sync, 'Init', `Opened local IndexedDB table "todos"`);
 
   // 3. Subscribe to reactive Table changes (both local mutations and remote WebSocket broadcasts)
-  todosTable.subscribe(
-    ({
-      op,
-      id,
-      isRemote,
-      data,
-    }: {
-      op: OperationType;
-      id: string;
-      isRemote?: boolean;
-      data?: TodoItem;
-    }) => {
+  todosTable.subscribe((events: TableChangeEvent<TodoItem>[]) => {
+    for (const { op, id, isRemote, data } of events) {
       const origin = isRemote ? 'Remote Sync' : 'Local IDB';
       const category = isRemote ? LogCategory.Remote : LogCategory.Local;
       const title = data?.title ?? id;
       logEvent(category, origin, `${op.toUpperCase()} "${title}"`);
-      renderTodos();
-    },
-  );
+    }
+    renderTodos();
+  });
 
   // 4. Monitor synchronization connection status
   if (db.sync) {
@@ -306,7 +296,11 @@ async function renderTodos(): Promise<void> {
   } else {
     emptyState.style.display = 'none';
 
-    for (const item of filtered) {
+    const MAX_RENDER_ITEMS = 100;
+    const itemsToRender = filtered.slice(0, MAX_RENDER_ITEMS);
+    const remainingCount = filtered.length - MAX_RENDER_ITEMS;
+
+    for (const item of itemsToRender) {
       const li = document.createElement('li');
       li.className = `todo-item ${item.data.completed ? 'completed' : ''}`;
       li.dataset.id = item.id;
@@ -341,6 +335,13 @@ async function renderTodos(): Promise<void> {
       });
 
       todoList.appendChild(li);
+    }
+
+    if (remainingCount > 0) {
+      const moreLi = document.createElement('li');
+      moreLi.className = 'todo-item-more';
+      moreLi.textContent = `... and ${remainingCount} more`;
+      todoList.appendChild(moreLi);
     }
   }
 }
@@ -378,14 +379,16 @@ filterBtns.forEach((btn: HTMLButtonElement) => {
   });
 });
 
-// Clear completed todos
+// Clear completed todos using batched deleteAll
 clearCompletedBtn.addEventListener('click', async () => {
   if (!todosTable) return;
   const allTodos = await todosTable.getAllWithMetadata();
-  for (const item of allTodos) {
-    if (item.data.completed) {
-      await todosTable.delete(item.id);
-    }
+  const completedIds = allTodos
+    .filter((item) => item.data.completed)
+    .map((item) => item.id);
+
+  if (completedIds.length > 0) {
+    await todosTable.deleteAll(completedIds);
   }
 });
 

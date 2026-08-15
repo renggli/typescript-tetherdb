@@ -95,7 +95,7 @@ export class BeamedClientDB {
         this.idb,
         () => this.clientId,
         () => {
-          this.syncClient?.pushOutbox();
+          this.syncClient?.schedulePush();
         },
       );
       this.tables.set(name, tbl);
