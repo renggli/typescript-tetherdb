@@ -123,7 +123,7 @@ export class AppSqliteStorage implements AppStorage {
         const tableExists = handle.stmtCheckTable.get(tableName);
         if (!tableExists) {
           throw new Error(
-            `Table "${tableName}" does not exist in app "${this.id}". Create it first using "tetherdb tables add ${this.id} ${tableName}".`,
+            `Table "${tableName}" does not exist in app "${this.id}".`,
           );
         }
 

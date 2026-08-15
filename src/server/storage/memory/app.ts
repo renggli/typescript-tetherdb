@@ -64,7 +64,7 @@ export class AppMemoryStorage implements AppStorage {
 
       if (!this.tables.has(tableName)) {
         throw new Error(
-          `Table "${tableName}" does not exist in app "${this.id}". Create it first using "tetherdb tables add ${this.id} ${tableName}".`,
+          `Table "${tableName}" does not exist in app "${this.id}".`,
         );
       }
 

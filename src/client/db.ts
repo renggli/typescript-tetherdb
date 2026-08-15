@@ -141,9 +141,16 @@ export class TetherDB {
       this.disableSync();
     }
 
+    const appId = options.appId ?? this.appId;
+    if (!appId) {
+      throw new Error(
+        'Missing required appId for synchronization. Please specify an appId in TetherDB options or SyncOptions.',
+      );
+    }
+
     const syncOptions: SyncOptions = {
-      appId: this.appId,
       ...options,
+      appId,
     };
 
     this.syncClient = new TetherSyncClient(

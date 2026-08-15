@@ -45,28 +45,34 @@ export class SyncHub {
    * @param ws - Active WebSocket connection.
    */
   handleConnection(ws: WebSocket): void {
-    ws.on('message', async (data) => {
-      const client = this.wsToClient.get(ws);
-      const userContext = client
-        ? ` (app: "${client.appId}", user: "${client.user.id}", client: "${client.clientId}")`
-        : '';
+    let messageQueue: Promise<void> = Promise.resolve();
 
-      try {
-        const raw = typeof data === 'string' ? data : data.toString();
-        const msg: ClientMessage = JSON.parse(raw);
-        await this.handleMessage(ws, msg);
-      } catch (err) {
-        const errorMsg =
-          err instanceof Error ? err.message : 'Invalid message format';
-        console.error(
-          `[TetherServer] WebSocket message error${userContext}:`,
-          errorMsg,
-        );
-        this.send(ws, {
-          type: ServerMessageType.Error,
-          message: `${errorMsg}${userContext}`,
-        });
-      }
+    ws.on('message', (data) => {
+      messageQueue = messageQueue
+        .then(async () => {
+          const client = this.wsToClient.get(ws);
+          const userContext = client
+            ? ` (app: "${client.appId}", user: "${client.user.id}", client: "${client.clientId}")`
+            : '';
+
+          try {
+            const raw = typeof data === 'string' ? data : data.toString();
+            const msg: ClientMessage = JSON.parse(raw);
+            await this.handleMessage(ws, msg);
+          } catch (err) {
+            const errorMsg =
+              err instanceof Error ? err.message : 'Invalid message format';
+            console.error(
+              `[TetherServer] WebSocket message error${userContext}:`,
+              errorMsg,
+            );
+            this.send(ws, {
+              type: ServerMessageType.Error,
+              message: `${errorMsg}${userContext}`,
+            });
+          }
+        })
+        .catch(() => {});
     });
 
     ws.on('close', () => {
@@ -138,12 +144,21 @@ export class SyncHub {
           return;
         }
 
-        const appId = validateAppId(msg.appId ?? 'default');
+        if (typeof msg.appId !== 'string' || !msg.appId) {
+          this.send(ws, {
+            type: ServerMessageType.AuthError,
+            message: 'Missing required field: appId',
+          });
+          ws.close();
+          return;
+        }
+
+        const appId = validateAppId(msg.appId);
         const app = await this.storage.getApp(appId);
         if (!app) {
           this.send(ws, {
             type: ServerMessageType.AuthError,
-            message: `Application "${appId}" does not exist. Create it first using "tetherdb apps add ${appId}".`,
+            message: `Application "${appId}" does not exist.`,
           });
           ws.close();
           return;
@@ -223,9 +238,7 @@ export class SyncHub {
 
         const app = await this.storage.getApp(client.appId);
         if (!app) {
-          throw new Error(
-            `Application "${client.appId}" does not exist. Create it first using "tetherdb apps add ${client.appId}".`,
-          );
+          throw new Error(`Application "${client.appId}" does not exist.`);
         }
 
         const { applied, newSeq } = await app.applyChanges(

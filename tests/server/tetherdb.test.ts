@@ -89,7 +89,7 @@ describe('src/server/tetherdb.ts (CLI commands and backends)', () => {
       await runCli(['users', 'add', 'bob', `--sqlite=${tmpDir}`]);
       expect(errorSpy).toHaveBeenCalledWith(
         'Command failed:',
-        'Usage: tetherdb users add <username> <password>',
+        'Missing password.',
       );
       exitSpy.mockRestore();
       errorSpy.mockRestore();
@@ -156,7 +156,7 @@ describe('src/server/tetherdb.ts (CLI commands and backends)', () => {
       ]);
       expect(errorSpy).toHaveBeenCalledWith(
         'Command failed:',
-        'Application "rezeptario" not found. Create it first with: tetherdb apps add rezeptario',
+        'Application "rezeptario" not found.',
       );
       exitSpy.mockRestore();
       errorSpy.mockRestore();
@@ -230,6 +230,24 @@ describe('src/server/tetherdb.ts (CLI commands and backends)', () => {
       expect(errorSpy).toHaveBeenCalledWith(
         'Command failed:',
         expect.stringContaining('Unknown or invalid option: "--host"'),
+      );
+
+      exitSpy.mockRestore();
+      errorSpy.mockRestore();
+    });
+
+    it('should reject tables command without appId', async () => {
+      const exitSpy = vi
+        .spyOn(process, 'exit')
+        .mockImplementation((() => {}) as unknown as (
+          code?: string | number | null | undefined,
+        ) => never);
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      await runCli(['tables', 'list']);
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Command failed:',
+        'Missing application ID.',
       );
 
       exitSpy.mockRestore();

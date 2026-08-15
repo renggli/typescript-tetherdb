@@ -54,6 +54,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
       sync: {
         url: wsUrl,
         token: userToken,
+        appId: 'default',
         WebSocketClass: WebSocket,
       },
     });
@@ -87,6 +88,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
       sync: {
         url: wsUrl,
         token: userToken,
+        appId: 'default',
         WebSocketClass: WebSocket,
       },
     });
@@ -105,6 +107,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
       sync: {
         url: wsUrl,
         token: userToken,
+        appId: 'default',
         WebSocketClass: WebSocket,
       },
     });
@@ -130,6 +133,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
       sync: {
         url: wsUrl,
         token: userToken,
+        appId: 'default',
         WebSocketClass: WebSocket,
       },
     });
@@ -140,6 +144,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
       sync: {
         url: wsUrl,
         token: userToken,
+        appId: 'default',
         WebSocketClass: WebSocket,
       },
     });
@@ -181,6 +186,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
       sync: {
         url: wsUrl,
         token: userToken,
+        appId: 'default',
         WebSocketClass: WebSocket,
       },
     });
@@ -197,6 +203,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
       sync: {
         url: wsUrl,
         token: userToken,
+        appId: 'default',
         WebSocketClass: WebSocket,
       },
     });
@@ -220,6 +227,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
       sync: {
         url: wsUrl,
         token: userToken,
+        appId: 'default',
         WebSocketClass: WebSocket,
       },
     });
@@ -245,6 +253,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
       sync: {
         url: wsUrl,
         token: userToken,
+        appId: 'default',
         WebSocketClass: WebSocket,
       },
     });
@@ -255,6 +264,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
       sync: {
         url: wsUrl,
         token: user2Token,
+        appId: 'default',
         WebSocketClass: WebSocket,
       },
     });
@@ -302,6 +312,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
       sync: {
         url: wsUrl,
         token: userToken,
+        appId: 'default',
         WebSocketClass: WebSocket,
       },
     });
@@ -322,6 +333,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
       sync: {
         url: wsUrl,
         token: userToken,
+        appId: 'default',
         WebSocketClass: WebSocket,
       },
     });
@@ -332,6 +344,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
       sync: {
         url: wsUrl,
         token: userToken,
+        appId: 'default',
         WebSocketClass: WebSocket,
       },
     });

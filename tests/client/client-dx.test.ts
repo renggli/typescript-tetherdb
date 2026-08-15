@@ -120,6 +120,7 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
       serverUrl,
       username: 'onboard_user',
       password: 'secretpassword',
+      appId: 'default',
       WebSocketClass: WebSocket,
     });
 
@@ -161,6 +162,7 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
     db.enableSync({
       url: wsUrl,
       token: auth.token,
+      appId: 'default',
       WebSocketClass: WebSocket,
     });
 
@@ -180,6 +182,7 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
     db.enableSync({
       url: wsUrl,
       token: auth.token,
+      appId: 'default',
       WebSocketClass: WebSocket,
     });
 

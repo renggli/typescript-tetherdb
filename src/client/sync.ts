@@ -263,6 +263,9 @@ export class TetherSyncClient {
   }
 
   private async sendAuth(): Promise<void> {
+    if (!this.options.appId) {
+      throw new Error('Missing required appId for sync authentication.');
+    }
     const lastSyncSeq = (await this.idb.getMeta<number>('lastSyncSeq')) ?? 0;
     const msg: ClientMessage = {
       type: ClientMessageType.Auth,
