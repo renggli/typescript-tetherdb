@@ -229,12 +229,10 @@ export class IDBManager {
    *
    * @typeParam T - Data payload type.
    * @param storeName - Table/store name.
-   * @param includeDeleted - Whether to include tombstone deleted records (defaults to `false`).
    * @returns Array of stored records with metadata.
    */
   async getAllRecords<T = unknown>(
     storeName: string,
-    includeDeleted = false,
   ): Promise<StoredRecord<T>[]> {
     await this.ensureStore(storeName);
     const db = await this.getDB();
@@ -242,10 +240,7 @@ export class IDBManager {
       const tx = db.transaction(storeName, 'readonly');
       const store = tx.objectStore(storeName);
       const req = store.getAll();
-      req.onsuccess = () => {
-        const results: StoredRecord<T>[] = req.result ?? [];
-        resolve(includeDeleted ? results : results.filter((r) => !r.deleted));
-      };
+      req.onsuccess = () => resolve(req.result ?? []);
       req.onerror = () => reject(req.error);
     });
   }
@@ -284,7 +279,12 @@ export class IDBManager {
           deleted: isDelete,
         };
 
-        dataStore.put(record);
+        if (isDelete) {
+          dataStore.delete(item.id);
+        } else {
+          dataStore.put(record);
+        }
+
         outboxStore.add({
           change: item.change,
           createdAt: now,
@@ -335,14 +335,17 @@ export class IDBManager {
       for (const item of snapshot) {
         const objStore = storeObjects.get(item.store);
         if (objStore) {
-          const record: StoredRecord = {
-            id: item.id,
-            data: item.data,
-            timestamp: item.timestamp,
-            version: item.version,
-            deleted: item.deleted ?? false,
-          };
-          objStore.put(record);
+          if (item.deleted) {
+            objStore.delete(item.id);
+          } else {
+            const record: StoredRecord = {
+              id: item.id,
+              data: item.data,
+              timestamp: item.timestamp,
+              version: item.version,
+            };
+            objStore.put(record);
+          }
         }
       }
 
@@ -387,14 +390,17 @@ export class IDBManager {
         if (objStore) {
           const isDelete =
             change.op === OperationType.Delete || Boolean(change.deleted);
-          const record: StoredRecord = {
-            id: change.id,
-            data: change.data,
-            timestamp: change.timestamp,
-            version: change.version ?? 1,
-            deleted: isDelete,
-          };
-          objStore.put(record);
+          if (isDelete) {
+            objStore.delete(change.id);
+          } else {
+            const record: StoredRecord = {
+              id: change.id,
+              data: change.data,
+              timestamp: change.timestamp,
+              version: change.version ?? 1,
+            };
+            objStore.put(record);
+          }
         }
       }
 

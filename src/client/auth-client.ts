@@ -47,9 +47,18 @@ export class BeamedAuthClient {
    */
   constructor(options: AuthClientOptions) {
     this.serverUrl = options.serverUrl.replace(/\/+$/, '');
-    this.fetchFn =
+    const rawFetch =
       options.fetch ??
-      (typeof fetch !== 'undefined' ? fetch : globalThis.fetch);
+      (typeof globalThis !== 'undefined' && globalThis.fetch
+        ? globalThis.fetch
+        : typeof fetch !== 'undefined'
+          ? fetch
+          : undefined);
+
+    if (!rawFetch) {
+      throw new Error('No fetch implementation available');
+    }
+    this.fetchFn = rawFetch.bind(globalThis);
   }
 
   /**

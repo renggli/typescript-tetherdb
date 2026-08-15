@@ -83,7 +83,7 @@ describe('BeamedClientDB local operations', () => {
     expect(remaining[0].title).toBe('Bulk 3');
   });
 
-  it('should retrieve records with full metadata (version, timestamp, deleted)', async () => {
+  it('should retrieve active records with metadata and remove them upon delete', async () => {
     const todos = db.table<{ title: string }>('todos');
     await todos.put('m1', { title: 'Meta 1' });
     await todos.put('m1', { title: 'Meta 1 v2' });
@@ -91,16 +91,13 @@ describe('BeamedClientDB local operations', () => {
     const rec = await todos.getWithMetadata('m1');
     expect(rec).toBeDefined();
     expect(rec?.version).toBe(2);
-    expect(rec?.deleted).toBe(false);
     expect(rec?.data.title).toBe('Meta 1 v2');
 
-    await todos.delete('m1');
-    const recDeleted = await todos.getWithMetadata('m1');
-    expect(recDeleted?.deleted).toBe(true);
-    expect(recDeleted?.version).toBe(3);
+    expect(await todos.getAllWithMetadata()).toHaveLength(1);
 
-    const allWithMeta = await todos.getAllWithMetadata();
-    expect(allWithMeta).toHaveLength(1);
+    await todos.delete('m1');
+    expect(await todos.getWithMetadata('m1')).toBeUndefined();
+    expect(await todos.getAllWithMetadata()).toHaveLength(0);
   });
 
   it('should store and retrieve internal metadata', async () => {

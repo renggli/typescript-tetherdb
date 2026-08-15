@@ -57,6 +57,7 @@ const db = new BeamedClientDB({ name: 'beamed_todo_app' });
 const todosTable: Table<TodoItem> = db.table<TodoItem>('todos');
 let currentFilter: FilterMode = FilterMode.All;
 let authMode: AuthMode = AuthMode.Login;
+let isReauthenticating = false;
 
 // DOM References
 const currentUsernameEl = document.getElementById(
@@ -141,7 +142,7 @@ function updateSyncStatusUI(status: SyncStatus): void {
       statusText.textContent = 'Offline (Local Only)';
       break;
     case SyncStatus.Error:
-      statusText.textContent = 'Sync Error';
+      statusText.textContent = currentUser ? 'Sync Error' : 'Auth Required';
       break;
   }
 }
@@ -201,7 +202,7 @@ async function renderTodos(): Promise<void> {
         });
       });
 
-      // Delete: creates tombstone locally & triggers background sync via todosTable.delete()
+      // Delete: removes locally & triggers background sync via todosTable.delete()
       const deleteBtn = li.querySelector(
         '.delete-btn',
       ) as HTMLButtonElement | null;
@@ -338,20 +339,11 @@ async function init(): Promise<void> {
     renderTodos();
   });
 
-  // 2. Monitor sync connection status changes
-  db.onSyncStatusChange((status: SyncStatus) => {
-    updateSyncStatusUI(status);
-    logEvent(LogCategory.Sync, 'SyncStatus', status.toUpperCase());
-  });
-
-  // 3. Connect sync if user previously logged in, or try demo account
   const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = `${wsProtocol}//${window.location.host}/sync`;
 
-  if (currentUser?.token) {
-    db.enableSync({ url: wsUrl, token: currentUser.token });
-  } else {
-    // Attempt auto-login demo user for instant multi-tab demonstration
+  // Helper to authenticate as demo account
+  const autoAuthenticateDemo = async () => {
     const authClient = new BeamedAuthClient({
       serverUrl: window.location.origin,
     });
@@ -373,8 +365,37 @@ async function init(): Promise<void> {
         db.enableSync({ url: wsUrl, token: auth.token });
       }
     } catch {
-      // Offline mode
+      // Server offline -> offline mode
     }
+  };
+
+  // 2. Monitor sync connection status changes with auto-recovery for stale/invalid tokens
+  db.onSyncStatusChange(async (status: SyncStatus) => {
+    updateSyncStatusUI(status);
+    logEvent(LogCategory.Sync, 'SyncStatus', status.toUpperCase());
+
+    if (status === SyncStatus.Error && !isReauthenticating) {
+      isReauthenticating = true;
+      localStorage.removeItem('beamed_todo_user');
+      const wasDemo = currentUser?.user?.username === 'demo' || !currentUser;
+      currentUser = null;
+      updateUserUI();
+
+      if (wasDemo) {
+        logEvent(LogCategory.Sync, 'Auth', 'Refreshing demo authentication...');
+        await autoAuthenticateDemo();
+      } else {
+        logEvent(LogCategory.Sync, 'Auth', 'Session expired. Please log in.');
+      }
+      isReauthenticating = false;
+    }
+  });
+
+  // 3. Connect sync if user previously logged in, or auto-connect demo account
+  if (currentUser?.token) {
+    db.enableSync({ url: wsUrl, token: currentUser.token });
+  } else {
+    await autoAuthenticateDemo();
   }
 
   // Initial render from local IndexedDB

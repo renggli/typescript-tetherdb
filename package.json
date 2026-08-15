@@ -13,7 +13,7 @@
         "default": "./dist/index.js"
       },
       "require": {
-        "types": "./dist/index.d.cts",
+        "types": "./dist/index.d.ts",
         "default": "./dist/index.cjs"
       }
     },
@@ -23,7 +23,7 @@
         "default": "./dist/client/index.js"
       },
       "require": {
-        "types": "./dist/client/index.d.cts",
+        "types": "./dist/client/index.d.ts",
         "default": "./dist/client/index.cjs"
       }
     },
@@ -33,7 +33,7 @@
         "default": "./dist/server/index.js"
       },
       "require": {
-        "types": "./dist/server/index.d.cts",
+        "types": "./dist/server/index.d.ts",
         "default": "./dist/server/index.cjs"
       }
     },
@@ -43,7 +43,7 @@
         "default": "./dist/shared/index.js"
       },
       "require": {
-        "types": "./dist/shared/index.d.cts",
+        "types": "./dist/shared/index.d.ts",
         "default": "./dist/shared/index.cjs"
       }
     }
@@ -55,7 +55,7 @@
     "examples/todo"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && tsc --emitDeclarationOnly --outDir dist",
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "biome check --write .",
@@ -72,7 +72,7 @@
     "@types/ws": "^8.5.13",
     "fake-indexeddb": "^6.0.0",
     "tsup": "^8.3.5",
-    "typescript": "^5.7.2",
+    "typescript": "^7.0.2",
     "vitest": "^2.1.8"
   },
   "keywords": [

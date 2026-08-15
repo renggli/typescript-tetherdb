@@ -8,7 +8,7 @@ export default defineConfig({
     'shared/index': 'src/shared/index.ts',
   },
   format: ['esm', 'cjs'],
-  dts: true,
+  dts: false,
   clean: true,
   sourcemap: true,
   splitting: false,

@@ -1,4 +1,5 @@
 import * as crypto from 'node:crypto';
+import * as fsSync from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { validateUsername } from '../shared/sanitize.js';
@@ -67,9 +68,32 @@ export class AuthManager {
       ? path.resolve(options.secretFilePath)
       : undefined;
     this.customTokenSecretProvided = options.tokenSecret !== undefined;
+
+    let secret = options.tokenSecret;
+    if (!secret && this.secretFilePath) {
+      try {
+        const raw = fsSync.readFileSync(this.secretFilePath, 'utf-8').trim();
+        if (raw.length > 0) {
+          secret = raw;
+        }
+      } catch {
+        // Will write file below
+      }
+    }
+
     this.tokenSecret =
-      options.tokenSecret ??
+      secret ??
       `beameddb-default-secret-${crypto.randomBytes(16).toString('hex')}`;
+
+    if (this.secretFilePath && !this.customTokenSecretProvided && !secret) {
+      try {
+        const dir = path.dirname(this.secretFilePath);
+        fsSync.mkdirSync(dir, { recursive: true });
+        fsSync.writeFileSync(this.secretFilePath, this.tokenSecret, 'utf-8');
+      } catch {
+        // In-memory fallback
+      }
+    }
   }
 
   /**
@@ -77,20 +101,6 @@ export class AuthManager {
    */
   async init(): Promise<void> {
     if (this.isLoaded) return;
-
-    if (this.secretFilePath && !this.customTokenSecretProvided) {
-      try {
-        const rawSecret = await fs.readFile(this.secretFilePath, 'utf-8');
-        const trimmed = rawSecret.trim();
-        if (trimmed.length > 0) {
-          this.tokenSecret = trimmed;
-        }
-      } catch {
-        const dir = path.dirname(this.secretFilePath);
-        await fs.mkdir(dir, { recursive: true });
-        await fs.writeFile(this.secretFilePath, this.tokenSecret, 'utf-8');
-      }
-    }
 
     if (this.usersFilePath) {
       try {

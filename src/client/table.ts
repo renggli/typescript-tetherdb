@@ -103,16 +103,15 @@ export class Table<T = unknown> implements ITable {
    * Retrieves a single record by its identifier.
    *
    * @param id - The unique record identifier.
-   * @returns A promise resolving to the record data, or `null` if not found or marked deleted.
+   * @returns A promise resolving to the record data, or `null` if not found.
    */
   async get(id: string): Promise<T | null> {
     const record = await this.idb.getRecord<T>(this.storeName, id);
-    if (!record || record.deleted) return null;
-    return record.data;
+    return record ? record.data : null;
   }
 
   /**
-   * Retrieves non-deleted records stored in this table, optionally filtered by a list of IDs.
+   * Retrieves records stored in this table, optionally filtered by a list of IDs.
    *
    * @param ids - Optional list of record identifiers to fetch. If omitted, retrieves all records.
    * @returns A promise resolving to an array of record data objects.
@@ -124,14 +123,14 @@ export class Table<T = unknown> implements ITable {
       const results: T[] = [];
       for (const id of ids) {
         const rec = map.get(id);
-        if (rec && !rec.deleted) {
+        if (rec) {
           results.push(rec.data);
         }
       }
       return results;
     }
     const records = await this.idb.getAllRecords<T>(this.storeName);
-    return records.filter((r) => !r.deleted).map((r) => r.data);
+    return records.map((r) => r.data);
   }
 
   /**
@@ -146,7 +145,7 @@ export class Table<T = unknown> implements ITable {
   }
 
   /**
-   * Retrieves a single stored record including metadata (version, timestamp, deleted flag).
+   * Retrieves a single stored record including metadata (version, timestamp).
    *
    * @param id - The unique record identifier.
    * @returns A promise resolving to the stored record with metadata, or `undefined` if not found.
@@ -156,12 +155,12 @@ export class Table<T = unknown> implements ITable {
   }
 
   /**
-   * Retrieves all records including deleted tombstones and metadata.
+   * Retrieves all records with storage metadata (version, timestamp).
    *
    * @returns A promise resolving to an array of stored records with metadata.
    */
   async getAllWithMetadata(): Promise<StoredRecord<T>[]> {
-    return this.idb.getAllRecords<T>(this.storeName, true);
+    return this.idb.getAllRecords<T>(this.storeName);
   }
 
   /**
