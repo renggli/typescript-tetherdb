@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import * as path from 'node:path';
-import type { ServerLimits } from '../shared/types.js';
+import { fileURLToPath } from 'node:url';
 import { startServer } from './server.js';
 import { FileStorage } from './storage/file/index.js';
 import { MemoryStorage } from './storage/memory/index.js';
 import { SqliteStorage } from './storage/sqlite/index.js';
-import type { Storage } from './storage/storage.js';
+import type { Storage, StorageOptions } from './storage/storage.js';
 
 /**
  * Backend persistence type for TetherDB server.
@@ -17,23 +17,23 @@ export type BackendType = 'memory' | 'file' | 'sqlite';
  *
  * @param backend - Target backend ('memory', 'file', or 'sqlite'). Defaults to 'memory'.
  * @param baseDir - Directory path for file and sqlite backends. Defaults to '.data'.
- * @param limits - Optional server limits configuration.
+ * @param options - Optional storage configuration and limits.
  * @returns Instantiated `Storage` engine.
  */
 export function createBackend(
   backend: BackendType = 'memory',
   baseDir: string = '.data',
-  limits?: ServerLimits,
+  options?: StorageOptions,
 ): Storage {
   const resolvedDir = path.resolve(baseDir);
 
   switch (backend) {
     case 'memory':
-      return new MemoryStorage({ limits });
+      return new MemoryStorage(options);
     case 'sqlite':
-      return new SqliteStorage({ baseDir: resolvedDir, limits });
+      return new SqliteStorage({ baseDir: resolvedDir, ...options });
     case 'file':
-      return new FileStorage({ baseDir: resolvedDir, limits });
+      return new FileStorage({ baseDir: resolvedDir, ...options });
     default:
       throw new Error(
         `Unknown backend type: "${backend}". Expected 'memory', 'file', or 'sqlite'.`,
@@ -53,6 +53,7 @@ export function createBackend(
  * - `tables add <appid> <table1> [table2...]`: Registers one or more tables for an application
  * - `tables rm <appid> <table1> [table2...]`: Deletes table(s) from an application
  * - `users` / `users list`: Lists registered user accounts
+ * - `users add <username> <password>`: Registers a new user account
  * - `users rm <userid>`: Deletes a user account and their data
  */
 export async function runCli(
@@ -75,11 +76,12 @@ Commands:
   tables add <appid> <table1> [table2...] Add one or more tables to an application
   tables rm <appid> <table1> [table2...]  Remove table(s) from an application
   users [list]                            List all registered user accounts
+  users add <username> <password>         Register a new user account
   users rm <userid>                       Delete a user account and associated data
 
 Server Options (for 'serve'):
-  --port, -p <number>                     Port number to bind (default: 8080 or PORT env)
-  --host, -H <string>                     Host address to bind (default: 0.0.0.0 or HOST env)
+  --port=<number>, -p <number>            Port number to bind (default: 8080 or PORT env)
+  --host=<string>, -H <string>            Host address to bind (default: 0.0.0.0 or HOST env)
 
 Backend Options (for all commands):
   --memory                                Run in-memory without disk persistence (default)
@@ -90,60 +92,46 @@ Backend Options (for all commands):
     return;
   }
 
-  // Determine subcommand
-  let command = 'serve';
-  const positionalArgs: string[] = [];
-  let port = process.env.PORT ? Number.parseInt(process.env.PORT, 10) : 8080;
-  let host = process.env.HOST ?? '0.0.0.0';
-  let backend: BackendType = 'memory';
-  let dir = '.data';
-
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === '--port' || arg === '-p') {
-      const val = args[++i];
-      if (val) port = Number.parseInt(val, 10);
-    } else if (arg.startsWith('--port=')) {
-      port = Number.parseInt(arg.slice('--port='.length), 10);
-    } else if (arg === '--host' || arg === '-H') {
-      const val = args[++i];
-      if (val) host = val;
-    } else if (arg.startsWith('--host=')) {
-      host = arg.slice('--host='.length);
-    } else if (arg === '--memory') {
-      backend = 'memory';
-    } else if (arg === '--file') {
-      backend = 'file';
-      const next = args[i + 1];
-      if (next && !next.startsWith('-')) {
-        dir = args[++i];
-      }
-    } else if (arg.startsWith('--file=')) {
-      backend = 'file';
-      const val = arg.slice('--file='.length);
-      if (val) dir = val;
-    } else if (arg === '--sqlite') {
-      backend = 'sqlite';
-      const next = args[i + 1];
-      if (next && !next.startsWith('-')) {
-        dir = args[++i];
-      }
-    } else if (arg.startsWith('--sqlite=')) {
-      backend = 'sqlite';
-      const val = arg.slice('--sqlite='.length);
-      if (val) dir = val;
-    } else if (!arg.startsWith('-')) {
-      positionalArgs.push(arg);
-    }
-  }
-
-  if (positionalArgs.length > 0) {
-    command = positionalArgs[0];
-  }
-
-  const storage = createBackend(backend, dir);
+  let storage: Storage | undefined;
 
   try {
+    let command = 'serve';
+    const positionalArgs: string[] = [];
+    let port = process.env.PORT ? Number.parseInt(process.env.PORT, 10) : 8080;
+    let host = process.env.HOST ?? '0.0.0.0';
+    let backend: BackendType = 'memory';
+    let dir = '.data';
+
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i];
+      if (arg.startsWith('--port=')) {
+        port = Number.parseInt(arg.slice(7), 10);
+      } else if (arg === '-p') {
+        port = Number.parseInt(args[++i] ?? '', 10);
+      } else if (arg.startsWith('--host=')) {
+        host = arg.slice(7);
+      } else if (arg === '-H') {
+        host = args[++i] ?? host;
+      } else if (arg === '--memory') {
+        backend = 'memory';
+      } else if (arg === '--file' || arg.startsWith('--file=')) {
+        backend = 'file';
+        if (arg.startsWith('--file=')) dir = arg.slice(7);
+      } else if (arg === '--sqlite' || arg.startsWith('--sqlite=')) {
+        backend = 'sqlite';
+        if (arg.startsWith('--sqlite=')) dir = arg.slice(9);
+      } else if (arg.startsWith('-')) {
+        throw new Error(`Unknown or invalid option: "${arg}".`);
+      } else {
+        positionalArgs.push(arg);
+      }
+    }
+
+    if (positionalArgs.length > 0) {
+      command = positionalArgs[0];
+    }
+
+    storage = createBackend(backend, dir);
     switch (command) {
       case 'serve': {
         const running = await startServer({
@@ -249,8 +237,12 @@ Backend Options (for all commands):
               'Usage: tetherdb tables add <appid> <table1> [table2...]',
             );
           }
-          const app =
-            (await storage.getApp(appId)) ?? (await storage.createApp(appId));
+          const app = await storage.getApp(appId);
+          if (!app) {
+            throw new Error(
+              `Application "${appId}" not found. Create it first with: tetherdb apps add ${appId}`,
+            );
+          }
           for (const t of tableNames) {
             const existing = await app.getTable(t);
             if (existing) {
@@ -271,8 +263,11 @@ Backend Options (for all commands):
             );
           }
           const app = await storage.getApp(appId);
+          if (!app) {
+            throw new Error(`Application "${appId}" not found.`);
+          }
           for (const t of tableNames) {
-            const table = app ? await app.getTable(t) : undefined;
+            const table = await app.getTable(t);
             if (table) {
               await table.delete();
               console.log(`Removed table "${t}" from application "${appId}"`);
@@ -313,6 +308,14 @@ Backend Options (for all commands):
               console.log(`  • [${u.id}] ${u.username} (created: ${created})`);
             }
           }
+        } else if (action === 'add') {
+          const username = positionalArgs[2];
+          const password = positionalArgs[3];
+          if (!username || !password) {
+            throw new Error('Usage: tetherdb users add <username> <password>');
+          }
+          const user = await storage.createUser(username, password);
+          console.log(`Created user: [${user.id}] ${user.username}`);
         } else if (action === 'rm') {
           const userId = positionalArgs[2];
           if (!userId) {
@@ -327,7 +330,7 @@ Backend Options (for all commands):
           }
         } else {
           throw new Error(
-            `Unknown users action: "${action}". Usage: users [list|rm <userid>]`,
+            `Unknown users action: "${action}". Usage: users [list|add <username> <password>|rm <userid>]`,
           );
         }
         await storage.close?.();
@@ -341,12 +344,15 @@ Backend Options (for all commands):
     }
   } catch (err) {
     console.error('Command failed:', (err as Error).message);
-    await storage.close?.();
+    await storage?.close?.();
     process.exit(1);
   }
 }
 
-if (process.argv[1]?.endsWith('tetherdb.ts')) {
+if (
+  process.argv[1] &&
+  fileURLToPath(import.meta.url) === path.resolve(process.argv[1])
+) {
   runCli().catch((err) => {
     console.error('Failed to start TetherDB CLI:', err);
     process.exit(1);

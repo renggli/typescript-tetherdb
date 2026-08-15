@@ -19,7 +19,6 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
   let port: number;
 
   beforeEach(async () => {
-    port = 9000 + Math.floor(Math.random() * 1000);
     tmpDir = path.join(
       os.tmpdir(),
       `tetherdb-e2e-${Math.random().toString(36).substring(2, 8)}`,
@@ -33,7 +32,9 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
       },
     });
 
-    await server.listen(port, '127.0.0.1');
+    const httpServer = await server.listen(0, '127.0.0.1');
+    const addr = httpServer.address();
+    port = typeof addr === 'object' && addr ? addr.port : 0;
     wsUrl = `ws://127.0.0.1:${port}/sync`;
 
     // Register user
@@ -61,7 +62,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
     await todosA.put('t1', { title: 'Buy groceries', done: false });
 
     // Wait for sync to flush
-    await delay(200);
+    await delay(400);
 
     const user = await server.storage.getUserByToken(userToken);
     expect(user).toBeDefined();

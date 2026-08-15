@@ -121,7 +121,7 @@ describe('src/server/storage/index.ts (Barrel Exports & Custom Storage Integrati
       async getApps() {
         return [customApp];
       },
-      async createUser() {
+      async createUser(_username: string, _password: string) {
         return customUser;
       },
       async getUser() {

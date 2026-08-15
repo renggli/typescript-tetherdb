@@ -1,14 +1,14 @@
 import { shouldOverwrite } from '../../../shared/clock.js';
 import {
-  calculateByteSize,
-  validateRecordId,
-  validateTableName,
-} from '../../../shared/sanitize.js';
-import {
   type ChangeRecord,
   OperationType,
   type StoredRecord,
 } from '../../../shared/types.js';
+import {
+  calculateByteSize,
+  validateRecordId,
+  validateTableName,
+} from '../../validate.js';
 import type { AppStorage } from '../app.js';
 import type { TableStorage } from '../table.js';
 import type { UserStorage } from '../user.js';
@@ -54,13 +54,13 @@ export class AppMemoryStorage implements AppStorage {
     const userState = this.storage.getUserState(user.id, this.id);
     const applied: ChangeRecord[] = [];
 
-    const maxRecords = this.storage.limits.maxRecordsPerTable ?? 10000;
-    const maxRecordSize = this.storage.limits.maxRecordSizeBytes ?? 512 * 1024;
-    const maxChangelog = this.storage.limits.maxChangelogEntries ?? 1000;
+    const maxRecords = this.storage.options.maxRecordsPerTable ?? 10000;
+    const maxRecordSize = this.storage.options.maxRecordSizeBytes ?? 512 * 1024;
+    const maxChangelog = this.storage.options.maxChangelogEntries ?? 1000;
 
     for (const change of changes) {
       const tableName = validateTableName(change.table);
-      const recordId = validateRecordId(change.id, tableName, user.id);
+      const recordId = validateRecordId(change.id);
 
       if (!this.tables.has(tableName)) {
         throw new Error(

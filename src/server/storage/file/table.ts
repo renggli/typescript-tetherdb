@@ -1,11 +1,11 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { validateRecordId, validateUserId } from '../../../shared/sanitize.js';
 import type {
   ChangeRecord,
   RecordSnapshotItem,
   StoredRecord,
 } from '../../../shared/types.js';
+import { validateRecordId, validateUserId } from '../../validate.js';
 import type { TableStorage } from '../table.js';
 import type { UserStorage } from '../user.js';
 import type { AppFileStorage } from './app.js';
@@ -57,7 +57,7 @@ export class TableFileStorage implements TableStorage {
     id: string,
   ): Promise<StoredRecord | undefined> {
     const safeUserId = validateUserId(user.id);
-    const safeId = validateRecordId(id, this.name, safeUserId);
+    const safeId = validateRecordId(id);
     const map = await this.readTableRecords(safeUserId);
     const record = map.get(safeId);
     if (!record || record.deleted) {

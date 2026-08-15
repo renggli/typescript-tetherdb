@@ -1,11 +1,14 @@
 import * as http from 'node:http';
 import { WebSocketServer } from 'ws';
-import { validateAppId } from '../shared/sanitize.js';
-import type { ServerLimits } from '../shared/types.js';
 import { FileStorage } from './storage/file/index.js';
 import { MemoryStorage } from './storage/memory/index.js';
-import type { Storage } from './storage/storage.js';
+import type { Storage, StorageOptions } from './storage/storage.js';
 import { SyncHub } from './sync-hub.js';
+import {
+  normalizePassword,
+  normalizeUsername,
+  validateAppId,
+} from './validate.js';
 
 /**
  * Configuration options for the TetherServer.
@@ -15,8 +18,8 @@ export interface TetherServerOptions {
   storage?: Storage;
   /** Filesystem root directory for storage & auth (e.g. '.data'). */
   baseDir?: string;
-  /** Server-side table and quota limits. */
-  limits?: ServerLimits;
+  /** Storage configuration options and resource limits. */
+  storageOptions?: StorageOptions;
   /** Path for WebSocket upgrade requests (defaults to '/sync'). */
   wsPath?: string;
   /** Initial apps and tables to declare on startup. */
@@ -57,7 +60,6 @@ export class TetherServer {
   private storageEngine: Storage;
   private syncHub: SyncHub;
   private wss: WebSocketServer | null = null;
-  private httpServer: http.Server | null = null;
   private wsPath: string;
   private initialApps?: Record<string, string[]> | Map<string, string[]>;
 
@@ -72,14 +74,14 @@ export class TetherServer {
     } else if (options.baseDir) {
       this.storageEngine = new FileStorage({
         baseDir: options.baseDir,
-        limits: options.limits,
+        ...options.storageOptions,
       });
     } else {
-      this.storageEngine = new MemoryStorage({ limits: options.limits });
+      this.storageEngine = new MemoryStorage(options.storageOptions);
     }
 
     this.initialApps = options.apps;
-    this.syncHub = new SyncHub(this.storageEngine, options.limits);
+    this.syncHub = new SyncHub(this.storageEngine);
     this.wsPath = options.wsPath ?? '/sync';
   }
 
@@ -110,347 +112,291 @@ export class TetherServer {
     return this.syncHub;
   }
 
-  /**
-   * Attaches WebSocket upgrade handlers and synchronization to an existing Node.js HTTP server.
-   *
-   * @param server - The Node HTTP server instance to attach to.
-   */
-  attach(server: http.Server): void {
-    this.httpServer = server;
-    this.wss = new WebSocketServer({ noServer: true });
-
-    server.on('upgrade', (req, socket, head) => {
-      const url = new URL(req.url ?? '', `http://${req.headers.host}`);
-      if (url.pathname === this.wsPath) {
-        this.wss?.handleUpgrade(req, socket, head, (ws) => {
-          this.syncHub.handleConnection(ws);
-        });
-      } else {
-        socket.destroy();
-      }
-    });
-
-    const existingListeners = server.listeners('request').slice();
-    server.removeAllListeners('request');
-
-    server.on(
-      'request',
-      (req: http.IncomingMessage, res: http.ServerResponse) => {
-        this.handleHttpRequest(req, res, () => {
-          for (const listener of existingListeners) {
-            listener.call(server, req, res);
-          }
-        });
-      },
-    );
-  }
-
-  /**
-   * Starts an HTTP server listening on the specified port and host, attaching TetherServer.
-   *
-   * @param port - Port number to bind (defaults to 8080).
-   * @param host - Host interface to bind (defaults to '0.0.0.0').
-   * @returns Running Node.js HTTP server.
-   */
-  async listen(port = 8080, host = '0.0.0.0'): Promise<http.Server> {
+  private async initializeApps(): Promise<void> {
     if (this.initialApps) {
-      const entries =
-        this.initialApps instanceof Map
-          ? Array.from(this.initialApps.entries())
-          : Object.entries(this.initialApps);
-      for (const [appId, tables] of entries) {
-        await this.declareApp(appId, tables);
+      if (this.initialApps instanceof Map) {
+        for (const [appId, tables] of this.initialApps.entries()) {
+          await this.declareApp(appId, tables);
+        }
+      } else {
+        for (const [appId, tables] of Object.entries(this.initialApps)) {
+          await this.declareApp(appId, tables);
+        }
       }
     }
-
-    const httpServer = http.createServer();
-    this.attach(httpServer);
-    await new Promise<void>((resolve, reject) => {
-      httpServer.listen(port, host, () => resolve());
-      httpServer.on('error', reject);
-    });
-    return httpServer;
   }
 
   /**
-   * Main HTTP request router for TetherDB authentication and discovery endpoints.
-   *
-   * @param req - Incoming HTTP request.
-   * @param res - Outgoing HTTP response.
-   * @param next - Next middleware / fallback handler callback.
+   * The underlying HTTP server instance, if listening.
    */
-  handleHttpRequest(
+  get httpServer(): http.Server | null {
+    return this._httpServer;
+  }
+
+  private _httpServer: http.Server | null = null;
+
+  /**
+   * Starts the HTTP and WebSocket server listening on the specified port and host.
+   *
+   * @param port - Port number to bind. Defaults to 8080.
+   * @param host - Host interface to bind. Defaults to '0.0.0.0'.
+   * @returns The active Node.js HTTP server instance.
+   */
+  async listen(port = 8080, host = '0.0.0.0'): Promise<http.Server> {
+    await this.initializeApps();
+
+    return new Promise<http.Server>((resolve) => {
+      this._httpServer = http.createServer(async (req, res) => {
+        await this.handleHttpRequest(req, res);
+      });
+
+      this.wss = new WebSocketServer({ noServer: true });
+      this.wss.on('connection', (ws) => {
+        this.syncHub.handleConnection(ws);
+      });
+
+      this._httpServer.on('upgrade', (req, socket, head) => {
+        const url = new URL(req.url ?? '', `http://${req.headers.host}`);
+        if (url.pathname === this.wsPath) {
+          this.wss?.handleUpgrade(req, socket, head, (ws) => {
+            this.wss?.emit('connection', ws, req);
+          });
+        } else {
+          socket.destroy();
+        }
+      });
+
+      this._httpServer.listen(port, host, () => {
+        if (this._httpServer) {
+          resolve(this._httpServer);
+        }
+      });
+    });
+  }
+
+  /**
+   * Closes active HTTP server and WebSocket server listeners.
+   */
+  async close(): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      if (this.wss) {
+        this.wss.close();
+        this.wss = null;
+      }
+      if (this._httpServer) {
+        this._httpServer.close((err) => {
+          this._httpServer = null;
+          if (err) reject(err);
+          else resolve();
+        });
+      } else {
+        resolve();
+      }
+    });
+  }
+
+  private sendJson(res: http.ServerResponse, status: number, data: unknown) {
+    res.writeHead(status, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    });
+    res.end(JSON.stringify(data));
+  }
+
+  private async readJsonBody(
+    req: http.IncomingMessage,
+  ): Promise<Record<string, unknown>> {
+    return new Promise((resolve, reject) => {
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > 1024 * 1024) {
+          reject(new Error('Payload too large'));
+        }
+      });
+      req.on('end', () => {
+        try {
+          resolve(body ? JSON.parse(body) : {});
+        } catch {
+          reject(new Error('Invalid JSON'));
+        }
+      });
+      req.on('error', reject);
+    });
+  }
+
+  /**
+   * Handles incoming HTTP requests for authentication and discovery endpoints.
+   */
+  async handleHttpRequest(
     req: http.IncomingMessage,
     res: http.ServerResponse,
-    next: () => void = () => this._sendJson(res, 404, { error: 'Not found' }),
-  ): void {
+  ): Promise<void> {
     const url = new URL(
-      req.url ?? '',
+      req.url ?? '/',
       `http://${req.headers.host ?? 'localhost'}`,
     );
     const method = req.method?.toUpperCase();
-    const pathname = url.pathname;
-
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader(
-      'Access-Control-Allow-Methods',
-      'GET, POST, PUT, DELETE, OPTIONS',
-    );
-    res.setHeader(
-      'Access-Control-Allow-Headers',
-      'Content-Type, Authorization',
-    );
 
     if (method === 'OPTIONS') {
-      res.writeHead(204);
+      res.writeHead(204, {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      });
       res.end();
       return;
     }
 
-    if (pathname === '/health' && method === 'GET') {
-      this._handleGetHealth(res);
-      return;
-    }
-
-    if (pathname === '/auth/register' && method === 'POST') {
-      this._handlePostRegister(req, res);
-      return;
-    }
-
-    if (pathname === '/auth/login' && method === 'POST') {
-      this._handlePostLogin(req, res);
-      return;
-    }
-
-    if (pathname === '/apps' && method === 'GET') {
-      this._handleGetApps(req, res);
-      return;
-    }
-
-    const tablesMatch = pathname.match(/^\/apps\/([^/]+)\/tables$/);
-    if (tablesMatch && method === 'GET') {
-      this._handleGetTables(req, res, tablesMatch[1]);
-      return;
-    }
-
-    next();
-  }
-
-  private _sendJson(
-    res: http.ServerResponse,
-    statusCode: number,
-    data: unknown,
-  ): void {
-    res.writeHead(statusCode, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(data));
-  }
-
-  private _handleGetHealth(res: http.ServerResponse): void {
-    this._sendJson(res, 200, { status: 'ok', timestamp: Date.now() });
-  }
-
-  private async _handleGetApps(
-    _req: http.IncomingMessage,
-    res: http.ServerResponse,
-  ): Promise<void> {
-    const apps = await this.storageEngine.getApps();
-    this._sendJson(res, 200, { apps: apps.map((a) => a.id) });
-  }
-
-  private async _handleGetTables(
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-    rawAppIdParam: string,
-  ): Promise<void> {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
-      this._sendJson(res, 401, { error: 'Authorization header required' });
-      return;
-    }
-    const token = authHeader.slice(7).trim();
-    const user = await this.storageEngine.getUserByToken(token);
-    if (!user) {
-      this._sendJson(res, 401, { error: 'Invalid or expired token' });
-      return;
-    }
-
     try {
-      const rawAppId = decodeURIComponent(rawAppIdParam);
-      const appId = validateAppId(rawAppId);
-      const app = await this.storageEngine.getApp(appId);
-      if (!app) {
-        this._sendJson(res, 404, {
-          error: `Application "${appId}" not found`,
-        });
-        return;
-      }
-      const tables = await app.getTables();
-      this._sendJson(res, 200, { appId, tables: tables.map((t) => t.name) });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Invalid request';
-      this._sendJson(res, 400, { error: message });
-    }
-  }
-
-  private async _handlePostRegister(
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-  ): Promise<void> {
-    try {
-      const body = await this.readJsonBody<{
-        username?: string;
-        password?: string;
-      }>(req);
-      if (!body.username || !body.password) {
-        this._sendJson(res, 400, {
-          error: 'Username and password are required',
-        });
-        return;
-      }
-      const user = await this.storageEngine.createUser(
-        body.username,
-        body.password,
-      );
-      const token = await user.createToken();
-      this._sendJson(res, 201, {
-        userId: user.id,
-        username: user.username,
-        token,
-      });
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'Registration failed';
-      this._sendJson(res, 400, { error: message });
-    }
-  }
-
-  private async _handlePostLogin(
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-  ): Promise<void> {
-    try {
-      const body = await this.readJsonBody<{
-        username?: string;
-        password?: string;
-      }>(req);
-      if (!body.username || !body.password) {
-        this._sendJson(res, 400, {
-          error: 'Username and password are required',
-        });
-        return;
-      }
-      const user = await this.storageEngine.getUserByUsername(body.username);
-      if (!user || !(await user.verifyPassword(body.password))) {
-        this._sendJson(res, 401, { error: 'Invalid username or password' });
-        return;
-      }
-      const token = await user.createToken();
-      this._sendJson(res, 200, {
-        userId: user.id,
-        username: user.username,
-        token,
-      });
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'Authentication failed';
-      this._sendJson(res, 401, { error: message });
-    }
-  }
-
-  private readJsonBody<T = unknown>(
-    req: http.IncomingMessage,
-    maxBytes = 1024 * 1024,
-  ): Promise<T> {
-    return new Promise((resolve, reject) => {
-      let data = '';
-      let bytes = 0;
-
-      req.on('data', (chunk: Buffer | string) => {
-        bytes +=
-          typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length;
-        if (bytes > maxBytes) {
-          req.destroy();
-          reject(new Error('Request body exceeds maximum size limit'));
-          return;
+      // POST /auth/register
+      if (method === 'POST' && url.pathname === '/auth/register') {
+        const body = await this.readJsonBody(req);
+        const { username, password } = body as {
+          username?: string;
+          password?: string;
+        };
+        const normUsername = normalizeUsername(username ?? '');
+        const normPassword = normalizePassword(password ?? '');
+        if (!normUsername) {
+          return this.sendJson(res, 400, {
+            error: 'Missing or invalid required field: username',
+          });
         }
-        data += chunk;
-      });
-
-      req.on('end', () => {
-        if (!data.trim()) {
-          resolve({} as T);
-          return;
+        if (!normPassword) {
+          return this.sendJson(res, 400, {
+            error: 'Missing or invalid required field: password',
+          });
         }
+
         try {
-          resolve(JSON.parse(data) as T);
-        } catch {
-          reject(new Error('Invalid JSON request body'));
+          const user = await this.storageEngine.createUser(
+            normUsername,
+            normPassword,
+          );
+          const token = await user.createToken();
+          return this.sendJson(res, 201, {
+            userId: user.id,
+            username: user.username,
+            token,
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Registration error';
+          return this.sendJson(res, 409, { error: msg });
         }
-      });
-
-      req.on('error', (err) => reject(err));
-    });
-  }
-
-  /**
-   * Closes the server and releases all bound ports and active WebSocket connections.
-   */
-  async close(): Promise<void> {
-    if (this.wss) {
-      for (const client of this.wss.clients) {
-        client.terminate();
       }
-      await new Promise<void>((resolve) => {
-        this.wss?.close(() => resolve());
-      });
-      this.wss = null;
-    }
 
-    if (this.httpServer) {
-      await new Promise<void>((resolve) => {
-        this.httpServer?.close(() => resolve());
-      });
-      this.httpServer = null;
-    }
+      // POST /auth/login
+      if (method === 'POST' && url.pathname === '/auth/login') {
+        const body = await this.readJsonBody(req);
+        const { username, password } = body as {
+          username?: string;
+          password?: string;
+        };
+        const normUsername = normalizeUsername(username ?? '');
+        const normPassword = normalizePassword(password ?? '');
+        if (!normUsername || !normPassword) {
+          return this.sendJson(res, 400, {
+            error: 'Missing required field: username and password',
+          });
+        }
 
-    if (this.storageEngine.close) {
-      await this.storageEngine.close();
+        const user = await this.storageEngine.getUserByUsername(normUsername);
+        if (!user) {
+          return this.sendJson(res, 401, {
+            error: 'Invalid username or password',
+          });
+        }
+
+        const valid = await user.verifyPassword(normPassword);
+        if (!valid) {
+          return this.sendJson(res, 401, {
+            error: 'Invalid username or password',
+          });
+        }
+
+        const token = await user.createToken();
+        return this.sendJson(res, 200, {
+          userId: user.id,
+          username: user.username,
+          token,
+        });
+      }
+
+      // GET /apps
+      if (method === 'GET' && url.pathname === '/apps') {
+        const apps = await this.storageEngine.getApps();
+        const appSummaries = await Promise.all(
+          apps.map(async (app) => {
+            const tables = await app.getTables();
+            return {
+              id: app.id,
+              tables: tables.map((t) => t.name),
+            };
+          }),
+        );
+        return this.sendJson(res, 200, { apps: appSummaries });
+      }
+
+      // GET /apps/:appId/tables
+      const matchAppTables = url.pathname.match(/^\/apps\/([^/]+)\/tables$/);
+      if (method === 'GET' && matchAppTables) {
+        const appId = matchAppTables[1];
+        const safeAppId = validateAppId(appId);
+        const app = await this.storageEngine.getApp(safeAppId);
+        if (!app) {
+          return this.sendJson(res, 404, {
+            error: `Application "${safeAppId}" not found`,
+          });
+        }
+
+        const tables = await app.getTables();
+        return this.sendJson(res, 200, {
+          appId: app.id,
+          tables: tables.map((t) => t.name),
+        });
+      }
+
+      // Health check endpoint
+      if (method === 'GET' && url.pathname === '/health') {
+        return this.sendJson(res, 200, { status: 'ok' });
+      }
+
+      return this.sendJson(res, 404, { error: 'Not found' });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Internal server error';
+      return this.sendJson(res, 500, { error: msg });
     }
   }
 }
 
 /**
- * Starts a TetherDB HTTP & WebSocket server instance.
+ * Starts a complete standalone HTTP & WebSocket synchronization server.
  *
- * @param options - Startup configuration options including port and storage backend.
- * @returns A promise resolving to a `RunningServer` handle.
+ * @param options - Start options including port, host, storage, and limits.
+ * @returns Handle to the running server.
  */
 export async function startServer(
   options: StartServerOptions = {},
 ): Promise<RunningServer> {
   const port =
-    options.port ?? (process.env.PORT ? Number(process.env.PORT) : 8080);
+    options.port ??
+    (process.env.PORT ? Number.parseInt(process.env.PORT, 10) : 8080);
   const host = options.host ?? '0.0.0.0';
 
   const server = new TetherServer(options);
-  const httpServer = http.createServer();
-  server.attach(httpServer);
-
-  await new Promise<void>((resolve, reject) => {
-    httpServer.listen(port, host, () => resolve());
-    httpServer.on('error', reject);
-  });
-
-  const address = httpServer.address();
-  const actualPort =
-    typeof address === 'object' && address ? address.port : port;
+  const httpServer = await server.listen(port, host);
+  const addr = httpServer.address();
+  const boundPort = typeof addr === 'object' && addr ? addr.port : port;
 
   return {
     server,
     httpServer,
-    port: actualPort,
+    port: boundPort,
     host,
-    async close() {
+    close: async () => {
       await server.close();
     },
   };

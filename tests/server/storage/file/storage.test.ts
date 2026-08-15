@@ -24,12 +24,12 @@ describe('src/server/storage/file/ (FileStorage)', () => {
   });
 
   it('should persist user credentials and allow verification after reload', async () => {
-    const user = await storage.createUser('bob', 'secret123');
-    expect(user.username).toBe('bob');
+    const user = await storage.createUser('bobby', 'secret123');
+    expect(user.username).toBe('bobby');
 
     // Create a second storage pointing to the same directory
     const storage2 = new FileStorage({ baseDir: tmpDir });
-    const loadedUser = await storage2.getUserByUsername('bob');
+    const loadedUser = await storage2.getUserByUsername('bobby');
     expect(loadedUser).toBeDefined();
     expect(await loadedUser?.verifyPassword('secret123')).toBe(true);
     expect(await loadedUser?.verifyPassword('wrong')).toBe(false);

@@ -1,15 +1,16 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { hashPassword, verifySessionToken } from '../../crypto.js';
 import {
+  normalizeUsername,
   validateAppId,
+  validatePassword,
   validateUserId,
   validateUsername,
-} from '../../../shared/sanitize.js';
-import type { ServerLimits } from '../../../shared/types.js';
-import { hashPassword, verifySessionToken } from '../../crypto.js';
+} from '../../validate.js';
 import type { AppStorage } from '../app.js';
-import type { Storage } from '../storage.js';
+import type { Storage, StorageOptions } from '../storage.js';
 import type { UserStorage } from '../user.js';
 import { AppFileStorage } from './app.js';
 import { UserFileStorage } from './user.js';
@@ -21,10 +22,8 @@ export interface FileUserData {
   createdAt: number;
 }
 
-export interface FileStorageOptions {
+export interface FileStorageOptions extends StorageOptions {
   baseDir?: string;
-  limits?: ServerLimits;
-  secret?: string;
 }
 
 /**
@@ -32,14 +31,12 @@ export interface FileStorageOptions {
  */
 export class FileStorage implements Storage {
   readonly baseDir: string;
-  readonly limits: ServerLimits;
-  private explicitSecret?: string;
+  readonly options: FileStorageOptions;
   private userLocks: Map<string, Promise<unknown>> = new Map();
 
   constructor(options: FileStorageOptions = {}) {
+    this.options = options;
     this.baseDir = path.resolve(options.baseDir ?? '.data');
-    this.limits = options.limits ?? {};
-    this.explicitSecret = options.secret;
   }
 
   private get usersFile(): string {
@@ -51,7 +48,7 @@ export class FileStorage implements Storage {
   }
 
   async getSecret(): Promise<string> {
-    if (this.explicitSecret) return this.explicitSecret;
+    if (this.options.secret) return this.options.secret;
     try {
       return await fs.readFile(this.secretFile, 'utf-8');
     } catch {
@@ -178,8 +175,9 @@ export class FileStorage implements Storage {
     }
   }
 
-  async createUser(username: string, password?: string): Promise<UserStorage> {
+  async createUser(username: string, password: string): Promise<UserStorage> {
     const safeUsername = validateUsername(username);
+    const validPassword = validatePassword(password);
     const users = await this.readUsersFile();
 
     for (const u of users.values()) {
@@ -189,7 +187,7 @@ export class FileStorage implements Storage {
     }
 
     const userId = crypto.randomUUID();
-    const passwordHash = password ? await hashPassword(password) : null;
+    const passwordHash = await hashPassword(validPassword);
     const userData: FileUserData = {
       id: userId,
       username: safeUsername,
@@ -212,10 +210,11 @@ export class FileStorage implements Storage {
   }
 
   async getUserByUsername(username: string): Promise<UserStorage | undefined> {
-    const safeUsername = validateUsername(username);
+    const safeUsername = normalizeUsername(username);
+    if (!safeUsername) return undefined;
     const users = await this.readUsersFile();
     for (const u of users.values()) {
-      if (u.username.toLowerCase() === safeUsername.toLowerCase()) {
+      if (u.username.toLowerCase() === safeUsername) {
         return new UserFileStorage(u, this);
       }
     }

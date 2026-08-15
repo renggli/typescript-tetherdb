@@ -138,9 +138,8 @@ The standard server provides discovery endpoints for inspecting active applicati
   - `SyncHub`: WebSocket connection manager with app- and user-level change routing and broadcasting.
   - `FileStorageAdapter`: Multi-app sharded filesystem storage (`<baseDir>/<appId>/<shard>/<userId>/stores/`).
   - `MemoryStorageAdapter`: In-memory storage adapter for testing and ephemeral workloads.
-  - `StorageAdapter`: Pluggable storage adapter interface with `listApps()` and `listStores()`.
 - **`tetherdb/shared`**:
-  - Shared types (`ChangeRecord`, `StoredRecord`, `ClientMessage`, `ServerMessage`, `ServerLimits`).
+  - Shared types (`ChangeRecord`, `StoredRecord`, `ClientMessage`, `ServerMessage`).
   - Security validators (`validateUserId`, `validateAppId`, `validateStoreName`, `validateRecordId`, `validateUsername`).
   - Clock utilities (`shouldOverwrite`, `generateClientId`).
 

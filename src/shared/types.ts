@@ -219,25 +219,3 @@ export interface SyncMetadata {
   /** Unique client instance identifier. */
   clientId: string;
 }
-
-/**
- * Server limits and quota configuration for controlling storage and table access.
- */
-export interface ServerLimits {
-  /** Optional allowlist of table names. If provided, only these tables can be created or modified. */
-  allowedTables?: string[];
-  /** Optional allowlist of application IDs and their allowed table names. */
-  allowedApps?:
-    | Map<string, Set<string>>
-    | ReadonlyMap<string, ReadonlySet<string>>;
-  /** Maximum number of distinct tables allowed per user (default: 50). */
-  maxTablesPerUser?: number;
-  /** Maximum number of active records allowed per table (default: 10,000). */
-  maxRecordsPerTable?: number;
-  /** Maximum allowed payload size in bytes for an individual record (default: 512 KB). */
-  maxRecordSizeBytes?: number;
-  /** Maximum allowed size in bytes for a single change batch payload (default: 5 MB). */
-  maxBatchSizeBytes?: number;
-  /** Maximum number of changelog entries retained per user before compaction (default: 1,000). */
-  maxChangelogEntries?: number;
-}

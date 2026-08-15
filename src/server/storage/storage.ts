@@ -2,9 +2,28 @@ import type { AppStorage } from './app.js';
 import type { UserStorage } from './user.js';
 
 /**
+ * Configuration options and resource limits for storage engines.
+ */
+export interface StorageOptions {
+  /** Maximum number of active records allowed per table (default: 10,000). */
+  maxRecordsPerTable?: number;
+  /** Maximum allowed payload size in bytes for an individual record (default: 512 KB). */
+  maxRecordSizeBytes?: number;
+  /** Maximum allowed size in bytes for a single change batch payload (default: 5 MB). */
+  maxBatchSizeBytes?: number;
+  /** Maximum number of changelog entries retained per user before compaction (default: 1,000). */
+  maxChangelogEntries?: number;
+  /** Secret key used for signing session tokens. */
+  secret?: string;
+}
+
+/**
  * Top-level storage coordinator managing application namespaces and user accounts.
  */
 export interface Storage {
+  /** Storage configuration options and resource limits. */
+  readonly options?: StorageOptions;
+
   /**
    * Creates/registers a new application namespace.
    *
@@ -32,10 +51,10 @@ export interface Storage {
    * Creates a new user account with credentials.
    *
    * @param username - Username for the account.
-   * @param password - Optional account password.
+   * @param password - Account password.
    * @returns Created UserStorage handle.
    */
-  createUser(username: string, password?: string): Promise<UserStorage>;
+  createUser(username: string, password: string): Promise<UserStorage>;
 
   /**
    * Retrieves a user handle by user account ID.

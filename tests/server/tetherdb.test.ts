@@ -51,9 +51,9 @@ describe('src/server/tetherdb.ts (CLI commands and backends)', () => {
       expect(storage).toBeInstanceOf(FileStorage);
     });
 
-    it('should pass custom limits through createBackend', () => {
+    it('should pass custom options through createBackend', () => {
       const storage = createBackend('memory', '.data', {
-        maxTablesPerUser: 5,
+        maxRecordsPerTable: 500,
       });
       expect(storage).toBeInstanceOf(MemoryStorage);
     });
@@ -75,12 +75,36 @@ describe('src/server/tetherdb.ts (CLI commands and backends)', () => {
       logSpy.mockRestore();
     });
 
-    it('should support users list and users rm subcommands on SQLite backend', async () => {
-      const storage = createBackend('sqlite', tmpDir);
-      const user = await storage.createUser('alice', 'password123');
-      await storage.close?.();
-
+    it('should support users add, list, and rm subcommands on SQLite backend', async () => {
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      // Add user via CLI without password (should fail)
+      const exitSpy = vi
+        .spyOn(process, 'exit')
+        .mockImplementation((() => {}) as unknown as (
+          code?: string | number | null | undefined,
+        ) => never);
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      await runCli(['users', 'add', 'bob', `--sqlite=${tmpDir}`]);
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Command failed:',
+        'Usage: tetherdb users add <username> <password>',
+      );
+      exitSpy.mockRestore();
+      errorSpy.mockRestore();
+
+      // Add user via CLI with password
+      await runCli([
+        'users',
+        'add',
+        'alice',
+        'password123',
+        `--sqlite=${tmpDir}`,
+      ]);
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Created user: ['),
+      );
 
       // List users
       await runCli(['users', 'list', `--sqlite=${tmpDir}`]);
@@ -88,12 +112,26 @@ describe('src/server/tetherdb.ts (CLI commands and backends)', () => {
         expect.stringContaining('Registered users (1):'),
       );
 
+      // Extract created user ID from storage to test rm
+      const storage = createBackend('sqlite', tmpDir);
+      const user = await storage.getUserByUsername('alice');
+      await storage.close?.();
+      expect(user).toBeDefined();
+
       // Remove user
-      await runCli(['users', 'rm', user.id, `--sqlite=${tmpDir}`]);
-      expect(logSpy).toHaveBeenCalledWith(`Deleted user: ${user.id}`);
+      await runCli(['users', 'rm', user?.id ?? '', `--sqlite=${tmpDir}`]);
+      expect(logSpy).toHaveBeenCalledWith(`Deleted user: ${user?.id}`);
 
       // List again (empty)
       await runCli(['users', `--sqlite=${tmpDir}`]);
+      expect(logSpy).toHaveBeenCalledWith('No registered users found.');
+
+      // Test leading flags: --sqlite users (without =), should not swallow subcommand
+      await runCli(['--sqlite', 'users']);
+      expect(logSpy).toHaveBeenCalledWith('No registered users found.');
+
+      // Test leading flags: --file users add
+      await runCli(['--file', 'users']);
       expect(logSpy).toHaveBeenCalledWith('No registered users found.');
 
       logSpy.mockRestore();
@@ -101,6 +139,27 @@ describe('src/server/tetherdb.ts (CLI commands and backends)', () => {
 
     it('should support apps and tables add/list/rm subcommands on SQLite and File backends', async () => {
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const exitSpy = vi
+        .spyOn(process, 'exit')
+        .mockImplementation((() => {}) as unknown as (
+          code?: string | number | null | undefined,
+        ) => never);
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      // 0. Trying to add tables to non-existent app should fail
+      await runCli([
+        'tables',
+        'add',
+        'rezeptario',
+        'recipes',
+        `--sqlite=${tmpDir}`,
+      ]);
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Command failed:',
+        'Application "rezeptario" not found. Create it first with: tetherdb apps add rezeptario',
+      );
+      exitSpy.mockRestore();
+      errorSpy.mockRestore();
 
       // 1. Add app "rezeptario"
       await runCli(['apps', 'add', 'rezeptario', `--sqlite=${tmpDir}`]);
@@ -151,6 +210,30 @@ describe('src/server/tetherdb.ts (CLI commands and backends)', () => {
       expect(logSpy).toHaveBeenCalledWith('Deleted application: rezeptario');
 
       logSpy.mockRestore();
+    });
+
+    it('should reject double-dash options with values that omit equal signs', async () => {
+      const exitSpy = vi
+        .spyOn(process, 'exit')
+        .mockImplementation((() => {}) as unknown as (
+          code?: string | number | null | undefined,
+        ) => never);
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      await runCli(['--port', '8080']);
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Command failed:',
+        expect.stringContaining('Unknown or invalid option: "--port"'),
+      );
+
+      await runCli(['--host', '127.0.0.1']);
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Command failed:',
+        expect.stringContaining('Unknown or invalid option: "--host"'),
+      );
+
+      exitSpy.mockRestore();
+      errorSpy.mockRestore();
     });
   });
 });

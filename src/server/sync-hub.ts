@@ -1,19 +1,18 @@
 import type { WebSocket } from 'ws';
 import {
-  calculateByteSize,
-  validateAppId,
-  validateIdentifier,
-} from '../shared/sanitize.js';
-import {
   type ClientMessage,
   ClientMessageType,
   type RecordSnapshotItem,
-  type ServerLimits,
   type ServerMessage,
   ServerMessageType,
 } from '../shared/types.js';
 import type { Storage } from './storage/storage.js';
 import type { UserStorage } from './storage/user.js';
+import {
+  calculateByteSize,
+  validateAppId,
+  validateIdentifier,
+} from './validate.js';
 
 interface ActiveClient {
   ws: WebSocket;
@@ -28,7 +27,6 @@ interface ActiveClient {
  */
 export class SyncHub {
   private storage: Storage;
-  private limits: ServerLimits;
   private userClients: Map<string, Set<ActiveClient>> = new Map(); // key = `${appId}:${userId}`
   private wsToClient: Map<WebSocket, ActiveClient> = new Map();
 
@@ -36,11 +34,9 @@ export class SyncHub {
    * Initializes a new SyncHub instance.
    *
    * @param storage - Pluggable backend storage engine.
-   * @param limits - Optional server quota and payload limits.
    */
-  constructor(storage: Storage, limits: ServerLimits = {}) {
+  constructor(storage: Storage) {
     this.storage = storage;
-    this.limits = limits;
   }
 
   /**
@@ -142,7 +138,7 @@ export class SyncHub {
           return;
         }
 
-        const appId = validateAppId(msg.appId);
+        const appId = validateAppId(msg.appId ?? 'default');
         const app = await this.storage.getApp(appId);
         if (!app) {
           this.send(ws, {
@@ -156,7 +152,6 @@ export class SyncHub {
         const clientId = validateIdentifier(
           msg.clientId ?? 'client_anon',
           'clientId',
-          user.id,
         );
         const client: ActiveClient = {
           ws,
@@ -215,7 +210,8 @@ export class SyncHub {
           );
         }
 
-        const maxBatchSize = this.limits.maxBatchSizeBytes ?? 5 * 1024 * 1024;
+        const maxBatchSize =
+          this.storage.options?.maxBatchSizeBytes ?? 5 * 1024 * 1024;
         const batchBytes = calculateByteSize(msg.changes);
         if (batchBytes > maxBatchSize) {
           throw new Error(
@@ -223,11 +219,7 @@ export class SyncHub {
           );
         }
 
-        const batchId = validateIdentifier(
-          msg.batchId,
-          'batchId',
-          client.user.id,
-        );
+        const batchId = validateIdentifier(msg.batchId, 'batchId');
 
         const app = await this.storage.getApp(client.appId);
         if (!app) {

@@ -1,11 +1,11 @@
 import { shouldOverwrite } from '../../../shared/clock.js';
+import { type ChangeRecord, OperationType } from '../../../shared/types.js';
 import {
   calculateByteSize,
   validateRecordId,
   validateTableName,
   validateUserId,
-} from '../../../shared/sanitize.js';
-import { type ChangeRecord, OperationType } from '../../../shared/types.js';
+} from '../../validate.js';
 import type { AppStorage } from '../app.js';
 import type { TableStorage } from '../table.js';
 import type { UserStorage } from '../user.js';
@@ -104,9 +104,9 @@ export class AppSqliteStorage implements AppStorage {
     const applied: ChangeRecord[] = [];
     const handle = this.handle;
 
-    const maxRecords = this.storage.limits.maxRecordsPerTable ?? 10000;
-    const maxRecordSize = this.storage.limits.maxRecordSizeBytes ?? 512 * 1024;
-    const maxChangelog = this.storage.limits.maxChangelogEntries ?? 1000;
+    const maxRecords = this.storage.options.maxRecordsPerTable ?? 10000;
+    const maxRecordSize = this.storage.options.maxRecordSizeBytes ?? 512 * 1024;
+    const maxChangelog = this.storage.options.maxChangelogEntries ?? 1000;
 
     handle.db.exec('BEGIN IMMEDIATE TRANSACTION');
     try {
@@ -118,7 +118,7 @@ export class AppSqliteStorage implements AppStorage {
 
       for (const change of changes) {
         const tableName = validateTableName(change.table);
-        const recordId = validateRecordId(change.id, tableName, safeUserId);
+        const recordId = validateRecordId(change.id);
 
         const tableExists = handle.stmtCheckTable.get(tableName);
         if (!tableExists) {

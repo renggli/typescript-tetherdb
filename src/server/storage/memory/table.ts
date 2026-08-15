@@ -1,9 +1,9 @@
-import { validateRecordId } from '../../../shared/sanitize.js';
 import type {
   ChangeRecord,
   RecordSnapshotItem,
   StoredRecord,
 } from '../../../shared/types.js';
+import { validateRecordId } from '../../validate.js';
 import type { TableStorage } from '../table.js';
 import type { UserStorage } from '../user.js';
 import type { AppMemoryStorage } from './app.js';
@@ -27,7 +27,7 @@ export class TableMemoryStorage implements TableStorage {
     user: UserStorage,
     id: string,
   ): Promise<StoredRecord | undefined> {
-    const safeId = validateRecordId(id, this.name, user.id);
+    const safeId = validateRecordId(id);
     const userState = this.storage.getUserState(user.id, this.app.id);
     const tableMap = userState.tables.get(this.name);
     const record = tableMap?.get(safeId);

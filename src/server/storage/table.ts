@@ -45,7 +45,7 @@ export interface TableStorage {
   ): Promise<{ applied: ChangeRecord[]; newSeq: number }>;
 
   /**
-   * Deletes this table and its data across all users within the parent application.
+   * Deletes this table and its data across all.
    *
    * @returns True if deleted successfully.
    */

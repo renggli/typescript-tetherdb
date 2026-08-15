@@ -96,7 +96,7 @@ describe('Storage (src/server/storage/)', () => {
     it('should compact changelog beyond maxChangelogEntries and flag requiresSnapshot', async () => {
       const compactingStorage = new FileStorage({
         baseDir: tmpDir,
-        limits: { maxChangelogEntries: 5 },
+        maxChangelogEntries: 5,
       });
       const app = await compactingStorage.createApp('default');
       await app.createTable('events');
@@ -172,7 +172,9 @@ function runStorageTestSuite(createStorage: () => Storage) {
     expect(user.username).toBe('alice');
 
     expect(await user.verifyPassword('password123')).toBe(true);
+    expect(await user.verifyPassword('  password123  ')).toBe(true);
     expect(await user.verifyPassword('wrongPassword')).toBe(false);
+    expect(await user.verifyPassword('')).toBe(false);
 
     const token = await user.createToken();
     expect(await user.verifyToken(token)).toBe(true);
@@ -181,7 +183,7 @@ function runStorageTestSuite(createStorage: () => Storage) {
     expect(retrievedUser?.id).toBe(user.id);
     expect(retrievedUser?.username).toBe('alice');
 
-    const byUsername = await storage.getUserByUsername('alice');
+    const byUsername = await storage.getUserByUsername('  ALICE  ');
     expect(byUsername?.id).toBe(user.id);
 
     const allUsers = await storage.getUsers();

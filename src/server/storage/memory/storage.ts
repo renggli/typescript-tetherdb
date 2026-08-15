@@ -1,13 +1,14 @@
 import * as crypto from 'node:crypto';
+import { hashPassword, verifySessionToken } from '../../crypto.js';
 import {
+  normalizeUsername,
   validateAppId,
+  validatePassword,
   validateUserId,
   validateUsername,
-} from '../../../shared/sanitize.js';
-import type { ServerLimits } from '../../../shared/types.js';
-import { hashPassword, verifySessionToken } from '../../crypto.js';
+} from '../../validate.js';
 import type { AppStorage } from '../app.js';
-import type { Storage } from '../storage.js';
+import type { Storage, StorageOptions } from '../storage.js';
 import type { UserStorage } from '../user.js';
 import { AppMemoryStorage } from './app.js';
 import { type MemoryUserData, UserMemoryStorage } from './user.js';
@@ -24,10 +25,7 @@ export interface UserState {
   >;
 }
 
-export interface MemoryStorageOptions {
-  limits?: ServerLimits;
-  secret?: string;
-}
+export interface MemoryStorageOptions extends StorageOptions {}
 
 /**
  * In-memory implementation of `Storage`.
@@ -38,10 +36,10 @@ export class MemoryStorage implements Storage {
   readonly rawUsers: Map<string, MemoryUserData> = new Map(); // key = userId
   private usersByUsername: Map<string, string> = new Map(); // username -> userId
   readonly secret: string;
-  readonly limits: ServerLimits;
+  readonly options: MemoryStorageOptions;
 
   constructor(options: MemoryStorageOptions = {}) {
-    this.limits = options.limits ?? {};
+    this.options = options;
     this.secret = options.secret ?? crypto.randomBytes(32).toString('hex');
   }
 
@@ -111,14 +109,15 @@ export class MemoryStorage implements Storage {
     return Array.from(this.apps.values());
   }
 
-  async createUser(username: string, password?: string): Promise<UserStorage> {
+  async createUser(username: string, password: string): Promise<UserStorage> {
     const safeUsername = validateUsername(username);
+    const validPassword = validatePassword(password);
     if (this.usersByUsername.has(safeUsername)) {
       throw new Error(`Username "${safeUsername}" is already registered.`);
     }
 
     const userId = crypto.randomUUID();
-    const passwordHash = password ? await hashPassword(password) : null;
+    const passwordHash = await hashPassword(validPassword);
     const userData: MemoryUserData = {
       id: userId,
       username: safeUsername,
@@ -141,7 +140,8 @@ export class MemoryStorage implements Storage {
   }
 
   async getUserByUsername(username: string): Promise<UserStorage | undefined> {
-    const safeUsername = validateUsername(username);
+    const safeUsername = normalizeUsername(username);
+    if (!safeUsername) return undefined;
     const userId = this.usersByUsername.get(safeUsername);
     if (!userId) return undefined;
     const data = this.rawUsers.get(userId);

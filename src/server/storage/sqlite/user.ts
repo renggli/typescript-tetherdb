@@ -4,6 +4,7 @@ import {
   verifyPasswordHash,
   verifySessionToken,
 } from '../../crypto.js';
+import { normalizePassword, validatePassword } from '../../validate.js';
 import type { UserStorage } from '../user.js';
 import type { SqliteStorage, SqliteUserData } from './storage.js';
 
@@ -26,11 +27,14 @@ export class UserSqliteStorage implements UserStorage {
   async verifyPassword(password: string): Promise<boolean> {
     const user = this.storage.findUserDataById(this.id);
     if (!user?.passwordHash) return false;
-    return verifyPasswordHash(password, user.passwordHash);
+    const normalized = normalizePassword(password);
+    if (!normalized) return false;
+    return verifyPasswordHash(normalized, user.passwordHash);
   }
 
   async changePassword(newPassword: string): Promise<void> {
-    const newHash = await hashPassword(newPassword);
+    const valid = validatePassword(newPassword);
+    const newHash = await hashPassword(valid);
     this.storage.updateUserData(this.id, newHash);
   }
 

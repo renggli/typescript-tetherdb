@@ -155,8 +155,10 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
     // Public list apps endpoint
     const appsRes = await fetch(`${serverUrl}/apps`);
     expect(appsRes.ok).toBe(true);
-    const appsData = (await appsRes.json()) as { apps: string[] };
-    expect(appsData.apps).toContain('chat-app');
+    const appsData = (await appsRes.json()) as {
+      apps: Array<{ id: string; tables: string[] }>;
+    };
+    expect(appsData.apps.map((a) => a.id)).toContain('chat-app');
 
     // Authenticated list tables endpoint
     const tablesRes = await fetch(`${serverUrl}/apps/chat-app/tables`, {

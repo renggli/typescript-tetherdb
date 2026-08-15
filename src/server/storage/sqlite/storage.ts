@@ -3,15 +3,16 @@ import * as fs from 'node:fs';
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
+import { hashPassword, verifySessionToken } from '../../crypto.js';
 import {
+  normalizeUsername,
   validateAppId,
+  validatePassword,
   validateUserId,
   validateUsername,
-} from '../../../shared/sanitize.js';
-import type { ServerLimits } from '../../../shared/types.js';
-import { hashPassword, verifySessionToken } from '../../crypto.js';
+} from '../../validate.js';
 import type { AppStorage } from '../app.js';
-import type { Storage } from '../storage.js';
+import type { Storage, StorageOptions } from '../storage.js';
 import type { UserStorage } from '../user.js';
 import { AppSqliteStorage } from './app.js';
 import { UserSqliteStorage } from './user.js';
@@ -55,11 +56,9 @@ interface AuthDbHandle {
   stmtListUsers: StatementSync;
 }
 
-export interface SqliteStorageOptions {
+export interface SqliteStorageOptions extends StorageOptions {
   baseDir?: string;
   inMemory?: boolean;
-  limits?: ServerLimits;
-  secret?: string;
 }
 
 /**
@@ -68,19 +67,19 @@ export interface SqliteStorageOptions {
 export class SqliteStorage implements Storage {
   readonly baseDir: string;
   readonly inMemory: boolean;
-  readonly limits: ServerLimits;
+  readonly options: SqliteStorageOptions;
   readonly secret: string;
   private appDbs: Map<string, AppDbHandle> = new Map();
   private authHandle: AuthDbHandle | null = null;
 
   constructor(options: SqliteStorageOptions = {}) {
+    this.options = options;
     this.inMemory = Boolean(
       options.inMemory ||
         options.baseDir === ':memory:' ||
         (!options.baseDir && options.inMemory),
     );
     this.baseDir = path.resolve(options.baseDir ?? '.data');
-    this.limits = options.limits ?? {};
     this.secret = options.secret ?? crypto.randomBytes(32).toString('hex');
 
     if (!this.inMemory) {
@@ -342,8 +341,9 @@ export class SqliteStorage implements Storage {
       .map((appId) => new AppSqliteStorage(appId, this));
   }
 
-  async createUser(username: string, password?: string): Promise<UserStorage> {
+  async createUser(username: string, password: string): Promise<UserStorage> {
     const safeUsername = validateUsername(username);
+    const validPassword = validatePassword(password);
     const auth = this.getAuthDb();
 
     const existing = auth.stmtFindByUsername.get(safeUsername);
@@ -352,7 +352,7 @@ export class SqliteStorage implements Storage {
     }
 
     const userId = crypto.randomUUID();
-    const passwordHash = password ? await hashPassword(password) : null;
+    const passwordHash = await hashPassword(validPassword);
     const createdAt = Date.now();
 
     auth.stmtInsertUser.run(userId, safeUsername, passwordHash, createdAt);
@@ -376,7 +376,8 @@ export class SqliteStorage implements Storage {
   }
 
   async getUserByUsername(username: string): Promise<UserStorage | undefined> {
-    const safeUsername = validateUsername(username);
+    const safeUsername = normalizeUsername(username);
+    if (!safeUsername) return undefined;
     const auth = this.getAuthDb();
     const row = auth.stmtFindByUsername.get(safeUsername) as
       | {

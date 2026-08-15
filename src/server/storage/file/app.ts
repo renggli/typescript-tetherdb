@@ -2,16 +2,16 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { shouldOverwrite } from '../../../shared/clock.js';
 import {
-  calculateByteSize,
-  validateRecordId,
-  validateTableName,
-  validateUserId,
-} from '../../../shared/sanitize.js';
-import {
   type ChangeRecord,
   OperationType,
   type StoredRecord,
 } from '../../../shared/types.js';
+import {
+  calculateByteSize,
+  validateRecordId,
+  validateTableName,
+  validateUserId,
+} from '../../validate.js';
 import type { AppStorage } from '../app.js';
 import type { TableStorage } from '../table.js';
 import type { UserStorage } from '../user.js';
@@ -188,10 +188,10 @@ export class AppFileStorage implements AppStorage {
       const safeUserId = validateUserId(user.id);
       const applied: ChangeRecord[] = [];
 
-      const maxRecords = this.storage.limits.maxRecordsPerTable ?? 10000;
+      const maxRecords = this.storage.options.maxRecordsPerTable ?? 10000;
       const maxRecordSize =
-        this.storage.limits.maxRecordSizeBytes ?? 512 * 1024;
-      const maxChangelog = this.storage.limits.maxChangelogEntries ?? 1000;
+        this.storage.options.maxRecordSizeBytes ?? 512 * 1024;
+      const maxChangelog = this.storage.options.maxChangelogEntries ?? 1000;
 
       const meta = await this.readUserMeta(safeUserId);
       const changelog = await this.readUserChangelog(safeUserId);
@@ -201,7 +201,7 @@ export class AppFileStorage implements AppStorage {
 
       for (const change of changes) {
         const tableName = validateTableName(change.table);
-        const recordId = validateRecordId(change.id, tableName, safeUserId);
+        const recordId = validateRecordId(change.id);
 
         if (!registeredTables.has(tableName)) {
           throw new Error(

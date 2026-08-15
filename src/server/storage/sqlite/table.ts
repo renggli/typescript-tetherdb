@@ -1,9 +1,9 @@
-import { validateRecordId, validateUserId } from '../../../shared/sanitize.js';
 import type {
   ChangeRecord,
   RecordSnapshotItem,
   StoredRecord,
 } from '../../../shared/types.js';
+import { validateRecordId, validateUserId } from '../../validate.js';
 import type { TableStorage } from '../table.js';
 import type { UserStorage } from '../user.js';
 import type { AppSqliteStorage } from './app.js';
@@ -44,7 +44,7 @@ export class TableSqliteStorage implements TableStorage {
     id: string,
   ): Promise<StoredRecord | undefined> {
     const safeUserId = validateUserId(user.id);
-    const safeId = validateRecordId(id, this.name, safeUserId);
+    const safeId = validateRecordId(id);
     const handle = this.app.getDbHandle();
 
     const row = handle.stmtGetRecord.get(safeUserId, this.name, safeId) as

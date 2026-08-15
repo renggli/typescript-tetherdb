@@ -8,11 +8,11 @@ import {
 describe('src/server/storage/memory/ (MemoryStorage)', () => {
   it('should enforce maxRecordsPerTable quota in memory', async () => {
     const storage = new MemoryStorage({
-      limits: { maxRecordsPerTable: 2 },
+      maxRecordsPerTable: 2,
     });
     const app = await storage.createApp('quota-app');
     await app.createTable('items');
-    const user = await storage.createUser('u1', 'pass');
+    const user = await storage.createUser('user1', 'pass');
 
     const c1: ChangeRecord = {
       table: 'items',
@@ -48,11 +48,11 @@ describe('src/server/storage/memory/ (MemoryStorage)', () => {
 
   it('should enforce maxRecordSizeBytes limit in memory', async () => {
     const storage = new MemoryStorage({
-      limits: { maxRecordSizeBytes: 50 },
+      maxRecordSizeBytes: 50,
     });
     const app = await storage.createApp('size-app');
     await app.createTable('items');
-    const user = await storage.createUser('u1', 'pass');
+    const user = await storage.createUser('user1', 'pass');
 
     const bigPayload = 'x'.repeat(100);
     await expect(
@@ -73,7 +73,7 @@ describe('src/server/storage/memory/ (MemoryStorage)', () => {
     const storage = new MemoryStorage();
     const app = await storage.createApp('test-app');
     const table = await app.createTable('temp_table');
-    const user = await storage.createUser('u1', 'pass');
+    const user = await storage.createUser('user1', 'pass');
 
     await table.applyChanges(user, [
       {
