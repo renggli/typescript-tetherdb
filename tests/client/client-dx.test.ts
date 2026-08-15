@@ -6,11 +6,11 @@ import {
   SyncStatus,
   TetherAuthClient,
   TetherDB,
-} from '../src/client/index.js';
-import { TetherServer } from '../src/server/server.js';
-import { MemoryStorageAdapter } from '../src/server/storage/memory.js';
+} from '../../src/client/index.js';
+import { TetherServer } from '../../src/server/server.js';
+import { MemoryStorageAdapter } from '../../src/server/storage/memory.js';
 
-describe('Developer Experience & Offline-to-Synced Onboarding', () => {
+describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', () => {
   let server: TetherServer;
   let httpServer: http.Server;
   let serverUrl: string;
@@ -82,14 +82,14 @@ describe('Developer Experience & Offline-to-Synced Onboarding', () => {
       username: 'dxuser',
       password: 'password123',
     });
-    expect(regResult.user.username).toBe('dxuser');
+    expect(regResult.username).toBe('dxuser');
     expect(regResult.token).toBeDefined();
 
     const loginResult = await authClient.login({
       username: 'dxuser',
       password: 'password123',
     });
-    expect(loginResult.user.id).toBe(regResult.user.id);
+    expect(loginResult.userId).toBe(regResult.userId);
   });
 
   it('should seamlessly transition from local-only offline storage to live sync upon registration', async () => {
@@ -124,7 +124,7 @@ describe('Developer Experience & Offline-to-Synced Onboarding', () => {
       WebSocketClass: WebSocket,
     });
 
-    expect(authResult.user.username).toBe('onboard_user');
+    expect(authResult.username).toBe('onboard_user');
 
     // Wait for sync to establish and outbox to drain
     await delay(300);
@@ -138,7 +138,7 @@ describe('Developer Experience & Offline-to-Synced Onboarding', () => {
 
     // Server storage should now have the 2 records
     const serverRecords = await server.storageAdapter.getAllRecords(
-      authResult.user.id,
+      authResult.userId,
       'todos',
     );
     expect(serverRecords).toHaveLength(2);

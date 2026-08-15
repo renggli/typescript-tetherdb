@@ -5,5 +5,13 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     setupFiles: ['tests/setup.ts'],
+    server: {
+      deps: {
+        external: ['node:sqlite'],
+      },
+    },
+  },
+  ssr: {
+    external: ['node:sqlite'],
   },
 });

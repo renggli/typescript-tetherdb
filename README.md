@@ -132,7 +132,9 @@ The standard server provides discovery endpoints for inspecting active applicati
 - **`tetherdb/server`**:
   - `startServer`: Zero-config server launcher with automatic port assignment and clean shutdown.
   - `TetherServer`: Unified HTTP and WebSocket server with discovery endpoints.
-  - `AuthManager`: User registration, credential verification, and token generation.
+  - `AuthAdapter`: Pluggable authentication interface for custom identity providers.
+  - `MemoryAuthAdapter`: In-memory auth adapter for fast testing and ephemeral workloads.
+  - `FileAuthAdapter`: Filesystem-persisted auth adapter storing user credentials and secret keys.
   - `SyncHub`: WebSocket connection manager with app- and user-level change routing and broadcasting.
   - `FileStorageAdapter`: Multi-app sharded filesystem storage (`<baseDir>/<appId>/<shard>/<userId>/stores/`).
   - `MemoryStorageAdapter`: In-memory storage adapter for testing and ephemeral workloads.

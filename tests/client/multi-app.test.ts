@@ -3,12 +3,12 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket as NodeWebSocket } from 'ws';
-import { TetherDB } from '../src/client/db.js';
-import { startServer, TetherServer } from '../src/server/server.js';
-import { MemoryStorageAdapter } from '../src/server/storage/memory.js';
-import { OperationType } from '../src/shared/types.js';
+import { TetherDB } from '../../src/client/db.js';
+import { startServer, TetherServer } from '../../src/server/server.js';
+import { MemoryStorageAdapter } from '../../src/server/storage/memory.js';
+import { OperationType } from '../../src/shared/types.js';
 
-describe('Multi-Application Support & Server Discovery', () => {
+describe('Multi-Application Support & Server Discovery (src/client/)', () => {
   let tmpDir: string;
   let server: TetherServer;
   let port: number;
@@ -104,17 +104,17 @@ describe('Multi-Application Support & Server Discovery', () => {
     expect(noteRecords[0]?.title).toBe('First Note Item');
 
     // 4. Verify server discovery APIs
-    const apps = await server.storageAdapter.listApps(auth.user.id);
+    const apps = await server.storageAdapter.listApps(auth.userId);
     expect(apps).toEqual(['notes-app', 'todo-app']);
 
     const todoStores = await server.storageAdapter.listStores(
-      auth.user.id,
+      auth.userId,
       'todo-app',
     );
     expect(todoStores).toEqual(['items']);
 
     const noteStores = await server.storageAdapter.listStores(
-      auth.user.id,
+      auth.userId,
       'notes-app',
     );
     expect(noteStores).toEqual(['items']);

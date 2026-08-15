@@ -3,15 +3,15 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
-import { TetherDB } from '../src/client/db.js';
-import { TetherServer } from '../src/server/server.js';
-import { OperationType } from '../src/shared/types.js';
+import { TetherDB } from '../../src/client/db.js';
+import { TetherServer } from '../../src/server/server.js';
+import { OperationType } from '../../src/shared/types.js';
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-describe('End-to-End WebSocket Sync', () => {
+describe('End-to-End WebSocket Sync (src/client/)', () => {
   let server: TetherServer;
   let wsUrl: string;
   let tmpDir: string;
@@ -60,7 +60,7 @@ describe('End-to-End WebSocket Sync', () => {
     // Wait for sync to flush
     await delay(200);
 
-    const session = server.auth.verifyToken(userToken);
+    const session = await server.auth.verifyToken(userToken);
     const serverRecords = await server.storageAdapter.getAllRecords(
       session?.userId ?? '',
     );
@@ -269,7 +269,7 @@ describe('End-to-End WebSocket Sync', () => {
 
   it('should deliver snapshot and update local database in batch when diff is large', async () => {
     // Populate 60 changes in server storage for user
-    const session = server.auth.verifyToken(userToken);
+    const session = await server.auth.verifyToken(userToken);
     const userId = session?.userId ?? '';
 
     const changes = [];

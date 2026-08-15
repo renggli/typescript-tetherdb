@@ -1,14 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
   calculateByteSize,
+  MAX_USERNAME_LENGTH,
+  MIN_USERNAME_LENGTH,
+  normalizeUsername,
   validateIdentifier,
   validateRecordId,
   validateStoreName,
   validateUserId,
   validateUsername,
-} from '../src/shared/sanitize.js';
+} from '../../src/shared/sanitize.js';
 
-describe('Sanitization and Security Validators', () => {
+describe('src/shared/sanitize.ts', () => {
   describe('validateUserId', () => {
     it('should accept valid user identifiers', () => {
       expect(validateUserId('213872ac-54f2-4cd6-924e-204050bf7396')).toBe(
@@ -90,16 +93,59 @@ describe('Sanitization and Security Validators', () => {
     });
   });
 
-  describe('validateUsername', () => {
-    it('should accept valid usernames and trim whitespace', () => {
-      expect(validateUsername(' alice ')).toBe('alice');
-      expect(validateUsername('john.doe-99_x')).toBe('john.doe-99_x');
+  describe('normalizeUsername', () => {
+    it('should trim whitespace and convert to lowercase', () => {
+      expect(normalizeUsername('  Alice  ')).toBe('alice');
+      expect(normalizeUsername('Bob_Builder-99.X')).toBe('bob_builder-99.x');
     });
 
-    it('should reject reserved or invalid usernames', () => {
-      expect(() => validateUsername('a')).toThrow('Invalid username');
+    it('should safely handle non-string or empty inputs', () => {
+      expect(normalizeUsername('')).toBe('');
+      // @ts-expect-error Testing runtime non-string handling
+      expect(normalizeUsername(null)).toBe('');
+      // @ts-expect-error Testing runtime non-string handling
+      expect(normalizeUsername(undefined)).toBe('');
+    });
+  });
+
+  describe('validateUsername', () => {
+    it('should accept valid usernames, normalize to lowercase, and trim whitespace', () => {
+      expect(validateUsername('  Alice  ')).toBe('alice');
+      expect(validateUsername('John.Doe-99_x')).toBe('john.doe-99_x');
+      expect(validateUsername('a'.repeat(MIN_USERNAME_LENGTH))).toBe('aa');
+      expect(validateUsername('a'.repeat(MAX_USERNAME_LENGTH))).toBe(
+        'a'.repeat(64),
+      );
+    });
+
+    it('should reject usernames outside the min/max length boundaries', () => {
+      expect(() => validateUsername('a')).toThrow('between 2 and 64');
+      expect(() => validateUsername('')).toThrow('between 2 and 64');
+      expect(() =>
+        validateUsername('a'.repeat(MAX_USERNAME_LENGTH + 1)),
+      ).toThrow('between 2 and 64');
+    });
+
+    it('should reject non-string username inputs', () => {
+      // @ts-expect-error Testing runtime non-string validation
+      expect(() => validateUsername(null)).toThrow('must be a string');
+      // @ts-expect-error Testing runtime non-string validation
+      expect(() => validateUsername(undefined)).toThrow('must be a string');
+      // @ts-expect-error Testing runtime non-string validation
+      expect(() => validateUsername(12345)).toThrow('must be a string');
+    });
+
+    it('should reject reserved or invalid characters in usernames', () => {
       expect(() => validateUsername('user space')).toThrow('Invalid username');
+      expect(() => validateUsername('user@domain.com')).toThrow(
+        'Invalid username',
+      );
+      expect(() => validateUsername('../traversal')).toThrow(
+        'Invalid username',
+      );
       expect(() => validateUsername('__proto__')).toThrow('reserved keyword');
+      expect(() => validateUsername('PROTOTYPE')).toThrow('reserved keyword');
+      expect(() => validateUsername('Constructor')).toThrow('reserved keyword');
     });
   });
 

@@ -122,8 +122,7 @@ function logEvent(category: LogCategory, tag: string, message: string): void {
  * Updates the user badge text.
  */
 function updateUserUI(): void {
-  currentUsernameEl.textContent =
-    currentUser?.user?.username ?? 'Offline Guest';
+  currentUsernameEl.textContent = currentUser?.username ?? 'Offline Guest';
 }
 
 /**
@@ -377,7 +376,7 @@ async function init(): Promise<void> {
     if (status === SyncStatus.Error && !isReauthenticating) {
       isReauthenticating = true;
       localStorage.removeItem('tether_todo_user');
-      const wasDemo = currentUser?.user?.username === 'demo' || !currentUser;
+      const wasDemo = currentUser?.username === 'demo' || !currentUser;
       currentUser = null;
       updateUserUI();
 

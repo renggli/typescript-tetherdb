@@ -2,14 +2,40 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { StorageAdapter } from '../src/server/storage/adapter.js';
-import { FileStorageAdapter } from '../src/server/storage/file.js';
-import { MemoryStorageAdapter } from '../src/server/storage/memory.js';
-import { type ChangeRecord, OperationType } from '../src/shared/types.js';
+import type { StorageAdapter } from '../../../src/server/storage/adapter.js';
+import { FileStorageAdapter } from '../../../src/server/storage/file.js';
+import { MemoryStorageAdapter } from '../../../src/server/storage/memory.js';
+import { SqliteStorageAdapter } from '../../../src/server/storage/sqlite.js';
+import { type ChangeRecord, OperationType } from '../../../src/shared/types.js';
 
-describe('Storage Adapters', () => {
+describe('Storage Adapters (src/server/storage/)', () => {
   describe('MemoryStorageAdapter', () => {
     runStorageTestSuite(() => new MemoryStorageAdapter());
+  });
+
+  describe('SqliteStorageAdapter (in-memory)', () => {
+    runStorageTestSuite(() => new SqliteStorageAdapter({ inMemory: true }));
+  });
+
+  describe('SqliteStorageAdapter (file-based)', () => {
+    let tmpDir: string;
+    let adapter: SqliteStorageAdapter;
+
+    beforeEach(async () => {
+      tmpDir = path.join(
+        os.tmpdir(),
+        `tetherdb-sqlite-suite-${Math.random().toString(36).substring(2, 10)}`,
+      );
+      await fs.mkdir(tmpDir, { recursive: true });
+      adapter = new SqliteStorageAdapter({ baseDir: tmpDir });
+    });
+
+    afterEach(async () => {
+      await adapter.close();
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    });
+
+    runStorageTestSuite(() => adapter);
   });
 
   describe('FileStorageAdapter', () => {

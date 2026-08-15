@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { TetherDB } from '../src/client/db.js';
-import { OperationType } from '../src/shared/types.js';
+import { TetherDB } from '../../src/client/db.js';
+import { OperationType } from '../../src/shared/types.js';
 
-describe('TetherDB local operations', () => {
+describe('TetherDB local operations (src/client/)', () => {
   let db: TetherDB;
 
   beforeEach(() => {

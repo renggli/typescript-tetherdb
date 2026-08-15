@@ -11,7 +11,7 @@ import {
   type ServerMessage,
   ServerMessageType,
 } from '../shared/types.js';
-import type { AuthManager } from './auth.js';
+import type { AuthAdapter } from './auth/adapter.js';
 import type { StorageAdapter } from './storage/adapter.js';
 
 interface ActiveClient {
@@ -27,7 +27,7 @@ interface ActiveClient {
  */
 export class SyncHub {
   private storage: StorageAdapter;
-  private authManager: AuthManager;
+  private authAdapter: AuthAdapter;
   private limits: ServerLimits;
   private userClients: Map<string, Set<ActiveClient>> = new Map(); // key = `${appId}:${userId}`
   private wsToClient: Map<WebSocket, ActiveClient> = new Map();
@@ -36,16 +36,16 @@ export class SyncHub {
    * Initializes a new SyncHub instance.
    *
    * @param storage - Pluggable backend storage adapter.
-   * @param authManager - User authentication and token verification manager.
+   * @param auth - User authentication and token verification adapter.
    * @param limits - Optional server quota and payload limits.
    */
   constructor(
     storage: StorageAdapter,
-    authManager: AuthManager,
+    auth: AuthAdapter,
     limits: ServerLimits = {},
   ) {
     this.storage = storage;
-    this.authManager = authManager;
+    this.authAdapter = auth;
     this.limits = limits;
   }
 
@@ -138,7 +138,7 @@ export class SyncHub {
           return;
         }
 
-        const session = this.authManager.verifyToken(msg.token);
+        const session = await this.authAdapter.verifyToken(msg.token);
         if (!session) {
           this.send(ws, {
             type: ServerMessageType.AuthError,

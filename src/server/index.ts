@@ -4,7 +4,7 @@
  * @module tetherdb/server
  */
 
-export * from './auth.js';
+export * from './auth/index.js';
 export * from './server.js';
 export * from './storage/index.js';
 export * from './sync-hub.js';

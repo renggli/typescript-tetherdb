@@ -2,13 +2,10 @@
  * Result returned upon successful user registration or login.
  */
 export interface AuthResult {
-  /** Authenticated user details. */
-  user: {
-    /** Unique user identifier (UUID). */
-    id: string;
-    /** User's unique username. */
-    username: string;
-  };
+  /** Unique user identifier (UUID). */
+  userId: string;
+  /** User's unique username. */
+  username: string;
   /** Signed session authentication token for sync and API calls. */
   token: string;
 }

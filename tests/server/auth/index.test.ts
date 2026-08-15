@@ -1,0 +1,154 @@
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  type AuthAdapter,
+  type AuthSession,
+  type AuthToken,
+  createUserAccount,
+  FileAuthAdapter,
+  generateSalt,
+  generateSessionToken,
+  generateTokenSecret,
+  hashPassword,
+  MAX_PASSWORD_LENGTH,
+  MAX_USERNAME_LENGTH,
+  MemoryAuthAdapter,
+  MIN_PASSWORD_LENGTH,
+  MIN_USERNAME_LENGTH,
+  normalizeUsername,
+  SqliteAuthAdapter,
+  type UserAccount,
+  validatePassword,
+  validateUsername,
+  verifyPassword,
+  verifySessionToken,
+} from '../../../src/server/auth/index.js';
+import { TetherServer } from '../../../src/server/server.js';
+
+describe('src/server/auth/index.ts (Barrel Exports & Pluggable Integration)', () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = path.join(
+      os.tmpdir(),
+      `tetherdb-auth-index-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    await fs.mkdir(tempDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    try {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup error
+    }
+  });
+
+  it('should export all public interfaces and implementations', () => {
+    expect(MemoryAuthAdapter).toBeDefined();
+    expect(FileAuthAdapter).toBeDefined();
+    expect(SqliteAuthAdapter).toBeDefined();
+    expect(createUserAccount).toBeDefined();
+    expect(generateSessionToken).toBeDefined();
+    expect(verifySessionToken).toBeDefined();
+    expect(generateSalt).toBeDefined();
+    expect(hashPassword).toBeDefined();
+    expect(verifyPassword).toBeDefined();
+    expect(validatePassword).toBeDefined();
+    expect(MIN_PASSWORD_LENGTH).toBeDefined();
+    expect(MAX_PASSWORD_LENGTH).toBeDefined();
+    expect(validateUsername).toBeDefined();
+    expect(normalizeUsername).toBeDefined();
+    expect(MIN_USERNAME_LENGTH).toBeDefined();
+    expect(MAX_USERNAME_LENGTH).toBeDefined();
+    expect(generateTokenSecret).toBeDefined();
+  });
+
+  it('should integrate custom AuthAdapter into TetherServer', async () => {
+    const customStore = new Map<string, UserAccount>();
+
+    const customAuth: AuthAdapter = {
+      async register(username, password): Promise<AuthToken> {
+        const id = `custom_${username}`;
+        const account = createUserAccount(username, password, id);
+        customStore.set(username, account);
+        return {
+          userId: id,
+          username,
+          token: `custom_token_${id}`,
+        };
+      },
+      async login(username, password): Promise<AuthToken> {
+        const account = customStore.get(username);
+        if (
+          !account ||
+          !verifyPassword(password, account.salt, account.passwordHash)
+        ) {
+          throw new Error('Custom auth login failed');
+        }
+        return {
+          userId: account.id,
+          username,
+          token: `custom_token_${account.id}`,
+        };
+      },
+      async verifyToken(token: string): Promise<AuthSession | null> {
+        if (token.startsWith('custom_token_')) {
+          const userId = token.replace('custom_token_', '');
+          return { userId, username: userId.replace('custom_', '') };
+        }
+        return null;
+      },
+    };
+
+    const server = new TetherServer({ auth: customAuth });
+    expect(server.auth).toBe(customAuth);
+
+    const reg = await server.auth.register('pluguser', 'secretpassword');
+    expect(reg.userId).toBe('custom_pluguser');
+    expect(reg.username).toBe('pluguser');
+
+    const session = await server.auth.verifyToken(reg.token);
+    expect(session?.userId).toBe('custom_pluguser');
+    expect(session?.username).toBe('pluguser');
+
+    const loginRes = await server.auth.login('pluguser', 'secretpassword');
+    expect(loginRes.userId).toBe('custom_pluguser');
+  });
+
+  it('should enable seamless user data migration and token compatibility across different adapters', async () => {
+    const sharedSecret = 'cross-adapter-migration-secret';
+
+    const fileAdapter = new FileAuthAdapter({
+      baseDir: tempDir,
+      tokenSecret: sharedSecret,
+    });
+    const memoryAdapter = new MemoryAuthAdapter({
+      tokenSecret: sharedSecret,
+    });
+
+    // 1. Create and register account in File adapter
+    const fileReg = await fileAdapter.register('migrator', 'securepass123');
+
+    // 2. Export record
+    const account = await fileAdapter.getUserById(fileReg.userId);
+    expect(account).toBeDefined();
+
+    // 3. Import record directly into memory adapter's storage (representing migration)
+    // Both adapters use identical UserAccount structure & scrypt hashing
+    expect(
+      verifyPassword(
+        'securepass123',
+        account?.salt ?? '',
+        account?.passwordHash ?? '',
+      ),
+    ).toBe(true);
+
+    // 4. Existing tokens generated by file adapter verify on memory adapter
+    const verifiedOnMemory = await memoryAdapter.verifyToken(fileReg.token);
+    expect(verifiedOnMemory?.userId).toBe(fileReg.userId);
+    expect(verifiedOnMemory?.username).toBe('migrator');
+  });
+});

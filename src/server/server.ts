@@ -1,9 +1,10 @@
 import * as http from 'node:http';
-import * as path from 'node:path';
 import { WebSocketServer } from 'ws';
 import { validateAppId } from '../shared/sanitize.js';
 import type { ServerLimits } from '../shared/types.js';
-import { AuthManager, type AuthManagerOptions } from './auth.js';
+import type { AuthAdapter } from './auth/adapter.js';
+import { FileAuthAdapter } from './auth/file.js';
+import { MemoryAuthAdapter } from './auth/memory.js';
 import type { StorageAdapter } from './storage/adapter.js';
 import { FileStorageAdapter } from './storage/file.js';
 import { MemoryStorageAdapter } from './storage/memory.js';
@@ -15,10 +16,10 @@ import { SyncHub } from './sync-hub.js';
 export interface TetherServerOptions {
   /** Custom storage adapter instance. */
   storage?: StorageAdapter;
-  /** Filesystem root directory for per-user directories (used if `storage` is omitted). */
-  storageDir?: string;
-  /** Custom AuthManager instance or configuration options. */
-  auth?: AuthManager | AuthManagerOptions;
+  /** Filesystem root directory for storage & auth (e.g. '.data'). */
+  baseDir?: string;
+  /** Custom AuthAdapter instance. */
+  auth?: AuthAdapter;
   /** Server-side table and quota limits. */
   limits?: ServerLimits;
   /** Path for WebSocket upgrade requests (defaults to '/sync'). */
@@ -57,7 +58,7 @@ export interface RunningServer {
  */
 export class TetherServer {
   private storage: StorageAdapter;
-  private authManager: AuthManager;
+  private authAdapter: AuthAdapter;
   private syncHub: SyncHub;
   private wss: WebSocketServer | null = null;
   private httpServer: http.Server | null = null;
@@ -71,38 +72,34 @@ export class TetherServer {
   constructor(options: TetherServerOptions = {}) {
     if (options.storage) {
       this.storage = options.storage;
-    } else if (options.storageDir) {
+    } else if (options.baseDir) {
       this.storage = new FileStorageAdapter({
-        baseDir: options.storageDir,
+        baseDir: options.baseDir,
         limits: options.limits,
       });
     } else {
       this.storage = new MemoryStorageAdapter({ limits: options.limits });
     }
 
-    if (options.auth instanceof AuthManager) {
-      this.authManager = options.auth;
+    if (options.auth) {
+      this.authAdapter = options.auth;
+    } else if (options.baseDir) {
+      this.authAdapter = new FileAuthAdapter({
+        baseDir: options.baseDir,
+      });
     } else {
-      const authOpts: AuthManagerOptions = { ...options.auth };
-      if (options.storageDir) {
-        authOpts.usersFilePath =
-          authOpts.usersFilePath ?? path.join(options.storageDir, 'users.json');
-        authOpts.secretFilePath =
-          authOpts.secretFilePath ??
-          path.join(options.storageDir, 'secret.key');
-      }
-      this.authManager = new AuthManager(authOpts);
+      this.authAdapter = new MemoryAuthAdapter();
     }
 
-    this.syncHub = new SyncHub(this.storage, this.authManager, options.limits);
+    this.syncHub = new SyncHub(this.storage, this.authAdapter, options.limits);
     this.wsPath = options.wsPath ?? '/sync';
   }
 
   /**
-   * The authentication manager instance.
+   * The authentication adapter instance.
    */
-  get auth(): AuthManager {
-    return this.authManager;
+  get auth(): AuthAdapter {
+    return this.authAdapter;
   }
 
   /**
@@ -227,7 +224,7 @@ export class TetherServer {
     let userId: string | undefined;
     if (authHeader?.startsWith('Bearer ')) {
       const token = authHeader.slice(7).trim();
-      const session = this.authManager.verifyToken(token);
+      const session = await this.authAdapter.verifyToken(token);
       if (session) userId = session.userId;
     }
     const apps = await this.storage.listApps(userId);
@@ -245,7 +242,7 @@ export class TetherServer {
       return;
     }
     const token = authHeader.slice(7).trim();
-    const session = this.authManager.verifyToken(token);
+    const session = await this.authAdapter.verifyToken(token);
     if (!session) {
       this._sendJson(res, 401, { error: 'Invalid or expired token' });
       return;
@@ -277,7 +274,7 @@ export class TetherServer {
         });
         return;
       }
-      const result = await this.authManager.register(
+      const result = await this.authAdapter.register(
         body.username,
         body.password,
       );
@@ -304,7 +301,7 @@ export class TetherServer {
         });
         return;
       }
-      const result = await this.authManager.login(body.username, body.password);
+      const result = await this.authAdapter.login(body.username, body.password);
       this._sendJson(res, 200, result);
     } catch (err) {
       const message =
@@ -352,7 +349,9 @@ export class TetherServer {
    * @returns A promise resolving to the running `http.Server`.
    */
   async listen(port: number, host = '0.0.0.0'): Promise<http.Server> {
-    await this.authManager.init();
+    if (this.authAdapter.init) {
+      await this.authAdapter.init();
+    }
 
     const server = http.createServer(async (req, res) => {
       const handled = await this.handleHttpRequest(req, res);
@@ -388,6 +387,9 @@ export class TetherServer {
     }
     if (this.storage.close) {
       await this.storage.close();
+    }
+    if (this.authAdapter.close) {
+      await this.authAdapter.close();
     }
   }
 }

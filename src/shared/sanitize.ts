@@ -166,29 +166,57 @@ export function validateRecordId(
   return id;
 }
 
+/** Minimum allowed username character length. */
+export const MIN_USERNAME_LENGTH = 2;
+
+/** Maximum allowed username character length. */
+export const MAX_USERNAME_LENGTH = 64;
+
 /**
- * Validates a username for account creation or authentication.
+ * Normalizes a username by trimming whitespace and converting to lowercase.
+ *
+ * @param username - The raw username string.
+ * @returns The normalized username (lowercase and trimmed).
+ */
+export function normalizeUsername(username: string): string {
+  return typeof username === 'string' ? username.trim().toLowerCase() : '';
+}
+
+/**
+ * Validates and normalizes a username for account creation or authentication.
  *
  * @param username - The username to validate.
- * @returns The validated trimmed username.
- * @throws Error if the username is invalid or contains forbidden characters.
+ * @returns The validated and normalized username (trimmed and lowercase).
+ * @throws Error if the username is invalid, out of length bounds, or contains forbidden characters.
  */
 export function validateUsername(username: string): string {
-  const trimmed = typeof username === 'string' ? username.trim() : '';
-  if (!SAFE_USERNAME_REGEX.test(trimmed)) {
+  if (typeof username !== 'string') {
     throw new Error(
-      `Invalid username: "${username}". Usernames must be 2-64 characters containing letters, numbers, hyphens, underscores, or dots.`,
+      `Username must be a string between ${MIN_USERNAME_LENGTH} and ${MAX_USERNAME_LENGTH} characters long.`,
     );
   }
-  const lower = trimmed.toLowerCase();
+  const normalized = normalizeUsername(username);
   if (
-    lower === '__proto__' ||
-    lower === 'prototype' ||
-    lower === 'constructor'
+    normalized.length < MIN_USERNAME_LENGTH ||
+    normalized.length > MAX_USERNAME_LENGTH
+  ) {
+    throw new Error(
+      `Username must be between ${MIN_USERNAME_LENGTH} and ${MAX_USERNAME_LENGTH} characters long.`,
+    );
+  }
+  if (!SAFE_USERNAME_REGEX.test(normalized)) {
+    throw new Error(
+      `Invalid username: "${username}". Usernames must contain only alphanumeric characters, hyphens, underscores, or dots.`,
+    );
+  }
+  if (
+    normalized === '__proto__' ||
+    normalized === 'prototype' ||
+    normalized === 'constructor'
   ) {
     throw new Error(`Username "${username}" is a reserved keyword.`);
   }
-  return trimmed;
+  return normalized;
 }
 
 /**

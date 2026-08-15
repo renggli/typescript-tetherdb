@@ -7,3 +7,4 @@
 export * from './adapter.js';
 export * from './file.js';
 export * from './memory.js';
+export * from './sqlite.js';
