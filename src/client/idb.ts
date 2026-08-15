@@ -225,14 +225,16 @@ export class IDBManager {
   }
 
   /**
-   * Retrieves all non-deleted records from a specified table.
+   * Retrieves stored records from a specified table.
    *
    * @typeParam T - Data payload type.
    * @param storeName - Table/store name.
-   * @returns Array of active stored records with metadata.
+   * @param includeDeleted - Whether to include tombstone deleted records (defaults to `false`).
+   * @returns Array of stored records with metadata.
    */
   async getAllRecords<T = unknown>(
     storeName: string,
+    includeDeleted = false,
   ): Promise<StoredRecord<T>[]> {
     await this.ensureStore(storeName);
     const db = await this.getDB();
@@ -242,7 +244,7 @@ export class IDBManager {
       const req = store.getAll();
       req.onsuccess = () => {
         const results: StoredRecord<T>[] = req.result ?? [];
-        resolve(results.filter((r) => !r.deleted));
+        resolve(includeDeleted ? results : results.filter((r) => !r.deleted));
       };
       req.onerror = () => reject(req.error);
     });

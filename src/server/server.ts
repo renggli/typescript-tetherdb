@@ -215,12 +215,25 @@ export class BeamedServer {
     return false;
   }
 
-  private readJsonBody<T = Record<string, unknown>>(
+  private readJsonBody<T = unknown>(
     req: http.IncomingMessage,
+    maxBytes = 1024 * 1024,
   ): Promise<T> {
     return new Promise((resolve, reject) => {
       let data = '';
-      req.on('data', (chunk) => (data += chunk));
+      let bytes = 0;
+
+      req.on('data', (chunk: Buffer | string) => {
+        bytes +=
+          typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length;
+        if (bytes > maxBytes) {
+          req.destroy();
+          reject(new Error('Request body exceeds maximum size limit'));
+          return;
+        }
+        data += chunk;
+      });
+
       req.on('end', () => {
         try {
           resolve((data ? JSON.parse(data) : {}) as T);
@@ -228,6 +241,7 @@ export class BeamedServer {
           reject(new Error('Invalid JSON body'));
         }
       });
+
       req.on('error', reject);
     });
   }

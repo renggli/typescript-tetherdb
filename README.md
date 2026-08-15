@@ -5,11 +5,13 @@
 ## Features
 
 - **Offline-First & Local-First**: Operations are applied to IndexedDB immediately, queued in an outbox, and transparently synced in the background.
+- **Batch-by-Default Architecture**: High-throughput atomic mutations (`putAll`, `deleteAll`, `getAll`) and coalesced WebSocket transmission.
 - **Client-First Synchronization**: On first load or cache-miss, the client receives the complete dataset snapshot. On reconnect, it catches up with delta diffs.
+- **Adaptive Snapshot Delivery & Compaction**: Compacts changelog history and automatically falls back to full snapshots when changelog windows are exceeded.
 - **Last-Write-Wins (LWW) Conflict Resolution**: Monotonic logical clocks and deterministic tie-breaking.
 - **Real-Time Broadcast**: Server broadcasts incoming changes in real-time to all other active client instances belonging to the same user.
-- **Pluggable & Per-User File Storage**: Includes `MemoryStorageAdapter` for zero-dependency testing and `FileStorageAdapter` for isolated per-user filesystem directories.
-- **Simple, Secure Auth**: Built-in account registration, password hashing (scrypt), and signed tokens.
+- **Sharded & Secure File Storage**: Persists data per user in sharded directories (`<baseDir>/<shard>/<userId>/stores/`) with path confinement and injection defenses.
+- **Simple, Secure Auth**: Built-in account registration, password hashing (scrypt with salt), and HMAC-signed tokens.
 - **Modern Subpath Exports**: Import cleanly via `beameddb/client`, `beameddb/server`, and `beameddb/shared`.
 
 ---
@@ -46,7 +48,7 @@ console.log("BeamedDB server running at http://localhost:8080");
 const response = await fetch("http://localhost:8080/auth/register", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ username: "alice", password: "mypassword" })
+  body: JSON.stringify({ username: "alice", password: "mypassword" }),
 });
 const { user, token } = await response.json();
 ```
@@ -66,33 +68,42 @@ const db = new BeamedClientDB({
   stores: ["todos"],
   sync: {
     url: "ws://localhost:8080/sync",
-    token: token // Auth token from registration/login
-  }
+    token: token, // Auth token from registration/login
+  },
 });
 
 const todos = db.table<Todo>("todos");
 
-// Reactive subscription to local & remote changes (receives a list of TableChangeEvent)
+// Reactive subscription to local & remote changes (always receives a list of TableChangeEvent)
 const unsubscribe = todos.subscribe((events) => {
   for (const { op, id, data, isRemote } of events) {
     console.log(`Change (${op}) on ${id}, isRemote: ${isRemote}:`, data);
   }
 });
 
-// Put an item (saved locally in IndexedDB and synced to server)
+// Single put
 await todos.put("task-1", {
   title: "Build awesome app",
-  completed: false
+  completed: false,
 });
+
+// Bulk put (atomic IDB transaction & single sync batch)
+await todos.putAll([
+  { id: "task-2", data: { title: "Write tests", completed: false } },
+  { id: "task-3", data: { title: "Deploy", completed: false } },
+]);
 
 // Read an item
 const task = await todos.get("task-1");
 
+// Read filtered items
+const subset = await todos.getAll(["task-1", "task-2"]);
+
 // Read all items
 const allTasks = await todos.getAll();
 
-// Delete an item
-await todos.delete("task-1");
+// Bulk delete (atomic IDB transaction & single sync batch)
+await todos.deleteAll(["task-1", "task-2"]);
 ```
 
 ---
@@ -101,18 +112,19 @@ await todos.delete("task-1");
 
 - **`beameddb/client`**:
   - `BeamedClientDB`: Main database client.
-  - `Table`: Typed table wrapper around IndexedDB object stores.
-  - `BeamedSyncClient`: Real-time WebSocket sync manager.
+  - `Table`: Typed table wrapper around IndexedDB object stores supporting single and bulk CRUD.
+  - `BeamedSyncClient`: Real-time WebSocket sync manager with debounced outbox draining.
   - `IDBManager`: IndexedDB layer with outbox and metadata stores.
 - **`beameddb/server`**:
   - `BeamedServer`: Unified HTTP and WebSocket server.
   - `AuthManager`: User registration, credential verification, and token generation.
   - `SyncHub`: WebSocket connection manager with user-level change routing and broadcasting.
-  - `FileStorageAdapter`: Persists data per user in subdirectories (`<baseDir>/<userId>/stores/`).
-  - `MemoryStorageAdapter`: In-memory storage adapter.
+  - `FileStorageAdapter`: Persists data per user in sharded subdirectories (`<baseDir>/<shard>/<userId>/stores/`).
+  - `MemoryStorageAdapter`: In-memory storage adapter for testing and ephemeral workloads.
   - `StorageAdapter`: Pluggable storage adapter interface.
 - **`beameddb/shared`**:
-  - Shared types (`ChangeRecord`, `StoredRecord`, `ClientMessage`, `ServerMessage`).
+  - Shared types (`ChangeRecord`, `StoredRecord`, `ClientMessage`, `ServerMessage`, `ServerLimits`).
+  - Security validators (`validateUserId`, `validateStoreName`, `validateRecordId`, `validateUsername`).
   - Clock utilities (`shouldOverwrite`, `generateClientId`).
 
 ---
@@ -147,7 +159,3 @@ npm run typecheck
 # Build bundle
 npm run build
 ```
-
-## License
-
-MIT

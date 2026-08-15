@@ -55,6 +55,11 @@ describe('BeamedClientDB local operations', () => {
   it('should perform atomic bulk operations (putAll, deleteAll, getAll with ids)', async () => {
     const todos = db.table<{ title: string }>('todos');
 
+    // Empty operations handle gracefully
+    expect(await todos.putAll([])).toEqual([]);
+    expect(await todos.deleteAll([])).toBe(0);
+    expect(await todos.getAll([])).toEqual([]);
+
     // Bulk put
     const items = [
       { id: 'b1', data: { title: 'Bulk 1' } },
@@ -76,6 +81,39 @@ describe('BeamedClientDB local operations', () => {
     const remaining = await todos.getAll();
     expect(remaining).toHaveLength(1);
     expect(remaining[0].title).toBe('Bulk 3');
+  });
+
+  it('should retrieve records with full metadata (version, timestamp, deleted)', async () => {
+    const todos = db.table<{ title: string }>('todos');
+    await todos.put('m1', { title: 'Meta 1' });
+    await todos.put('m1', { title: 'Meta 1 v2' });
+
+    const rec = await todos.getWithMetadata('m1');
+    expect(rec).toBeDefined();
+    expect(rec?.version).toBe(2);
+    expect(rec?.deleted).toBe(false);
+    expect(rec?.data.title).toBe('Meta 1 v2');
+
+    await todos.delete('m1');
+    const recDeleted = await todos.getWithMetadata('m1');
+    expect(recDeleted?.deleted).toBe(true);
+    expect(recDeleted?.version).toBe(3);
+
+    const allWithMeta = await todos.getAllWithMetadata();
+    expect(allWithMeta).toHaveLength(1);
+  });
+
+  it('should store and retrieve internal metadata', async () => {
+    expect(await db.idbManager.getMeta('nonexistent')).toBeUndefined();
+    await db.idbManager.setMeta('seq', 42);
+    expect(await db.idbManager.getMeta('seq')).toBe(42);
+  });
+
+  it('should dynamically create new object stores on demand', async () => {
+    const dynamicTable = db.table<{ content: string }>('dynamic_store');
+    await dynamicTable.put('d1', { content: 'Dynamic content' });
+    const res = await dynamicTable.get('d1');
+    expect(res?.content).toBe('Dynamic content');
   });
 
   it('should record local changes into outbox in batch', async () => {

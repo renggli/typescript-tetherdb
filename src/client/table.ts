@@ -150,7 +150,7 @@ export class Table<T = unknown> implements ITable {
    * @returns A promise resolving to an array of stored records with metadata.
    */
   async getAllWithMetadata(): Promise<StoredRecord<T>[]> {
-    return this.idb.getAllRecords<T>(this.storeName);
+    return this.idb.getAllRecords<T>(this.storeName, true);
   }
 
   /**

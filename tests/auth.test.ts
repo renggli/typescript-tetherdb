@@ -65,16 +65,29 @@ describe('AuthManager', () => {
 
     await expect(auth.login('dan', 'wrongpwd')).rejects.toThrow('Invalid');
     await expect(auth.login('nonexistent', 'pwd')).rejects.toThrow('Invalid');
+    await expect(auth.login('', '')).rejects.toThrow('Invalid');
   });
 
-  it('should reject tampered tokens', () => {
-    const auth = new AuthManager();
-    const token = auth.generateToken(
+  it('should reject tampered or corrupted tokens', () => {
+    const auth1 = new AuthManager({ tokenSecret: 'secret-key-1' });
+    const auth2 = new AuthManager({ tokenSecret: 'secret-key-2' });
+
+    const token = auth1.generateToken(
       '12345678-1234-1234-1234-123456789abc',
       'alice',
     );
-    const tampered = `${token.slice(0, -4)}abcd`;
 
-    expect(auth.verifyToken(tampered)).toBeNull();
+    // Corrupted signature
+    const tampered = `${token.slice(0, -4)}abcd`;
+    expect(auth1.verifyToken(tampered)).toBeNull();
+
+    // Invalid format tokens
+    expect(auth1.verifyToken('')).toBeNull();
+    expect(auth1.verifyToken('invalid-token')).toBeNull();
+    expect(auth1.verifyToken('invalid.payload.format')).toBeNull();
+    expect(auth1.verifyToken('notbase64.signature')).toBeNull();
+
+    // Token signed with different secret key
+    expect(auth2.verifyToken(token)).toBeNull();
   });
 });
