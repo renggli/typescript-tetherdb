@@ -1,0 +1,83 @@
+{
+  "name": "beameddb",
+  "version": "0.1.0",
+  "description": "Offline-first client-side IndexedDB with real-time two-way WebSocket sync and per-user server storage",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./client": {
+      "import": {
+        "types": "./dist/client/index.d.ts",
+        "default": "./dist/client/index.js"
+      },
+      "require": {
+        "types": "./dist/client/index.d.cts",
+        "default": "./dist/client/index.cjs"
+      }
+    },
+    "./server": {
+      "import": {
+        "types": "./dist/server/index.d.ts",
+        "default": "./dist/server/index.js"
+      },
+      "require": {
+        "types": "./dist/server/index.d.cts",
+        "default": "./dist/server/index.cjs"
+      }
+    },
+    "./shared": {
+      "import": {
+        "types": "./dist/shared/index.d.ts",
+        "default": "./dist/shared/index.js"
+      },
+      "require": {
+        "types": "./dist/shared/index.d.cts",
+        "default": "./dist/shared/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "biome check --write .",
+    "format": "biome format --write .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.7",
+    "@types/node": "^22.10.2",
+    "@types/ws": "^8.5.13",
+    "fake-indexeddb": "^6.0.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "keywords": [
+    "indexeddb",
+    "sync",
+    "websocket",
+    "offline-first",
+    "realtime",
+    "database"
+  ],
+  "license": "MIT"
+}
