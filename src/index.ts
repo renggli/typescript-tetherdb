@@ -1,7 +1,7 @@
 /**
- * BeamedDB — Offline-first IndexedDB client with real-time two-way WebSocket sync.
+ * TetherDB — Offline-first IndexedDB client with real-time two-way WebSocket sync.
  *
- * @module beameddb
+ * @module tetherdb
  */
 
 export * from './client/index.js';

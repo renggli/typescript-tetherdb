@@ -33,17 +33,23 @@ export type WebSocketConstructor = new (
 ) => WebSocket;
 
 /**
- * Configuration options for BeamedSyncClient.
+ * Configuration options for TetherSyncClient.
  */
 export interface SyncOptions {
   /** WebSocket URL of the sync endpoint (e.g. 'ws://localhost:8080/sync'). */
   url: string;
   /** Signed authentication session token. */
   token: string;
+  /** Optional application namespace identifier (defaults to 'default'). */
+  appId?: string;
   /** Whether to automatically connect on creation (defaults to `true`). */
   autoConnect?: boolean;
-  /** Interval in milliseconds to wait before attempting auto-reconnect (defaults to 2000). */
+  /** Initial reconnection backoff delay in milliseconds (defaults to 1000). */
   reconnectIntervalMs?: number;
+  /** Maximum reconnection backoff delay in milliseconds (defaults to 30000). */
+  maxReconnectIntervalMs?: number;
+  /** Periodic keepalive ping interval in milliseconds (defaults to 30000). Set to 0 to disable. */
+  pingIntervalMs?: number;
   /** Custom WebSocket constructor for Node.js environments. */
   WebSocketClass?: WebSocketConstructor;
 }
@@ -52,7 +58,7 @@ export interface SyncOptions {
  * Two-way WebSocket sync coordinator managing initial snapshot / diff downloads,
  * batched outbox queue flushing, acknowledgments, and auto-reconnect backoff.
  */
-export class BeamedSyncClient {
+export class TetherSyncClient {
   private idb: IDBManager;
   private getTable: (name: string) => ITable;
   private getClientId: () => string;
@@ -61,13 +67,15 @@ export class BeamedSyncClient {
   private status: SyncStatus = SyncStatus.Disconnected;
   private statusListeners: Set<(status: SyncStatus) => void> = new Set();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempts = 0;
+  private pingTimer: ReturnType<typeof setInterval> | null = null;
   private pushTimer: ReturnType<typeof setTimeout> | null = null;
   private isPushing = false;
   private isDestroyed = false;
   private pendingBatches: Map<string, number[]> = new Map(); // batchId -> localIds
 
   /**
-   * Creates a new BeamedSyncClient instance.
+   * Creates a new TetherSyncClient instance.
    *
    * @param idb - IndexedDB transaction manager.
    * @param getTable - Function to resolve a table by name.
@@ -85,7 +93,9 @@ export class BeamedSyncClient {
     this.getClientId = getClientId;
     this.options = {
       autoConnect: true,
-      reconnectIntervalMs: 2000,
+      reconnectIntervalMs: 1000,
+      maxReconnectIntervalMs: 30000,
+      pingIntervalMs: 30000,
       ...options,
     };
 
@@ -122,7 +132,7 @@ export class BeamedSyncClient {
       try {
         listener(newStatus);
       } catch (err) {
-        console.error('[BeamedDB] Sync status listener error:', err);
+        console.error('[TetherDB] Sync status listener error:', err);
       }
     }
   }
@@ -138,7 +148,7 @@ export class BeamedSyncClient {
       this.options.WebSocketClass ??
       (typeof WebSocket !== 'undefined' ? WebSocket : null);
     if (!WS) {
-      console.warn('[BeamedDB] No WebSocket implementation found.');
+      console.warn('[TetherDB] No WebSocket implementation found.');
       this.setStatus(SyncStatus.Error);
       return;
     }
@@ -166,7 +176,7 @@ export class BeamedSyncClient {
         const msg: ServerMessage = JSON.parse(raw);
         await this.handleServerMessage(msg);
       } catch (err) {
-        console.error('[BeamedDB] Failed to process message from server:', err);
+        console.error('[TetherDB] Failed to process message from server:', err);
       }
     };
 
@@ -179,7 +189,7 @@ export class BeamedSyncClient {
     };
 
     this.ws.onerror = (err) => {
-      console.error('[BeamedDB] WebSocket error:', err);
+      console.error('[TetherDB] WebSocket error:', err);
       this.ws?.close();
     };
   }
@@ -188,6 +198,7 @@ export class BeamedSyncClient {
    * Disconnects the active WebSocket connection without marking the client as destroyed.
    */
   disconnect(): void {
+    this.stopPing();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -214,10 +225,35 @@ export class BeamedSyncClient {
 
   private scheduleReconnect(): void {
     if (this.isDestroyed || this.reconnectTimer) return;
+    this.reconnectAttempts += 1;
+    const baseInterval = this.options.reconnectIntervalMs ?? 1000;
+    const maxInterval = this.options.maxReconnectIntervalMs ?? 30000;
+    const delay = Math.min(
+      baseInterval * 1.5 ** Math.min(this.reconnectAttempts - 1, 8),
+      maxInterval,
+    );
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connect();
-    }, this.options.reconnectIntervalMs ?? 2000);
+    }, delay);
+  }
+
+  private startPing(): void {
+    this.stopPing();
+    const interval = this.options.pingIntervalMs ?? 30000;
+    if (interval <= 0) return;
+    this.pingTimer = setInterval(() => {
+      if (this.ws && this.ws.readyState === 1 /* OPEN */) {
+        this.send({ type: ClientMessageType.Ping });
+      }
+    }, interval);
+  }
+
+  private stopPing(): void {
+    if (this.pingTimer) {
+      clearInterval(this.pingTimer);
+      this.pingTimer = null;
+    }
   }
 
   private send(msg: ClientMessage): void {
@@ -233,6 +269,7 @@ export class BeamedSyncClient {
       token: this.options.token,
       clientId: this.getClientId(),
       lastSyncSeq,
+      appId: this.options.appId,
     };
     this.send(msg);
   }
@@ -240,13 +277,15 @@ export class BeamedSyncClient {
   private async handleServerMessage(msg: ServerMessage): Promise<void> {
     switch (msg.type) {
       case ServerMessageType.AuthSuccess: {
+        this.reconnectAttempts = 0;
+        this.startPing();
         this.setStatus(SyncStatus.Connected);
         this.schedulePush(0);
         break;
       }
 
       case ServerMessageType.AuthError: {
-        console.error('[BeamedDB] Auth error from server:', msg.message);
+        console.error('[TetherDB] Auth error from server:', msg.message);
         this.setStatus(SyncStatus.Error);
         this.disconnect();
         break;
@@ -286,9 +325,10 @@ export class BeamedSyncClient {
       case ServerMessageType.Pong:
         break;
 
-      case ServerMessageType.Error:
-        console.error('[BeamedDB] Server error:', msg.message);
+      case ServerMessageType.Error: {
+        console.error('[TetherDB] Server error:', msg.message);
         break;
+      }
     }
   }
 

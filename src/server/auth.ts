@@ -18,6 +18,8 @@ export interface UserAccount {
   salt: string;
   /** Epoch timestamp of user creation. */
   createdAt: number;
+  /** Epoch timestamp of the last successful login. */
+  lastLoginAt?: number;
 }
 
 /**
@@ -83,7 +85,7 @@ export class AuthManager {
 
     this.tokenSecret =
       secret ??
-      `beameddb-default-secret-${crypto.randomBytes(16).toString('hex')}`;
+      `tetherdb-default-secret-${crypto.randomBytes(16).toString('hex')}`;
 
     if (this.secretFilePath && !this.customTokenSecretProvided && !secret) {
       try {
@@ -147,6 +149,11 @@ export class AuthManager {
     await this.init();
     const cleanUsername = validateUsername(username);
 
+    const key = cleanUsername.toLowerCase().trim();
+    if (this.users.has(key)) {
+      throw new Error('Username already exists');
+    }
+
     if (
       typeof password !== 'string' ||
       password.length < 4 ||
@@ -155,21 +162,18 @@ export class AuthManager {
       throw new Error('Password must be between 4 and 1024 characters long');
     }
 
-    const key = cleanUsername.toLowerCase();
-    if (this.users.has(key)) {
-      throw new Error('Username already exists');
-    }
-
     const id = crypto.randomUUID();
     const salt = crypto.randomBytes(16).toString('hex');
     const passwordHash = this.hashPassword(password, salt);
 
+    const now = Date.now();
     const account: UserAccount = {
       id,
       username: cleanUsername,
       passwordHash,
       salt,
-      createdAt: Date.now(),
+      createdAt: now,
+      lastLoginAt: now,
     };
 
     this.users.set(key, account);
@@ -185,6 +189,7 @@ export class AuthManager {
 
   /**
    * Authenticates user credentials and returns a signed session token.
+   * Updates the user's `lastLoginAt` timestamp upon successful authentication.
    *
    * @param username - Account username.
    * @param password - Account password.
@@ -200,7 +205,7 @@ export class AuthManager {
       throw new Error('Invalid username or password');
     }
 
-    const key = cleanUsername.toLowerCase();
+    const key = cleanUsername.toLowerCase().trim();
     const account = this.users.get(key);
     if (!account) {
       throw new Error('Invalid username or password');
@@ -210,6 +215,9 @@ export class AuthManager {
     if (hash !== account.passwordHash) {
       throw new Error('Invalid username or password');
     }
+
+    account.lastLoginAt = Date.now();
+    await this.persist();
 
     const token = this.generateToken(account.id, account.username);
     return {
@@ -293,5 +301,16 @@ export class AuthManager {
    */
   getUserById(id: string): UserAccount | undefined {
     return this.usersById.get(id);
+  }
+
+  /**
+   * Resolves a user account by username.
+   *
+   * @param username - User account username.
+   * @returns UserAccount if found, or `undefined`.
+   */
+  getUserByUsername(username: string): UserAccount | undefined {
+    const clean = username.toLowerCase().trim();
+    return this.users.get(clean);
   }
 }

@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { shouldOverwrite } from '../../shared/clock.js';
 import {
   calculateByteSize,
+  validateAppId,
   validateRecordId,
   validateStoreName,
   validateUserId,
@@ -25,7 +26,7 @@ interface UserMeta {
  * Options for configuring the filesystem storage adapter.
  */
 export interface FileStorageOptions {
-  /** Root directory on the filesystem where user data folders will be stored. */
+  /** Root directory on the filesystem where application and user data folders will be stored. */
   baseDir: string;
   /** Optional limits and quota configurations. */
   limits?: ServerLimits;
@@ -40,9 +41,9 @@ interface UserCacheEntry {
 }
 
 /**
- * Filesystem-backed storage adapter organizing data into sharded per-user subdirectories
- * (`<baseDir>/<shard>/<userId>/stores/<storeName>.json` where `<shard> = userId.slice(0, 2)`).
- * Provides path traversal defense, changelog compaction, and quota enforcement.
+ * Filesystem-backed storage adapter organizing data into sharded per-app, per-user subdirectories
+ * (`<baseDir>/<appId>/<shard>/<userId>/stores/<storeName>.json` where `<shard> = userId.slice(0, 2)`).
+ * Provides multi-application partitioning, path traversal defense, changelog compaction, and quota enforcement.
  */
 export class FileStorageAdapter implements StorageAdapter {
   private baseDir: string;
@@ -60,43 +61,53 @@ export class FileStorageAdapter implements StorageAdapter {
     this.limits = options.limits ?? {};
   }
 
+  private getUserKey(userId: string, appId?: string): string {
+    const safeAppId = validateAppId(appId);
+    const safeUserId = validateUserId(userId);
+    return `${safeAppId}:${safeUserId}`;
+  }
+
   private async withUserLock<T>(
     userId: string,
+    appId: string | undefined,
     fn: () => Promise<T>,
   ): Promise<T> {
-    const prevLock = this.userLocks.get(userId) ?? Promise.resolve();
+    const key = this.getUserKey(userId, appId);
+    const prevLock = this.userLocks.get(key) ?? Promise.resolve();
     let resolveLock: (() => void) | undefined;
     const newLock = new Promise<void>((resolve) => {
       resolveLock = resolve;
     });
 
-    this.userLocks.set(userId, newLock);
+    this.userLocks.set(key, newLock);
 
     try {
       await prevLock;
       return await fn();
     } finally {
       resolveLock?.();
-      if (this.userLocks.get(userId) === newLock) {
-        this.userLocks.delete(userId);
+      if (this.userLocks.get(key) === newLock) {
+        this.userLocks.delete(key);
       }
     }
   }
 
   /**
-   * Computes the sharded directory path for a user with strict path confinement checks.
+   * Computes the sharded directory path for a user within an application with strict path confinement checks.
    *
    * @param userId - Validated user ID.
-   * @returns Absolute path to user directory `<baseDir>/<shard>/<userId>`.
+   * @param appId - Validated application ID.
+   * @returns Absolute path to user directory `<baseDir>/<appId>/<shard>/<userId>`.
    */
-  private getUserDir(userId: string): string {
+  private getUserDir(userId: string, appId?: string): string {
+    const safeAppId = validateAppId(appId);
     const safeUserId = validateUserId(userId);
     const shard = safeUserId.slice(0, 2).toLowerCase();
-    const userDir = path.resolve(this.baseDir, shard, safeUserId);
+    const userDir = path.resolve(this.baseDir, safeAppId, shard, safeUserId);
 
     if (!userDir.startsWith(this.baseDir + path.sep)) {
       throw new Error(
-        `Path traversal attempt detected for userId: "${userId}"`,
+        `Path traversal attempt detected for userId: "${userId}" in appId: "${appId}"`,
       );
     }
     return userDir;
@@ -107,6 +118,7 @@ export class FileStorageAdapter implements StorageAdapter {
    *
    * @param userDir - The user root directory.
    * @param storeName - Store name to validate and resolve.
+   * @param userId - Optional user context for errors.
    * @returns Absolute path to store JSON file.
    */
   private getStoreFilePath(
@@ -131,8 +143,12 @@ export class FileStorageAdapter implements StorageAdapter {
     return filePath;
   }
 
-  private async loadUser(userId: string): Promise<UserCacheEntry> {
-    let cached = this.userCache.get(userId);
+  private async loadUser(
+    userId: string,
+    appId?: string,
+  ): Promise<UserCacheEntry> {
+    const key = this.getUserKey(userId, appId);
+    let cached = this.userCache.get(key);
     if (cached?.loaded) return cached;
 
     cached = {
@@ -143,7 +159,7 @@ export class FileStorageAdapter implements StorageAdapter {
       loaded: true,
     };
 
-    const userDir = this.getUserDir(userId);
+    const userDir = this.getUserDir(userId, appId);
     const storesDir = path.join(userDir, 'stores');
     await fs.mkdir(storesDir, { recursive: true });
 
@@ -177,9 +193,9 @@ export class FileStorageAdapter implements StorageAdapter {
           );
           const recordsObj: Record<string, StoredRecord> = JSON.parse(content);
           const map = new Map<string, StoredRecord>();
-          for (const [key, val] of Object.entries(recordsObj)) {
-            if (key !== '__proto__' && key !== 'prototype') {
-              map.set(key, val);
+          for (const [recKey, val] of Object.entries(recordsObj)) {
+            if (recKey !== '__proto__' && recKey !== 'prototype') {
+              map.set(recKey, val);
             }
           }
           cached.stores.set(storeName, map);
@@ -200,15 +216,16 @@ export class FileStorageAdapter implements StorageAdapter {
       // ignore
     }
 
-    this.userCache.set(userId, cached);
+    this.userCache.set(key, cached);
     return cached;
   }
 
-  private async persistUser(userId: string): Promise<void> {
-    const cached = this.userCache.get(userId);
+  private async persistUser(userId: string, appId?: string): Promise<void> {
+    const key = this.getUserKey(userId, appId);
+    const cached = this.userCache.get(key);
     if (!cached) return;
 
-    const userDir = this.getUserDir(userId);
+    const userDir = this.getUserDir(userId, appId);
     const storesDir = path.join(userDir, 'stores');
     await fs.mkdir(storesDir, { recursive: true });
 
@@ -247,17 +264,19 @@ export class FileStorageAdapter implements StorageAdapter {
    * @param userId - Target user account identifier.
    * @param store - Table/store name.
    * @param id - Record identifier.
+   * @param appId - Optional application namespace (defaults to 'default').
    * @returns Stored record or `undefined` if not found.
    */
   async getRecord(
     userId: string,
     store: string,
     id: string,
+    appId?: string,
   ): Promise<StoredRecord | undefined> {
     validateStoreName(store, this.limits.allowedStores, userId);
     validateRecordId(id, store, userId);
-    return this.withUserLock(userId, async () => {
-      const user = await this.loadUser(userId);
+    return this.withUserLock(userId, appId, async () => {
+      const user = await this.loadUser(userId, appId);
       const storeMap = user.stores.get(store);
       return storeMap?.get(id);
     });
@@ -268,17 +287,20 @@ export class FileStorageAdapter implements StorageAdapter {
    *
    * @param userId - Target user account identifier.
    * @param store - Optional table name to filter.
+   * @param appId - Optional application namespace (defaults to 'default').
    * @returns Array of snapshot items.
    */
   async getAllRecords(
     userId: string,
     store?: string,
+    appId?: string,
   ): Promise<RecordSnapshotItem[]> {
     if (store !== undefined) {
       validateStoreName(store, this.limits.allowedStores, userId);
     }
-    return this.withUserLock(userId, async () => {
-      const user = await this.loadUser(userId);
+    const safeAppId = validateAppId(appId);
+    return this.withUserLock(userId, appId, async () => {
+      const user = await this.loadUser(userId, appId);
       const items: RecordSnapshotItem[] = [];
 
       const storesToIterate = store ? [store] : Array.from(user.stores.keys());
@@ -294,6 +316,7 @@ export class FileStorageAdapter implements StorageAdapter {
               timestamp: record.timestamp,
               version: record.version,
               deleted: false,
+              appId: safeAppId,
             });
           }
         }
@@ -309,14 +332,17 @@ export class FileStorageAdapter implements StorageAdapter {
    *
    * @param userId - Target user account identifier.
    * @param changes - Array of change records to apply.
+   * @param appId - Optional application namespace (defaults to 'default').
    * @returns Object with applied changes and new sequence number.
    */
   async applyChanges(
     userId: string,
     changes: ChangeRecord[],
+    appId?: string,
   ): Promise<{ applied: ChangeRecord[]; newSeq: number }> {
-    return this.withUserLock(userId, async () => {
-      const user = await this.loadUser(userId);
+    const safeAppId = validateAppId(appId);
+    return this.withUserLock(userId, appId, async () => {
+      const user = await this.loadUser(userId, appId);
       const applied: ChangeRecord[] = [];
 
       const maxStores = this.limits.maxStoresPerUser ?? 50;
@@ -332,10 +358,10 @@ export class FileStorageAdapter implements StorageAdapter {
         );
         const recordId = validateRecordId(change.id, change.store, userId);
 
-        // Enforce max stores per user
+        // Enforce max stores per user in this app
         if (!user.stores.has(storeName) && user.stores.size >= maxStores) {
           throw new Error(
-            `Store limit reached. Maximum ${maxStores} tables allowed for user "${userId}".`,
+            `Store limit reached. Maximum ${maxStores} tables allowed for user "${userId}" in app "${safeAppId}".`,
           );
         }
 
@@ -350,7 +376,7 @@ export class FileStorageAdapter implements StorageAdapter {
           const payloadSize = calculateByteSize(change.data);
           if (payloadSize > maxRecordSize) {
             throw new Error(
-              `Record size (${payloadSize} bytes) for record "${recordId}" in table "${storeName}" exceeds maximum allowed size of ${maxRecordSize} bytes for user "${userId}".`,
+              `Record size (${payloadSize} bytes) for record "${recordId}" in table "${storeName}" exceeds maximum allowed size of ${maxRecordSize} bytes for user "${userId}" in app "${safeAppId}".`,
             );
           }
         }
@@ -369,7 +395,7 @@ export class FileStorageAdapter implements StorageAdapter {
           }
           if (activeCount >= maxRecords) {
             throw new Error(
-              `Table "${storeName}" has reached the maximum capacity of ${maxRecords} records for user "${userId}".`,
+              `Table "${storeName}" has reached the maximum capacity of ${maxRecords} records for user "${userId}" in app "${safeAppId}".`,
             );
           }
         }
@@ -397,6 +423,7 @@ export class FileStorageAdapter implements StorageAdapter {
             seq,
             version: record.version,
             deleted: isDelete,
+            appId: safeAppId,
           };
 
           user.changelog.push(appliedChange);
@@ -415,7 +442,7 @@ export class FileStorageAdapter implements StorageAdapter {
       }
 
       if (applied.length > 0) {
-        await this.persistUser(userId);
+        await this.persistUser(userId, appId);
       }
 
       return { applied, newSeq: user.currentSeq };
@@ -423,23 +450,25 @@ export class FileStorageAdapter implements StorageAdapter {
   }
 
   /**
-   * Retrieves all changes applied since the given sequence number for a user.
+   * Retrieves all changes applied since the given sequence number for a user in an application.
    * If `fromSeq < minSeq` (compacted window), `requiresSnapshot` is true.
    *
    * @param userId - Target user account identifier.
    * @param fromSeq - Starting sequence number (exclusive).
+   * @param appId - Optional application namespace (defaults to 'default').
    * @returns Object with change records, current sequence number, and snapshot requirement flag.
    */
   async getChangesSince(
     userId: string,
     fromSeq: number,
+    appId?: string,
   ): Promise<{
     changes: ChangeRecord[];
     currentSeq: number;
     requiresSnapshot?: boolean;
   }> {
-    return this.withUserLock(userId, async () => {
-      const user = await this.loadUser(userId);
+    return this.withUserLock(userId, appId, async () => {
+      const user = await this.loadUser(userId, appId);
 
       // Check if client is requesting changes older than compacted changelog
       if (user.minSeq > 0 && fromSeq < user.minSeq) {
@@ -463,12 +492,73 @@ export class FileStorageAdapter implements StorageAdapter {
    * Retrieves the current global sequence number for a user from metadata.
    *
    * @param userId - Target user account identifier.
+   * @param appId - Optional application namespace (defaults to 'default').
    * @returns Current integer sequence number.
    */
-  async getCurrentSeq(userId: string): Promise<number> {
-    return this.withUserLock(userId, async () => {
-      const user = await this.loadUser(userId);
+  async getCurrentSeq(userId: string, appId?: string): Promise<number> {
+    return this.withUserLock(userId, appId, async () => {
+      const user = await this.loadUser(userId, appId);
       return user.currentSeq;
+    });
+  }
+
+  /**
+   * Lists all application namespaces on the server, or created for a specific user.
+   *
+   * @param userId - Optional user ID filter.
+   * @returns Array of unique application IDs.
+   */
+  async listApps(userId?: string): Promise<string[]> {
+    try {
+      const entries = await fs.readdir(this.baseDir, { withFileTypes: true });
+      const appDirs: string[] = [];
+
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const name = entry.name;
+        if (
+          name === 'users.json' ||
+          name === 'secret.key' ||
+          name.startsWith('.')
+        ) {
+          continue;
+        }
+        try {
+          validateAppId(name);
+        } catch {
+          continue;
+        }
+
+        if (userId) {
+          const userDir = this.getUserDir(userId, name);
+          try {
+            await fs.access(userDir);
+            appDirs.push(name);
+          } catch {
+            // User does not have data in this app
+          }
+        } else {
+          appDirs.push(name);
+        }
+      }
+
+      return appDirs.sort();
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Lists all table/store names created within an application for a user.
+   *
+   * @param userId - Target user account identifier.
+   * @param appId - Optional application namespace (defaults to 'default').
+   * @returns Array of table names.
+   */
+  async listStores(userId: string, appId?: string): Promise<string[]> {
+    return this.withUserLock(userId, appId, async () => {
+      const user = await this.loadUser(userId, appId);
+      return Array.from(user.stores.keys()).sort();
     });
   }
 

@@ -19,7 +19,7 @@ describe('Storage Adapters', () => {
     beforeEach(async () => {
       tmpDir = path.join(
         os.tmpdir(),
-        `beameddb-test-${Math.random().toString(36).substring(2, 10)}`,
+        `tetherdb-test-${Math.random().toString(36).substring(2, 10)}`,
       );
       await fs.mkdir(tmpDir, { recursive: true });
       adapter = new FileStorageAdapter({ baseDir: tmpDir });
@@ -44,9 +44,9 @@ describe('Storage Adapters', () => {
 
       await adapter.applyChanges('user-42', [change]);
 
-      // Sharded layout: tmpDir / us / user-42 / ...
+      // Sharded layout: tmpDir / default / us / user-42 / ...
       const shard = 'user-42'.slice(0, 2).toLowerCase();
-      const userDir = path.join(tmpDir, shard, 'user-42');
+      const userDir = path.join(tmpDir, 'default', shard, 'user-42');
       const storeFile = path.join(userDir, 'stores', 'settings.json');
       const metaFile = path.join(userDir, 'meta.json');
 

@@ -1,5 +1,5 @@
 {
-  "name": "beameddb",
+  "name": "tetherdb",
   "version": "0.1.0",
   "description": "Offline-first client-side IndexedDB with real-time two-way WebSocket sync and per-user server storage",
   "type": "module",
@@ -48,8 +48,12 @@
       }
     }
   },
+  "bin": {
+    "tetherdb": "./bin/tetherdb.js"
+  },
   "files": [
-    "dist"
+    "dist",
+    "bin"
   ],
   "workspaces": [
     "examples/todo"
@@ -61,7 +65,7 @@
     "check": "biome check --write .",
     "format": "biome format --write .",
     "typecheck": "tsc --noEmit",
-    "example:todo": "npm --workspace=@beameddb/example-todo run dev"
+    "example:todo": "npm --workspace=@tetherdb/example-todo run dev"
   },
   "dependencies": {
     "ws": "^8.18.0"

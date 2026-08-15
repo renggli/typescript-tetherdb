@@ -1,6 +1,6 @@
-# BeamedDB — AI Developer Guide & Architecture Map
+# TetherDB — AI Developer Guide & Architecture Map
 
-This document outlines the core architecture, developer rules, TypeScript conventions, and testing guidelines for developing BeamedDB.
+This document outlines the core architecture, developer rules, TypeScript conventions, and testing guidelines for developing TetherDB.
 
 ---
 
@@ -27,19 +27,19 @@ This document outlines the core architecture, developer rules, TypeScript conven
 The codebase is organized into three decoupled layers with clear subpath exports:
 
 - **Shared / Protocol (`src/shared/`)**:
-  - Exported as `beameddb/shared`.
+  - Exported as `tetherdb/shared`.
   - Single source of truth for message schemas, data structures, and conflict resolution logic.
   - Contains deterministic conflict resolution algorithms (Last-Write-Wins with logical timestamps and client ID tie-breaking).
   - Pure TypeScript with zero runtime dependencies.
 
 - **Client Layer (`src/client/`)**:
-  - Exported as `beameddb/client`.
+  - Exported as `tetherdb/client`.
   - **IndexedDB Layer (`idb.ts`)**: Atomic transaction coordinator managing user object stores alongside internal outbox and metadata stores.
   - **Tables (`table.ts`)**: Typed table wrappers providing local-first CRUD operations and reactive event subscriptions.
   - **Sync Client (`sync.ts`)**: Two-way WebSocket sync coordinator managing initial snapshot / diff downloads, outbox queue flushing, acknowledgments, and auto-reconnect backoff.
 
 - **Server Layer (`src/server/`)**:
-  - Exported as `beameddb/server`.
+  - Exported as `tetherdb/server`.
   - **Authentication (`auth.ts`)**: Secure credential hashing (scrypt) and signed token sessions.
   - **Storage Adapters (`storage/`)**: Pluggable storage abstraction with implementations for in-memory testing (`MemoryStorageAdapter`) and per-user filesystem directories (`FileStorageAdapter`).
   - **Sync Hub (`sync-hub.ts`)**: Real-time WebSocket connection manager and user-isolated broadcast engine.

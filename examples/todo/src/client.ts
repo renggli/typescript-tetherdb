@@ -1,11 +1,11 @@
 import {
   type AuthResult,
-  BeamedAuthClient,
-  BeamedClientDB,
   SyncStatus,
   type Table,
   type TableChangeEvent,
-} from 'beameddb';
+  TetherAuthClient,
+  TetherDB,
+} from 'tetherdb';
 
 /**
  * Todo record data model.
@@ -43,7 +43,7 @@ enum AuthMode {
 
 // User State from storage
 let currentUser: AuthResult | null = (() => {
-  const saved = localStorage.getItem('beamed_todo_user');
+  const saved = localStorage.getItem('tether_todo_user');
   if (!saved) return null;
   try {
     return JSON.parse(saved) as AuthResult;
@@ -53,7 +53,7 @@ let currentUser: AuthResult | null = (() => {
 })();
 
 // Database & UI State
-const db = new BeamedClientDB({ name: 'beamed_todo_app' });
+const db = new TetherDB({ name: 'tether_todo_app', appId: 'todo-example' });
 const todosTable: Table<TodoItem> = db.table<TodoItem>('todos');
 let currentFilter: FilterMode = FilterMode.All;
 let authMode: AuthMode = AuthMode.Login;
@@ -312,7 +312,7 @@ authForm.addEventListener('submit', async (e: SubmitEvent) => {
     }
 
     currentUser = result;
-    localStorage.setItem('beamed_todo_user', JSON.stringify(currentUser));
+    localStorage.setItem('tether_todo_user', JSON.stringify(currentUser));
     updateUserUI();
     authDialog.close();
   } catch (err) {
@@ -344,7 +344,7 @@ async function init(): Promise<void> {
 
   // Helper to authenticate as demo account
   const autoAuthenticateDemo = async () => {
-    const authClient = new BeamedAuthClient({
+    const authClient = new TetherAuthClient({
       serverUrl: window.location.origin,
     });
     try {
@@ -360,7 +360,7 @@ async function init(): Promise<void> {
 
       if (auth) {
         currentUser = auth;
-        localStorage.setItem('beamed_todo_user', JSON.stringify(currentUser));
+        localStorage.setItem('tether_todo_user', JSON.stringify(currentUser));
         updateUserUI();
         db.enableSync({ url: wsUrl, token: auth.token });
       }
@@ -376,7 +376,7 @@ async function init(): Promise<void> {
 
     if (status === SyncStatus.Error && !isReauthenticating) {
       isReauthenticating = true;
-      localStorage.removeItem('beamed_todo_user');
+      localStorage.removeItem('tether_todo_user');
       const wasDemo = currentUser?.user?.username === 'demo' || !currentUser;
       currentUser = null;
       updateUserUI();

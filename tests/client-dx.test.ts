@@ -3,25 +3,25 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import {
   type AuthResult,
-  BeamedAuthClient,
-  BeamedClientDB,
   SyncStatus,
+  TetherAuthClient,
+  TetherDB,
 } from '../src/client/index.js';
-import { BeamedServer } from '../src/server/server.js';
+import { TetherServer } from '../src/server/server.js';
 import { MemoryStorageAdapter } from '../src/server/storage/memory.js';
 
 describe('Developer Experience & Offline-to-Synced Onboarding', () => {
-  let server: BeamedServer;
+  let server: TetherServer;
   let httpServer: http.Server;
   let serverUrl: string;
   let wsUrl: string;
-  const clientsToClose: BeamedClientDB[] = [];
+  const clientsToClose: TetherDB[] = [];
 
   const delay = (ms: number) =>
     new Promise((resolve) => setTimeout(resolve, ms));
 
   beforeEach(async () => {
-    server = new BeamedServer({
+    server = new TetherServer({
       storage: new MemoryStorageAdapter(),
     });
     httpServer = await server.listen(0, '127.0.0.1');
@@ -41,7 +41,7 @@ describe('Developer Experience & Offline-to-Synced Onboarding', () => {
   });
 
   it('should initialize with options object and dynamic tables with zero store pre-declaration', async () => {
-    const db = new BeamedClientDB({
+    const db = new TetherDB({
       name: `simple-db-${Math.random().toString(36).substring(2, 8)}`,
     });
     clientsToClose.push(db);
@@ -54,7 +54,7 @@ describe('Developer Experience & Offline-to-Synced Onboarding', () => {
   });
 
   it('should provide ergonomic table clear helper', async () => {
-    const db = new BeamedClientDB({
+    const db = new TetherDB({
       name: `dx-db-${Math.random().toString(36).substring(2, 8)}`,
     });
     clientsToClose.push(db);
@@ -74,8 +74,8 @@ describe('Developer Experience & Offline-to-Synced Onboarding', () => {
     expect((await tasks.getAll()).length).toBe(0);
   });
 
-  it('should support BeamedAuthClient direct authentication requests', async () => {
-    const authClient = new BeamedAuthClient({ serverUrl });
+  it('should support TetherAuthClient direct authentication requests', async () => {
+    const authClient = new TetherAuthClient({ serverUrl });
     expect(await authClient.checkHealth()).toBe(true);
 
     const regResult = await authClient.register({
@@ -94,7 +94,7 @@ describe('Developer Experience & Offline-to-Synced Onboarding', () => {
 
   it('should seamlessly transition from local-only offline storage to live sync upon registration', async () => {
     // 1. User starts locally offline with zero configuration
-    const db = new BeamedClientDB({
+    const db = new TetherDB({
       name: `offline-onboard-${Math.random().toString(36).substring(2, 8)}`,
     });
     clientsToClose.push(db);
@@ -145,13 +145,13 @@ describe('Developer Experience & Offline-to-Synced Onboarding', () => {
   });
 
   it('should allow disconnecting and reconnecting sync dynamically', async () => {
-    const authClient = new BeamedAuthClient({ serverUrl });
+    const authClient = new TetherAuthClient({ serverUrl });
     const auth = await authClient.register({
       username: 'dynamic_user',
       password: 'password123',
     });
 
-    const db = new BeamedClientDB({
+    const db = new TetherDB({
       name: `dynamic-db-${Math.random().toString(36).substring(2, 8)}`,
     });
     clientsToClose.push(db);
@@ -190,7 +190,7 @@ describe('Developer Experience & Offline-to-Synced Onboarding', () => {
   });
 
   it('should wipe local data on db.clear()', async () => {
-    const db = new BeamedClientDB({
+    const db = new TetherDB({
       name: `clear-test-db-${Math.random().toString(36).substring(2, 8)}`,
     });
     clientsToClose.push(db);

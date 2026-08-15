@@ -1,7 +1,7 @@
 /**
- * BeamedDB Server Storage — Storage adapter interfaces and implementations.
+ * TetherDB Server Storage — Storage adapter interfaces and implementations.
  *
- * @module beameddb/server/storage
+ * @module tetherdb/server/storage
  */
 
 export * from './adapter.js';

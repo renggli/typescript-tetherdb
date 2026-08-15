@@ -1,6 +1,7 @@
 import { shouldOverwrite } from '../../shared/clock.js';
 import {
   calculateByteSize,
+  validateAppId,
   validateRecordId,
   validateStoreName,
   validateUserId,
@@ -31,11 +32,11 @@ export interface MemoryStorageOptions {
 
 /**
  * In-memory implementation of `StorageAdapter` providing zero-dependency persistence
- * with per-user data isolation, changelog compaction, and quota enforcement.
+ * with per-app and per-user data isolation, changelog compaction, discovery APIs, and quota enforcement.
  * Ideal for unit and integration testing.
  */
 export class MemoryStorageAdapter implements StorageAdapter {
-  private users: Map<string, UserState> = new Map();
+  private userStates: Map<string, UserState> = new Map(); // key = `${appId}:${userId}`
   private limits: ServerLimits;
 
   /**
@@ -47,9 +48,26 @@ export class MemoryStorageAdapter implements StorageAdapter {
     this.limits = options.limits ?? {};
   }
 
-  private getUserState(userId: string): UserState {
+  private getKey(
+    userId: string,
+    appId?: string,
+  ): {
+    key: string;
+    safeAppId: string;
+    safeUserId: string;
+  } {
+    const safeAppId = validateAppId(appId);
     const safeUserId = validateUserId(userId);
-    let state = this.users.get(safeUserId);
+    return {
+      key: `${safeAppId}:${safeUserId}`,
+      safeAppId,
+      safeUserId,
+    };
+  }
+
+  private getUserState(userId: string, appId?: string): UserState {
+    const { key } = this.getKey(userId, appId);
+    let state = this.userStates.get(key);
     if (!state) {
       state = {
         currentSeq: 0,
@@ -57,46 +75,51 @@ export class MemoryStorageAdapter implements StorageAdapter {
         stores: new Map(),
         changelog: [],
       };
-      this.users.set(safeUserId, state);
+      this.userStates.set(key, state);
     }
     return state;
   }
 
   /**
-   * Retrieves a single stored record by table and ID for a user.
+   * Retrieves a single stored record by table and ID for a user and application.
    *
    * @param userId - Target user account identifier.
    * @param store - Table/store name.
    * @param id - Record identifier.
+   * @param appId - Optional application namespace (defaults to 'default').
    * @returns The stored record, or `undefined` if not found.
    */
   async getRecord(
     userId: string,
     store: string,
     id: string,
+    appId?: string,
   ): Promise<StoredRecord | undefined> {
     validateStoreName(store, this.limits.allowedStores, userId);
     validateRecordId(id, store, userId);
-    const userState = this.getUserState(userId);
+    const userState = this.getUserState(userId, appId);
     const storeMap = userState.stores.get(store);
     return storeMap?.get(id);
   }
 
   /**
-   * Retrieves all non-deleted records for a user across all stores (or a specified store).
+   * Retrieves all non-deleted records for a user across all stores (or a specified store) within an application.
    *
    * @param userId - Target user account identifier.
    * @param store - Optional specific table name to filter.
+   * @param appId - Optional application namespace (defaults to 'default').
    * @returns Array of snapshot items.
    */
   async getAllRecords(
     userId: string,
     store?: string,
+    appId?: string,
   ): Promise<RecordSnapshotItem[]> {
     if (store !== undefined) {
       validateStoreName(store, this.limits.allowedStores, userId);
     }
-    const userState = this.getUserState(userId);
+    const { safeAppId } = this.getKey(userId, appId);
+    const userState = this.getUserState(userId, appId);
     const items: RecordSnapshotItem[] = [];
 
     const storesToIterate = store
@@ -115,6 +138,7 @@ export class MemoryStorageAdapter implements StorageAdapter {
             timestamp: record.timestamp,
             version: record.version,
             deleted: false,
+            appId: safeAppId,
           });
         }
       }
@@ -129,13 +153,16 @@ export class MemoryStorageAdapter implements StorageAdapter {
    *
    * @param userId - Target user account identifier.
    * @param changes - Array of change records to apply.
+   * @param appId - Optional application namespace (defaults to 'default').
    * @returns Object with applied changes and new sequence number.
    */
   async applyChanges(
     userId: string,
     changes: ChangeRecord[],
+    appId?: string,
   ): Promise<{ applied: ChangeRecord[]; newSeq: number }> {
-    const userState = this.getUserState(userId);
+    const { safeAppId } = this.getKey(userId, appId);
+    const userState = this.getUserState(userId, appId);
     const applied: ChangeRecord[] = [];
 
     const maxStores = this.limits.maxStoresPerUser ?? 50;
@@ -156,7 +183,7 @@ export class MemoryStorageAdapter implements StorageAdapter {
         userState.stores.size >= maxStores
       ) {
         throw new Error(
-          `Store limit reached. Maximum ${maxStores} tables allowed for user "${userId}".`,
+          `Store limit reached. Maximum ${maxStores} tables allowed for user "${userId}" in app "${safeAppId}".`,
         );
       }
 
@@ -170,7 +197,7 @@ export class MemoryStorageAdapter implements StorageAdapter {
         const payloadSize = calculateByteSize(change.data);
         if (payloadSize > maxRecordSize) {
           throw new Error(
-            `Record size (${payloadSize} bytes) for record "${recordId}" in table "${storeName}" exceeds maximum allowed size of ${maxRecordSize} bytes for user "${userId}".`,
+            `Record size (${payloadSize} bytes) for record "${recordId}" in table "${storeName}" exceeds maximum allowed size of ${maxRecordSize} bytes for user "${userId}" in app "${safeAppId}".`,
           );
         }
       }
@@ -188,7 +215,7 @@ export class MemoryStorageAdapter implements StorageAdapter {
         }
         if (activeCount >= maxRecords) {
           throw new Error(
-            `Table "${storeName}" has reached the maximum capacity of ${maxRecords} records for user "${userId}".`,
+            `Table "${storeName}" has reached the maximum capacity of ${maxRecords} records for user "${userId}" in app "${safeAppId}".`,
           );
         }
       }
@@ -216,6 +243,7 @@ export class MemoryStorageAdapter implements StorageAdapter {
           seq,
           version: record.version,
           deleted: isDelete,
+          appId: safeAppId,
         };
 
         userState.changelog.push(appliedChange);
@@ -237,22 +265,24 @@ export class MemoryStorageAdapter implements StorageAdapter {
   }
 
   /**
-   * Retrieves all changes applied since the given sequence number for a user.
+   * Retrieves all changes applied since the given sequence number for a user in an application.
    * If `fromSeq < minSeq` (compacted window), `requiresSnapshot` is true.
    *
    * @param userId - Target user account identifier.
    * @param fromSeq - Starting sequence number (exclusive).
+   * @param appId - Optional application namespace (defaults to 'default').
    * @returns Object with change records, current sequence number, and snapshot requirement flag.
    */
   async getChangesSince(
     userId: string,
     fromSeq: number,
+    appId?: string,
   ): Promise<{
     changes: ChangeRecord[];
     currentSeq: number;
     requiresSnapshot?: boolean;
   }> {
-    const userState = this.getUserState(userId);
+    const userState = this.getUserState(userId, appId);
 
     if (userState.minSeq > 0 && fromSeq < userState.minSeq) {
       return {
@@ -271,20 +301,50 @@ export class MemoryStorageAdapter implements StorageAdapter {
   }
 
   /**
-   * Retrieves the current global sequence number for a user.
+   * Retrieves the current global sequence number for a user in an application.
    *
    * @param userId - Target user account identifier.
+   * @param appId - Optional application namespace (defaults to 'default').
    * @returns Current integer sequence number.
    */
-  async getCurrentSeq(userId: string): Promise<number> {
-    const userState = this.getUserState(userId);
+  async getCurrentSeq(userId: string, appId?: string): Promise<number> {
+    const userState = this.getUserState(userId, appId);
     return userState.currentSeq;
+  }
+
+  /**
+   * Lists all active application namespace identifiers on the server, or created by a user.
+   *
+   * @param userId - Optional user ID filter.
+   * @returns Array of unique application IDs.
+   */
+  async listApps(userId?: string): Promise<string[]> {
+    const apps = new Set<string>();
+    for (const key of this.userStates.keys()) {
+      const [appId, user] = key.split(':');
+      if (!userId || user === userId) {
+        if (appId) apps.add(appId);
+      }
+    }
+    return Array.from(apps).sort();
+  }
+
+  /**
+   * Lists all table/store names created within an application for a user.
+   *
+   * @param userId - Target user account identifier.
+   * @param appId - Optional application namespace (defaults to 'default').
+   * @returns Array of table names.
+   */
+  async listStores(userId: string, appId?: string): Promise<string[]> {
+    const userState = this.getUserState(userId, appId);
+    return Array.from(userState.stores.keys()).sort();
   }
 
   /**
    * Clears in-memory storage state.
    */
   async close(): Promise<void> {
-    this.users.clear();
+    this.userStates.clear();
   }
 }

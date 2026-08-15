@@ -24,24 +24,24 @@ export interface AuthCredentials {
 }
 
 /**
- * Options for configuring a BeamedAuthClient.
+ * Options for configuring a TetherAuthClient.
  */
 export interface AuthClientOptions {
-  /** Base HTTP URL of the BeamedDB server (e.g. 'http://localhost:8080'). */
+  /** Base HTTP URL of the TetherDB server (e.g. 'http://localhost:8080'). */
   serverUrl: string;
   /** Optional custom fetch implementation. */
   fetch?: typeof fetch;
 }
 
 /**
- * Lightweight HTTP client for BeamedDB authentication endpoints (`/auth/register`, `/auth/login`, `/health`).
+ * Lightweight HTTP client for TetherDB authentication endpoints (`/auth/register`, `/auth/login`, `/health`).
  */
-export class BeamedAuthClient {
+export class TetherAuthClient {
   private serverUrl: string;
   private fetchFn: typeof fetch;
 
   /**
-   * Initializes a new BeamedAuthClient instance.
+   * Initializes a new TetherAuthClient instance.
    *
    * @param options - Configuration options.
    */

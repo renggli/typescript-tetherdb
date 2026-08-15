@@ -326,7 +326,7 @@ export class Table<T = unknown> implements ITable {
         listener(events);
       } catch (err) {
         console.error(
-          `[BeamedDB] Error in listener for ${this.storeName}:`,
+          `[TetherDB] Error in listener for ${this.storeName}:`,
           err,
         );
       }

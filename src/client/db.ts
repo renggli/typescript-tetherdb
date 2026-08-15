@@ -1,20 +1,22 @@
 import { generateClientId } from '../shared/clock.js';
-import { type AuthResult, BeamedAuthClient } from './auth-client.js';
+import { type AuthResult, TetherAuthClient } from './auth-client.js';
 import { IDBManager } from './idb.js';
 import {
-  BeamedSyncClient,
   type SyncOptions,
   SyncStatus,
+  TetherSyncClient,
   type WebSocketConstructor,
 } from './sync.js';
 import { type ITable, Table } from './table.js';
 
 /**
- * Options for configuring a BeamedClientDB instance.
+ * Options for configuring a TetherDB database instance.
  */
-export interface BeamedClientOptions {
+export interface TetherClientOptions {
   /** Name of the local IndexedDB database. */
   name: string;
+  /** Optional application namespace identifier (defaults to 'default'). */
+  appId?: string;
   /** Schema version number (defaults to 1). */
   version?: number;
   /** Pre-declared array of table/store names to create upon database opening. */
@@ -23,8 +25,11 @@ export interface BeamedClientOptions {
   sync?: SyncOptions;
 }
 
+/** Alias for TetherClientOptions. */
+export type TetherDBOptions = TetherClientOptions;
+
 /**
- * Options for registering or logging into a remote server from BeamedClientDB.
+ * Options for registering or logging into a remote server from TetherDB.
  */
 export interface AuthOptions {
   /** Base HTTP URL of the server (e.g. 'http://localhost:8080'). */
@@ -33,6 +38,8 @@ export interface AuthOptions {
   username: string;
   /** Account password. */
   password: string;
+  /** Optional application namespace identifier (defaults to 'default' or database appId). */
+  appId?: string;
   /** Optional custom WebSocket URL override. */
   wsUrl?: string;
   /** Custom WebSocket constructor for Node.js environments. */
@@ -43,22 +50,24 @@ export interface AuthOptions {
  * Main client-side database entry point providing reactive IndexedDB tables,
  * local-first storage, and dynamic background synchronization.
  */
-export class BeamedClientDB {
+export class TetherDB {
   private idb: IDBManager;
   private tables: Map<string, ITable> = new Map();
   private clientId: string;
-  private syncClient: BeamedSyncClient | null = null;
+  private syncClient: TetherSyncClient | null = null;
   private name: string;
+  private appId?: string;
   private syncStatusListeners: Set<(status: SyncStatus) => void> = new Set();
   private syncStatusUnsubscribe: (() => void) | null = null;
 
   /**
-   * Initializes a new BeamedClientDB database instance.
+   * Initializes a new TetherDB database instance.
    *
    * @param options - Configuration options for the local database and optional sync connection.
    */
-  constructor(options: BeamedClientOptions) {
+  constructor(options: TetherClientOptions) {
     this.name = options.name;
+    this.appId = options.appId;
     this.clientId = generateClientId();
     this.idb = new IDBManager(
       options.name,
@@ -79,6 +88,13 @@ export class BeamedClientDB {
   }
 
   /**
+   * The application namespace identifier, if specified.
+   */
+  get applicationIdentifier(): string | undefined {
+    return this.appId;
+  }
+
+  /**
    * The internal IndexedDB transaction coordinator.
    */
   get idbManager(): IDBManager {
@@ -95,7 +111,7 @@ export class BeamedClientDB {
   /**
    * The real-time synchronization client instance, or `null` if sync is not enabled.
    */
-  get sync(): BeamedSyncClient | null {
+  get sync(): TetherSyncClient | null {
     return this.syncClient;
   }
 
@@ -131,11 +147,16 @@ export class BeamedClientDB {
       this.disableSync();
     }
 
-    this.syncClient = new BeamedSyncClient(
+    const syncOptions: SyncOptions = {
+      appId: this.appId,
+      ...options,
+    };
+
+    this.syncClient = new TetherSyncClient(
       this.idb,
       (storeName) => this.table(storeName),
       () => this.clientId,
-      options,
+      syncOptions,
     );
 
     this.syncStatusUnsubscribe = this.syncClient.onStatusChange((status) => {
@@ -143,7 +164,7 @@ export class BeamedClientDB {
         try {
           listener(status);
         } catch (err) {
-          console.error('[BeamedDB] Sync status listener error:', err);
+          console.error('[TetherDB] Sync status listener error:', err);
         }
       }
     });
@@ -165,7 +186,7 @@ export class BeamedClientDB {
       try {
         listener(SyncStatus.Disconnected);
       } catch (err) {
-        console.error('[BeamedDB] Sync status listener error:', err);
+        console.error('[TetherDB] Sync status listener error:', err);
       }
     }
   }
@@ -177,7 +198,7 @@ export class BeamedClientDB {
    * @returns A promise resolving to the authentication result.
    */
   async register(options: AuthOptions): Promise<AuthResult> {
-    const authClient = new BeamedAuthClient({ serverUrl: options.serverUrl });
+    const authClient = new TetherAuthClient({ serverUrl: options.serverUrl });
     const result = await authClient.register({
       username: options.username,
       password: options.password,
@@ -187,6 +208,7 @@ export class BeamedClientDB {
     this.enableSync({
       url: wsUrl,
       token: result.token,
+      appId: options.appId ?? this.appId,
       WebSocketClass: options.WebSocketClass,
     });
 
@@ -201,7 +223,7 @@ export class BeamedClientDB {
    * @returns A promise resolving to the authentication result.
    */
   async login(options: AuthOptions): Promise<AuthResult> {
-    const authClient = new BeamedAuthClient({ serverUrl: options.serverUrl });
+    const authClient = new TetherAuthClient({ serverUrl: options.serverUrl });
     const result = await authClient.login({
       username: options.username,
       password: options.password,
@@ -211,6 +233,7 @@ export class BeamedClientDB {
     this.enableSync({
       url: wsUrl,
       token: result.token,
+      appId: options.appId ?? this.appId,
       WebSocketClass: options.WebSocketClass,
     });
 
@@ -264,6 +287,9 @@ export class BeamedClientDB {
     await this.idb.close();
   }
 }
+
+/** Alias for TetherDB. */
+export const TetherClientDB = TetherDB;
 
 /**
  * Converts an HTTP(S) URL to a WS(S) URL.

@@ -1,5 +1,5 @@
 {
-  "name": "@beameddb/example-todo",
+  "name": "@tetherdb/example-todo",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "beameddb": "file:../..",
+    "tetherdb": "file:../..",
     "ws": "^8.18.0"
   },
   "devDependencies": {

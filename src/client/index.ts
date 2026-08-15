@@ -1,7 +1,7 @@
 /**
- * BeamedDB Client — Reactive IndexedDB wrapper with offline-first synchronization.
+ * TetherDB Client — Reactive IndexedDB wrapper with offline-first synchronization.
  *
- * @module beameddb/client
+ * @module tetherdb/client
  */
 
 export * from './auth-client.js';

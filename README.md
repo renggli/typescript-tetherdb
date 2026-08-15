@@ -1,125 +1,152 @@
-# BeamedDB 🚀
+# TetherDB 🚀
 
-**BeamedDB** is a lightweight, offline-first TypeScript library combining a reactive IndexedDB client wrapper with real-time two-way WebSocket synchronization against a server backend.
+**TetherDB** is a lightweight, offline-first TypeScript library combining a reactive IndexedDB client wrapper with real-time two-way WebSocket synchronization against a server backend.
 
 ## Features
 
 - **Offline-First & Local-First**: Operations are applied to IndexedDB immediately, queued in an outbox, and transparently synced in the background.
+- **Multi-Application on Standard Domain**: Host multiple independent web apps on a single TetherDB server instance (e.g. `store.mysite.com`). Data and real-time broadcasts are isolated by `appId`.
+- **Application & Table Discovery**: Inspect registered apps and their active tables programmatically (`listApps()`, `listStores()`) or via HTTP endpoints (`GET /apps`, `GET /apps/:appId/tables`).
+- **Zero-Config Server Starter & CLI**: Start in one line with `startServer()` or run directly via `npx tetherdb --port 8080 --dir ./data`.
 - **Seamless Local-to-Synced Onboarding**: Start offline with zero-config local storage, then attach cloud sync with a single `db.register()` or `db.login()` call.
 - **Batch-by-Default Architecture**: High-throughput atomic mutations (`putAll`, `deleteAll`, `getAll`) and coalesced WebSocket transmission.
 - **Client-First Synchronization**: On first load or cache-miss, the client receives the complete dataset snapshot. On reconnect, it catches up with delta diffs.
 - **Adaptive Snapshot Delivery & Compaction**: Compacts changelog history and automatically falls back to full snapshots when changelog windows are exceeded.
 - **Last-Write-Wins (LWW) Conflict Resolution**: Monotonic logical clocks and deterministic tie-breaking.
-- **Real-Time Broadcast**: Server broadcasts incoming changes in real-time to all other active client instances belonging to the same user.
-- **Sharded & Secure File Storage**: Persists data per user in sharded directories (`<baseDir>/<shard>/<userId>/stores/`) with path confinement and injection defenses.
+- **Real-Time Broadcast**: Server broadcasts incoming changes in real-time to all other active client instances belonging to the same app and user.
+- **Sharded & Secure File Storage**: Persists data per app and user in sharded directories (`<baseDir>/<appId>/<shard>/<userId>/stores/`) with path confinement and injection defenses.
 - **Simple, Secure Auth**: Built-in account registration, password hashing (scrypt with salt), and HMAC-signed tokens.
-- **Modern Subpath Exports**: Import cleanly via `beameddb/client`, `beameddb/server`, and `beameddb/shared`.
+- **Modern Subpath Exports**: Import cleanly via `tetherdb/client`, `tetherdb/server`, and `tetherdb/shared`.
 
 ---
 
 ## Installation
 
 ```bash
-npm install beameddb
+npm install tetherdb
 ```
 
 ---
 
 ## Quick Start
 
-### 1. Server Setup
+### 1. Zero-Config Standard Server
 
-```typescript
-import { BeamedServer, FileStorageAdapter } from "beameddb/server";
+You can launch a TetherDB server instantly from the command line:
 
-// Start BeamedDB server with file-based persistence
-const server = new BeamedServer({
-  storage: new FileStorageAdapter({ baseDir: "./data/users" }),
-  // Or simply pass `storageDir: "./data/users"`
-});
-
-const httpServer = await server.listen(8080, "0.0.0.0");
-console.log("BeamedDB server running at http://localhost:8080");
+```bash
+# Run standalone server CLI
+npx tetherdb --port 8080 --dir ./data
 ```
 
-### 2. Client Usage: Offline-First to Real-Time Sync
+Or programmatically in two lines of TypeScript:
 
 ```typescript
-import { BeamedClientDB } from "beameddb/client";
+import { startServer } from 'tetherdb/server';
+
+const running = await startServer({
+  port: 8080,
+  storageDir: './data',
+});
+console.log(`TetherDB running at http://${running.host}:${running.port}`);
+```
+
+### 2. Client Usage: Multi-App Offline-First to Real-Time Sync
+
+```typescript
+import { TetherDB } from 'tetherdb/client';
 
 interface Todo {
   title: string;
   completed: boolean;
 }
 
-// 1. Initialize local database with zero configuration
-const db = new BeamedClientDB({ name: "my-app-db" });
-const todos = db.table<Todo>("todos");
+// 1. Initialize local database scoped to your application
+const db = new TetherDB({
+  name: 'my-todos',
+  appId: 'todo-app', // Partition data & sync channels per application
+});
+const todos = db.table<Todo>('todos');
 
-// Reactive subscription to local & remote changes (always receives a list of TableChangeEvent)
+// Reactive subscription to local & remote changes
 const unsubscribe = todos.subscribe((events) => {
   for (const { op, id, data, isRemote } of events) {
     console.log(`Change (${op}) on ${id}, isRemote: ${isRemote}:`, data);
   }
 });
 
-// Write locally right away
-await todos.put("task-1", {
-  title: "Build awesome app",
+// Write locally right away (offline-first)
+await todos.put('task-1', {
+  title: 'Build awesome app',
   completed: false,
 });
 
 // Bulk put (atomic IDB transaction)
 await todos.putAll([
-  { id: "task-2", data: { title: "Write tests", completed: false } },
-  { id: "task-3", data: { title: "Deploy", completed: false } },
+  { id: 'task-2', data: { title: 'Write tests', completed: false } },
+  { id: 'task-3', data: { title: 'Deploy', completed: false } },
 ]);
 
 // Read items
-const task = await todos.get("task-1");
-const subset = await todos.getAll(["task-1", "task-2"]);
+const task = await todos.get('task-1');
 const allTasks = await todos.getAll();
 
 // 2. Connect sync seamlessly when user registers or logs in
 await db.register({
-  serverUrl: "http://localhost:8080",
-  username: "alice",
-  password: "mypassword",
+  serverUrl: 'http://localhost:8080',
+  username: 'alice',
+  password: 'mypassword',
 });
 
 // Monitor live synchronization status
 db.onSyncStatusChange((status) => {
-  console.log("Sync status:", status); // 'connected', 'connecting', 'disconnected', 'error'
+  console.log('Sync status:', status); // 'connected', 'connecting', 'disconnected', 'error'
 });
 ```
 
 ---
 
+## Server Discovery Endpoints
+
+The standard server provides discovery endpoints for inspecting active applications and their tables:
+
+| Method | Endpoint | Description | Auth Required |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/apps` | Lists active application namespace identifiers | Optional (filters by user if `Bearer` token provided) |
+| `GET` | `/apps/:appId/tables` | Lists table names created in the app | Yes (`Authorization: Bearer <token>`) |
+| `GET` | `/health` | Server liveness check (`{ status: "ok" }`) | No |
+| `POST` | `/auth/register` | Register a new user account | No |
+| `POST` | `/auth/login` | Log in and receive signed session token | No |
+| `WS` | `/sync` | Two-way WebSocket real-time synchronization | Token handshake in auth message |
+
+---
+
 ## Architecture & Subpaths
 
-- **`beameddb/client`**:
-  - `BeamedClientDB`: Main database client with local-first storage, dynamic sync, and auth helpers.
+- **`tetherdb/client`**:
+  - `TetherDB`: Main database client with local-first storage, multi-app support, dynamic sync, and auth helpers.
   - `Table`: Typed table wrapper around IndexedDB object stores supporting single and bulk CRUD (`put`, `putAll`, `delete`, `deleteAll`, `get`, `getAll`, `clear`).
-  - `BeamedSyncClient`: Real-time WebSocket sync manager with debounced outbox draining.
-  - `BeamedAuthClient`: Lightweight HTTP client for authentication endpoints.
+  - `TetherSyncClient`: Real-time WebSocket sync manager with debounced outbox draining and exponential backoff.
+  - `TetherAuthClient`: Lightweight HTTP client for authentication endpoints.
   - `IDBManager`: IndexedDB layer with outbox and metadata stores.
-- **`beameddb/server`**:
-  - `BeamedServer`: Unified HTTP and WebSocket server.
+- **`tetherdb/server`**:
+  - `startServer`: Zero-config server launcher with automatic port assignment and clean shutdown.
+  - `TetherServer`: Unified HTTP and WebSocket server with discovery endpoints.
   - `AuthManager`: User registration, credential verification, and token generation.
-  - `SyncHub`: WebSocket connection manager with user-level change routing and broadcasting.
-  - `FileStorageAdapter`: Persists data per user in sharded subdirectories (`<baseDir>/<shard>/<userId>/stores/`).
+  - `SyncHub`: WebSocket connection manager with app- and user-level change routing and broadcasting.
+  - `FileStorageAdapter`: Multi-app sharded filesystem storage (`<baseDir>/<appId>/<shard>/<userId>/stores/`).
   - `MemoryStorageAdapter`: In-memory storage adapter for testing and ephemeral workloads.
-  - `StorageAdapter`: Pluggable storage adapter interface.
-- **`beameddb/shared`**:
+  - `StorageAdapter`: Pluggable storage adapter interface with `listApps()` and `listStores()`.
+- **`tetherdb/shared`**:
   - Shared types (`ChangeRecord`, `StoredRecord`, `ClientMessage`, `ServerMessage`, `ServerLimits`).
-  - Security validators (`validateUserId`, `validateStoreName`, `validateRecordId`, `validateUsername`).
+  - Security validators (`validateUserId`, `validateAppId`, `validateStoreName`, `validateRecordId`, `validateUsername`).
   - Clock utilities (`shouldOverwrite`, `generateClientId`).
 
 ---
 
 ## Example Todo Application
 
-BeamedDB includes a full-featured, offline-first collaborative Todo application in `examples/todo/` demonstrating real-time synchronization across multiple browser tabs:
+TetherDB includes a full-featured, offline-first collaborative Todo application in `examples/todo/` demonstrating real-time synchronization across multiple browser tabs:
 
 ```bash
 # Build library bundles and start the example server

@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as http from 'node:http';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BeamedServer } from 'beameddb/server';
+import { TetherServer } from 'tetherdb/server';
 import { createServer as createViteServer } from 'vite';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -17,11 +17,11 @@ async function main(): Promise<void> {
   const PORT = Number(process.env.PORT ?? 3000);
   await fs.mkdir(dataDir, { recursive: true });
 
-  const beamedServer = new BeamedServer({
+  const tetherServer = new TetherServer({
     storageDir: dataDir,
   });
 
-  await beamedServer.auth.init();
+  await tetherServer.auth.init();
 
   // Create Vite server in middleware mode
   const vite = await createViteServer({
@@ -34,9 +34,9 @@ async function main(): Promise<void> {
 
   const server = http.createServer(
     async (req: http.IncomingMessage, res: http.ServerResponse) => {
-      // 1. Handle BeamedDB API routes (/auth/register, /auth/login, /health)
-      const handledByBeamed = await beamedServer.handleHttpRequest(req, res);
-      if (handledByBeamed) return;
+      // 1. Handle TetherDB API routes (/auth/register, /auth/login, /apps, /health)
+      const handledByTether = await tetherServer.handleHttpRequest(req, res);
+      if (handledByTether) return;
 
       // 2. Delegate all other requests to Vite middleware (handles TS, HMR, HTML, etc.)
       vite.middlewares(req, res);
@@ -44,11 +44,11 @@ async function main(): Promise<void> {
   );
 
   // Attach WebSocket sync handler
-  beamedServer.attach(server);
+  tetherServer.attach(server);
 
   server.listen(PORT, '0.0.0.0', () => {
     console.log(
-      `⚡ BeamedDB Todo Example running at: http://localhost:${PORT}`,
+      `⚡ TetherDB Todo Example running at: http://localhost:${PORT}`,
     );
     console.log(`📁 Per-user storage location: ${dataDir}`);
     console.log(

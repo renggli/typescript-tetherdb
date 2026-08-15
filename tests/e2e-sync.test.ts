@@ -3,8 +3,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
-import { BeamedClientDB } from '../src/client/db.js';
-import { BeamedServer } from '../src/server/server.js';
+import { TetherDB } from '../src/client/db.js';
+import { TetherServer } from '../src/server/server.js';
 import { OperationType } from '../src/shared/types.js';
 
 function delay(ms: number) {
@@ -12,7 +12,7 @@ function delay(ms: number) {
 }
 
 describe('End-to-End WebSocket Sync', () => {
-  let server: BeamedServer;
+  let server: TetherServer;
   let wsUrl: string;
   let tmpDir: string;
   let userToken: string;
@@ -22,11 +22,11 @@ describe('End-to-End WebSocket Sync', () => {
     port = 9000 + Math.floor(Math.random() * 1000);
     tmpDir = path.join(
       os.tmpdir(),
-      `beameddb-e2e-${Math.random().toString(36).substring(2, 8)}`,
+      `tetherdb-e2e-${Math.random().toString(36).substring(2, 8)}`,
     );
     await fs.mkdir(tmpDir, { recursive: true });
 
-    server = new BeamedServer({
+    server = new TetherServer({
       storageDir: tmpDir,
     });
 
@@ -44,7 +44,7 @@ describe('End-to-End WebSocket Sync', () => {
   });
 
   it('should sync local changes from Client A to server', async () => {
-    const clientA = new BeamedClientDB({
+    const clientA = new TetherDB({
       name: `client-a-${Math.random().toString(36).substring(2, 8)}`,
       stores: ['todos'],
       sync: {
@@ -75,7 +75,7 @@ describe('End-to-End WebSocket Sync', () => {
 
   it('should perform initial snapshot sync on new client connection', async () => {
     // Client A creates data
-    const clientA = new BeamedClientDB({
+    const clientA = new TetherDB({
       name: `client-a-${Math.random().toString(36).substring(2, 8)}`,
       stores: ['todos'],
       sync: {
@@ -93,7 +93,7 @@ describe('End-to-End WebSocket Sync', () => {
     await clientA.close();
 
     // Client B connects from clean state
-    const clientB = new BeamedClientDB({
+    const clientB = new TetherDB({
       name: `client-b-${Math.random().toString(36).substring(2, 8)}`,
       stores: ['todos'],
       sync: {
@@ -118,7 +118,7 @@ describe('End-to-End WebSocket Sync', () => {
   });
 
   it('should broadcast real-time changes between concurrent clients', async () => {
-    const clientA = new BeamedClientDB({
+    const clientA = new TetherDB({
       name: `client-a-${Math.random().toString(36).substring(2, 8)}`,
       stores: ['messages'],
       sync: {
@@ -128,7 +128,7 @@ describe('End-to-End WebSocket Sync', () => {
       },
     });
 
-    const clientB = new BeamedClientDB({
+    const clientB = new TetherDB({
       name: `client-b-${Math.random().toString(36).substring(2, 8)}`,
       stores: ['messages'],
       sync: {
@@ -169,7 +169,7 @@ describe('End-to-End WebSocket Sync', () => {
   });
 
   it('should catch up with diff sync after being offline', async () => {
-    const clientA = new BeamedClientDB({
+    const clientA = new TetherDB({
       name: `client-a-${Math.random().toString(36).substring(2, 8)}`,
       stores: ['items'],
       sync: {
@@ -185,7 +185,7 @@ describe('End-to-End WebSocket Sync', () => {
 
     // Client B connects and gets initial sync
     const clientBName = `client-b-${Math.random().toString(36).substring(2, 8)}`;
-    let clientB = new BeamedClientDB({
+    let clientB = new TetherDB({
       name: clientBName,
       stores: ['items'],
       sync: {
@@ -208,7 +208,7 @@ describe('End-to-End WebSocket Sync', () => {
     await delay(200);
 
     // Client B comes back online with the same IndexedDB database
-    clientB = new BeamedClientDB({
+    clientB = new TetherDB({
       name: clientBName,
       stores: ['items'],
       sync: {
@@ -232,7 +232,7 @@ describe('End-to-End WebSocket Sync', () => {
   it('should enforce multi-tenant isolation across users', async () => {
     const user2 = await server.auth.register('otheruser', 'password123');
 
-    const clientUser1 = new BeamedClientDB({
+    const clientUser1 = new TetherDB({
       name: `client-u1-${Math.random().toString(36).substring(2, 8)}`,
       stores: ['docs'],
       sync: {
@@ -242,7 +242,7 @@ describe('End-to-End WebSocket Sync', () => {
       },
     });
 
-    const clientUser2 = new BeamedClientDB({
+    const clientUser2 = new TetherDB({
       name: `client-u2-${Math.random().toString(36).substring(2, 8)}`,
       stores: ['docs'],
       sync: {
@@ -286,7 +286,7 @@ describe('End-to-End WebSocket Sync', () => {
     await server.storageAdapter.applyChanges(userId, changes);
 
     // New client connects with lastSyncSeq: 1 (so 59 changes diff > 50 threshold)
-    const client = new BeamedClientDB({
+    const client = new TetherDB({
       name: `client-bulk-${Math.random().toString(36).substring(2, 8)}`,
       stores: ['tasks'],
       sync: {
@@ -306,7 +306,7 @@ describe('End-to-End WebSocket Sync', () => {
   });
 
   it('should batch rapid local mutations and beam them to remote clients cohesively', async () => {
-    const clientA = new BeamedClientDB({
+    const clientA = new TetherDB({
       name: `client-a-bulk-${Math.random().toString(36).substring(2, 8)}`,
       stores: ['items'],
       sync: {
@@ -316,7 +316,7 @@ describe('End-to-End WebSocket Sync', () => {
       },
     });
 
-    const clientB = new BeamedClientDB({
+    const clientB = new TetherDB({
       name: `client-b-bulk-${Math.random().toString(36).substring(2, 8)}`,
       stores: ['items'],
       sync: {

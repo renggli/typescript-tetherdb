@@ -90,4 +90,35 @@ describe('AuthManager', () => {
     // Token signed with different secret key
     expect(auth2.verifyToken(token)).toBeNull();
   });
+
+  it('should track and update lastLoginAt in UserAccount', async () => {
+    const auth = new AuthManager();
+    const beforeReg = Date.now();
+    const result = await auth.register('eve', 'password123');
+    const afterReg = Date.now();
+
+    const account = auth.getUserById(result.user.id);
+    expect(account).toBeDefined();
+    expect(account?.lastLoginAt).toBeGreaterThanOrEqual(beforeReg);
+    expect(account?.lastLoginAt).toBeLessThanOrEqual(afterReg);
+
+    const initialLoginAt = account?.lastLoginAt ?? 0;
+
+    // Small delay to ensure timestamp difference
+    await new Promise((r) => setTimeout(r, 15));
+
+    // Failed login should NOT update lastLoginAt
+    await expect(auth.login('eve', 'wrongpassword')).rejects.toThrow('Invalid');
+    expect(auth.getUserById(result.user.id)?.lastLoginAt).toBe(initialLoginAt);
+
+    // Successful login should update lastLoginAt
+    const beforeLogin = Date.now();
+    await auth.login('eve', 'password123');
+    const afterLogin = Date.now();
+
+    const updatedAccount = auth.getUserByUsername('eve');
+    expect(updatedAccount?.lastLoginAt).toBeGreaterThanOrEqual(beforeLogin);
+    expect(updatedAccount?.lastLoginAt).toBeLessThanOrEqual(afterLogin);
+    expect((updatedAccount?.lastLoginAt ?? 0) >= initialLoginAt).toBe(true);
+  });
 });

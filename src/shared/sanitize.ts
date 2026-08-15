@@ -3,7 +3,7 @@
  * Protects server-side storage and synchronization from injection and traversal attacks.
  * Formats errors with exact user and table context for precise debugging and monitoring.
  *
- * @module beameddb/shared/sanitize
+ * @module tetherdb/shared/sanitize
  */
 
 /**
@@ -20,6 +20,11 @@ const SAFE_STORE_REGEX = /^[a-zA-Z0-9_-]{1,64}$/;
  * Regex for valid usernames (alphanumeric, underscores, hyphens, and dots).
  */
 const SAFE_USERNAME_REGEX = /^[a-zA-Z0-9_.-]{2,64}$/;
+
+/**
+ * Regex for valid application namespace identifiers (alphanumeric, underscores, hyphens, and dots).
+ */
+const SAFE_APP_ID_REGEX = /^[a-zA-Z0-9_.-]{1,64}$/;
 
 /**
  * Reserved keywords and prototype properties that must never be used as store or metadata keys.
@@ -52,6 +57,33 @@ export function validateUserId(userId: string): string {
     );
   }
   return userId;
+}
+
+/**
+ * Validates an application namespace identifier. Defaults to 'default' if omitted.
+ *
+ * @param appId - The application ID to validate.
+ * @returns The validated application ID.
+ * @throws Error if the application ID is invalid or reserved.
+ */
+export function validateAppId(appId?: string): string {
+  const normalized = appId ? appId.trim() : 'default';
+  if (!SAFE_APP_ID_REGEX.test(normalized)) {
+    throw new Error(
+      `Invalid application ID: "${appId}". Application IDs must be 1-64 alphanumeric characters, hyphens, underscores, or dots.`,
+    );
+  }
+  const lower = normalized.toLowerCase();
+  if (
+    lower === '__proto__' ||
+    lower === 'prototype' ||
+    lower === 'constructor' ||
+    lower === 'users' ||
+    lower === 'secret'
+  ) {
+    throw new Error(`Application ID "${appId}" is a reserved keyword.`);
+  }
+  return normalized;
 }
 
 /**

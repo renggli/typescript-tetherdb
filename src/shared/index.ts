@@ -1,7 +1,7 @@
 /**
- * BeamedDB Shared — Message protocol schemas, types, and conflict resolution algorithms.
+ * TetherDB Shared — Message protocol schemas, types, and conflict resolution algorithms.
  *
- * @module beameddb/shared
+ * @module tetherdb/shared
  */
 
 export * from './clock.js';

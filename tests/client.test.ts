@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { BeamedClientDB } from '../src/client/db.js';
+import { TetherDB } from '../src/client/db.js';
 import { OperationType } from '../src/shared/types.js';
 
-describe('BeamedClientDB local operations', () => {
-  let db: BeamedClientDB;
+describe('TetherDB local operations', () => {
+  let db: TetherDB;
 
   beforeEach(() => {
-    db = new BeamedClientDB({
+    db = new TetherDB({
       name: `test-db-${Math.random().toString(36).substring(2, 8)}`,
       stores: ['todos', 'notes'],
     });
@@ -165,5 +165,50 @@ describe('BeamedClientDB local operations', () => {
       { op: OperationType.Delete, id: 'n1' },
       { op: OperationType.Delete, id: 'n2' },
     ]);
+  });
+
+  it('should persist and reload local database across multiple TetherDB instances', async () => {
+    const dbName = `persistent-db-${Date.now()}`;
+    const instance1 = new TetherDB({ name: dbName });
+    const table1 = instance1.table<{ title: string }>('bookmarks');
+    await table1.put('b1', { title: 'GitHub' });
+    await table1.put('b2', { title: 'MDN' });
+    await instance1.close();
+
+    // Reopen database with new instance
+    const instance2 = new TetherDB({ name: dbName });
+    const table2 = instance2.table<{ title: string }>('bookmarks');
+    const items = await table2.getAll();
+    expect(items).toHaveLength(2);
+    expect(items.map((i) => i.title).sort()).toEqual(['GitHub', 'MDN']);
+    await instance2.close();
+  });
+
+  it('should dynamically create undeclared stores on demand', async () => {
+    const dynamicDb = new TetherDB({
+      name: `dyn-db-${Date.now()}`,
+    });
+
+    const customTable = dynamicDb.table<{ val: number }>('custom_metrics');
+    await customTable.put('cpu', { val: 42 });
+    const record = await customTable.get('cpu');
+    expect(record?.val).toBe(42);
+
+    await dynamicDb.close();
+  });
+
+  it('should clear table contents completely using table.clear()', async () => {
+    const table = db.table<{ name: string }>('tags');
+    await table.putAll([
+      { id: 't1', data: { name: 'work' } },
+      { id: 't2', data: { name: 'personal' } },
+      { id: 't3', data: { name: 'urgent' } },
+    ]);
+
+    expect(await table.getAll()).toHaveLength(3);
+    const clearedCount = await table.clear();
+    expect(clearedCount).toBe(3);
+    expect(await table.getAll()).toHaveLength(0);
+    expect(await table.getAllWithMetadata()).toHaveLength(0);
   });
 });
