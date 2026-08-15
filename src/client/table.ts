@@ -135,6 +135,17 @@ export class Table<T = unknown> implements ITable {
   }
 
   /**
+   * Deletes all records in this table and queues tombstones for synchronization.
+   *
+   * @returns A promise resolving to the number of deleted records.
+   */
+  async clear(): Promise<number> {
+    const records = await this.idb.getAllRecords<T>(this.storeName);
+    const ids = records.map((r) => r.id);
+    return this.deleteAll(ids);
+  }
+
+  /**
    * Retrieves a single stored record including metadata (version, timestamp, deleted flag).
    *
    * @param id - The unique record identifier.

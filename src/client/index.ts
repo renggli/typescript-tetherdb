@@ -4,6 +4,7 @@
  * @module beameddb/client
  */
 
+export * from './auth-client.js';
 export * from './db.js';
 export * from './idb.js';
 export * from './sync.js';

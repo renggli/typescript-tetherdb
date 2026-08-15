@@ -443,6 +443,24 @@ export class IDBManager {
   }
 
   /**
+   * Clears all user application object stores, outbox queue entries, and metadata.
+   */
+  async clearAllData(): Promise<void> {
+    const db = await this.getDB();
+    const stores = Array.from(db.objectStoreNames);
+    if (stores.length === 0) return;
+
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(stores, 'readwrite');
+      for (const storeName of stores) {
+        tx.objectStore(storeName).clear();
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  /**
    * Closes the active IndexedDB connection.
    */
   async close(): Promise<void> {

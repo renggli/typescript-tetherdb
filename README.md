@@ -5,6 +5,7 @@
 ## Features
 
 - **Offline-First & Local-First**: Operations are applied to IndexedDB immediately, queued in an outbox, and transparently synced in the background.
+- **Seamless Local-to-Synced Onboarding**: Start offline with zero-config local storage, then attach cloud sync with a single `db.register()` or `db.login()` call.
 - **Batch-by-Default Architecture**: High-throughput atomic mutations (`putAll`, `deleteAll`, `getAll`) and coalesced WebSocket transmission.
 - **Client-First Synchronization**: On first load or cache-miss, the client receives the complete dataset snapshot. On reconnect, it catches up with delta diffs.
 - **Adaptive Snapshot Delivery & Compaction**: Compacts changelog history and automatically falls back to full snapshots when changelog windows are exceeded.
@@ -41,19 +42,7 @@ const httpServer = await server.listen(8080, "0.0.0.0");
 console.log("BeamedDB server running at http://localhost:8080");
 ```
 
-### 2. Client Registration & Authentication
-
-```typescript
-// Register an account
-const response = await fetch("http://localhost:8080/auth/register", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ username: "alice", password: "mypassword" }),
-});
-const { user, token } = await response.json();
-```
-
-### 3. Client Database Usage
+### 2. Client Usage: Offline-First to Real-Time Sync
 
 ```typescript
 import { BeamedClientDB } from "beameddb/client";
@@ -63,15 +52,8 @@ interface Todo {
   completed: boolean;
 }
 
-const db = new BeamedClientDB({
-  name: "my-app-db",
-  stores: ["todos"],
-  sync: {
-    url: "ws://localhost:8080/sync",
-    token: token, // Auth token from registration/login
-  },
-});
-
+// 1. Initialize local database with zero configuration
+const db = new BeamedClientDB({ name: "my-app-db" });
 const todos = db.table<Todo>("todos");
 
 // Reactive subscription to local & remote changes (always receives a list of TableChangeEvent)
@@ -81,29 +63,34 @@ const unsubscribe = todos.subscribe((events) => {
   }
 });
 
-// Single put
+// Write locally right away
 await todos.put("task-1", {
   title: "Build awesome app",
   completed: false,
 });
 
-// Bulk put (atomic IDB transaction & single sync batch)
+// Bulk put (atomic IDB transaction)
 await todos.putAll([
   { id: "task-2", data: { title: "Write tests", completed: false } },
   { id: "task-3", data: { title: "Deploy", completed: false } },
 ]);
 
-// Read an item
+// Read items
 const task = await todos.get("task-1");
-
-// Read filtered items
 const subset = await todos.getAll(["task-1", "task-2"]);
-
-// Read all items
 const allTasks = await todos.getAll();
 
-// Bulk delete (atomic IDB transaction & single sync batch)
-await todos.deleteAll(["task-1", "task-2"]);
+// 2. Connect sync seamlessly when user registers or logs in
+await db.register({
+  serverUrl: "http://localhost:8080",
+  username: "alice",
+  password: "mypassword",
+});
+
+// Monitor live synchronization status
+db.onSyncStatusChange((status) => {
+  console.log("Sync status:", status); // 'connected', 'connecting', 'disconnected', 'error'
+});
 ```
 
 ---
@@ -111,9 +98,10 @@ await todos.deleteAll(["task-1", "task-2"]);
 ## Architecture & Subpaths
 
 - **`beameddb/client`**:
-  - `BeamedClientDB`: Main database client.
-  - `Table`: Typed table wrapper around IndexedDB object stores supporting single and bulk CRUD.
+  - `BeamedClientDB`: Main database client with local-first storage, dynamic sync, and auth helpers.
+  - `Table`: Typed table wrapper around IndexedDB object stores supporting single and bulk CRUD (`put`, `putAll`, `delete`, `deleteAll`, `get`, `getAll`, `clear`).
   - `BeamedSyncClient`: Real-time WebSocket sync manager with debounced outbox draining.
+  - `BeamedAuthClient`: Lightweight HTTP client for authentication endpoints.
   - `IDBManager`: IndexedDB layer with outbox and metadata stores.
 - **`beameddb/server`**:
   - `BeamedServer`: Unified HTTP and WebSocket server.

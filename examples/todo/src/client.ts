@@ -1,4 +1,6 @@
 import {
+  type AuthResult,
+  BeamedAuthClient,
   BeamedClientDB,
   SyncStatus,
   type Table,
@@ -6,62 +8,53 @@ import {
 } from 'beameddb';
 
 /**
- * Todo record payload model stored in BeamedDB.
+ * Todo record data model.
  */
-export interface TodoItem {
-  /** The todo item title. */
+interface TodoItem {
   title: string;
-  /** Completion status flag. */
   completed: boolean;
 }
 
 /**
- * Filter view mode for todo items.
+ * Filter viewing modes for the todo list.
  */
-export enum FilterMode {
+enum FilterMode {
   All = 'all',
   Active = 'active',
   Completed = 'completed',
 }
 
 /**
- * Account modal authentication mode.
+ * Visual badge categories for the on-screen live event stream.
  */
-export enum AuthMode {
-  Login = 'login',
-  Register = 'register',
-}
-
-/**
- * Log entry origin category.
- */
-export enum LogCategory {
+enum LogCategory {
   Local = 'local',
   Remote = 'remote',
   Sync = 'sync',
 }
 
-interface UserSession {
-  user: {
-    id: string;
-    username: string;
-  };
-  token?: string;
+/**
+ * Mode of the authentication dialog modal.
+ */
+enum AuthMode {
+  Login = 'login',
+  Register = 'register',
 }
 
-// Application & Auth State
-let currentUser: UserSession | null = (() => {
+// User State from storage
+let currentUser: AuthResult | null = (() => {
   const saved = localStorage.getItem('beamed_todo_user');
   if (!saved) return null;
   try {
-    return JSON.parse(saved) as UserSession;
+    return JSON.parse(saved) as AuthResult;
   } catch {
     return null;
   }
 })();
 
-let db: BeamedClientDB | null = null;
-let todosTable: Table<TodoItem> | null = null;
+// Database & UI State
+const db = new BeamedClientDB({ name: 'beamed_todo_app' });
+const todosTable: Table<TodoItem> = db.table<TodoItem>('todos');
 let currentFilter: FilterMode = FilterMode.All;
 let authMode: AuthMode = AuthMode.Login;
 
@@ -125,122 +118,11 @@ function logEvent(category: LogCategory, tag: string, message: string): void {
 }
 
 /**
- * Initializes authentication and sets up the BeamedDB database connection.
- */
-async function initApp(): Promise<void> {
-  if (!currentUser) {
-    try {
-      const res = await fetch('/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'demo', password: 'password123' }),
-      });
-      if (res.ok) {
-        currentUser = (await res.json()) as UserSession;
-      } else {
-        const regRes = await fetch('/auth/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: 'demo', password: 'password123' }),
-        });
-        if (regRes.ok) {
-          currentUser = (await regRes.json()) as UserSession;
-        }
-      }
-      if (currentUser) {
-        localStorage.setItem('beamed_todo_user', JSON.stringify(currentUser));
-      }
-    } catch (_err) {
-      currentUser = { user: { id: 'offline_user', username: 'offline' } };
-    }
-  }
-
-  updateUserUI();
-  await setupDatabase();
-}
-
-/**
  * Updates the user badge text.
  */
 function updateUserUI(): void {
-  currentUsernameEl.textContent = currentUser?.user?.username ?? 'Guest';
-}
-
-/**
- * Configures the BeamedClientDB instance and sets up reactive subscriptions.
- */
-async function setupDatabase(): Promise<void> {
-  if (db) {
-    await db.close();
-  }
-
-  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${wsProtocol}//${window.location.host}/sync`;
-
-  // 1. Initialize BeamedClientDB with local IndexedDB and sync options
-  db = new BeamedClientDB({
-    name: `beamed-todo-${currentUser?.user?.id ?? 'guest'}`,
-    stores: ['todos'],
-    sync: currentUser?.token
-      ? {
-          url: wsUrl,
-          token: currentUser.token,
-        }
-      : undefined,
-  });
-
-  // 2. Obtain typed Table<TodoItem> reference
-  todosTable = db.table<TodoItem>('todos');
-
-  logEvent(LogCategory.Sync, 'Init', `Opened local IndexedDB table "todos"`);
-
-  // 3. Subscribe to reactive Table changes (both local mutations and remote WebSocket broadcasts)
-  todosTable.subscribe((events: TableChangeEvent<TodoItem>[]) => {
-    for (const { op, id, isRemote, data } of events) {
-      const origin = isRemote ? 'Remote Sync' : 'Local IDB';
-      const category = isRemote ? LogCategory.Remote : LogCategory.Local;
-      const title = data?.title ?? id;
-      logEvent(category, origin, `${op.toUpperCase()} "${title}"`);
-    }
-    renderTodos();
-  });
-
-  // 4. Monitor synchronization connection status
-  if (db.sync) {
-    db.sync.onStatusChange(async (status: SyncStatus) => {
-      updateSyncStatusUI(status);
-      logEvent(LogCategory.Sync, 'SyncStatus', status.toUpperCase());
-
-      // If token expired or server secret changed, re-authenticate demo user
-      if (
-        status === SyncStatus.Error &&
-        currentUser?.user?.username === 'demo'
-      ) {
-        try {
-          const res = await fetch('/auth/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: 'demo', password: 'password123' }),
-          });
-          if (res.ok) {
-            currentUser = (await res.json()) as UserSession;
-            localStorage.setItem(
-              'beamed_todo_user',
-              JSON.stringify(currentUser),
-            );
-            updateUserUI();
-            await setupDatabase();
-          }
-        } catch {
-          // Server offline
-        }
-      }
-    });
-  } else {
-    updateSyncStatusUI(SyncStatus.Disconnected);
-  }
-
-  await renderTodos();
+  currentUsernameEl.textContent =
+    currentUser?.user?.username ?? 'Offline Guest';
 }
 
 /**
@@ -255,11 +137,8 @@ function updateSyncStatusUI(status: SyncStatus): void {
     case SyncStatus.Connecting:
       statusText.textContent = 'Connecting...';
       break;
-    case SyncStatus.Syncing:
-      statusText.textContent = 'Syncing...';
-      break;
     case SyncStatus.Disconnected:
-      statusText.textContent = 'Offline';
+      statusText.textContent = 'Offline (Local Only)';
       break;
     case SyncStatus.Error:
       statusText.textContent = 'Sync Error';
@@ -268,12 +147,10 @@ function updateSyncStatusUI(status: SyncStatus): void {
 }
 
 /**
- * Reads records from IndexedDB via `todosTable.getAllWithMetadata()` and renders the list.
+ * Reads records from IndexedDB and renders the list.
  */
 async function renderTodos(): Promise<void> {
-  if (!todosTable) return;
   const allTodos = await todosTable.getAllWithMetadata();
-
   allTodos.sort((a, b) => a.timestamp - b.timestamp);
 
   const filtered = allTodos.filter((item) => {
@@ -318,7 +195,6 @@ async function renderTodos(): Promise<void> {
         '.todo-checkbox',
       ) as HTMLInputElement | null;
       checkbox?.addEventListener('change', async () => {
-        if (!todosTable) return;
         await todosTable.put(item.id, {
           ...item.data,
           completed: checkbox.checked,
@@ -330,7 +206,6 @@ async function renderTodos(): Promise<void> {
         '.delete-btn',
       ) as HTMLButtonElement | null;
       deleteBtn?.addEventListener('click', async () => {
-        if (!todosTable) return;
         await todosTable.delete(item.id);
       });
 
@@ -352,11 +227,11 @@ function escapeHtml(text: string): string {
   return div.innerHTML;
 }
 
-// Add new Todo: writes locally to IndexedDB and queues for background sync
+// Add new Todo: writes locally to IndexedDB and automatically queues for sync if enabled
 newTodoForm.addEventListener('submit', async (e: SubmitEvent) => {
   e.preventDefault();
   const title = newTodoInput.value.trim();
-  if (!title || !todosTable) return;
+  if (!title) return;
 
   const id = `todo_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   await todosTable.put(id, {
@@ -381,7 +256,6 @@ filterBtns.forEach((btn: HTMLButtonElement) => {
 
 // Clear completed todos using batched deleteAll
 clearCompletedBtn.addEventListener('click', async () => {
-  if (!todosTable) return;
   const allTodos = await todosTable.getAllWithMetadata();
   const completedIds = allTodos
     .filter((item) => item.data.completed)
@@ -426,26 +300,20 @@ authForm.addEventListener('submit', async (e: SubmitEvent) => {
 
   const username = authUsername.value.trim();
   const password = authPassword.value;
+  const serverUrl = window.location.origin;
 
   try {
-    const endpoint =
-      authMode === AuthMode.Register ? '/auth/register' : '/auth/login';
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-    });
-
-    const data = (await res.json()) as UserSession & { error?: string };
-    if (!res.ok) {
-      throw new Error(data.error ?? 'Authentication failed');
+    let result: AuthResult;
+    if (authMode === AuthMode.Register) {
+      result = await db.register({ serverUrl, username, password });
+    } else {
+      result = await db.login({ serverUrl, username, password });
     }
 
-    currentUser = data;
+    currentUser = result;
     localStorage.setItem('beamed_todo_user', JSON.stringify(currentUser));
     updateUserUI();
     authDialog.close();
-    await setupDatabase();
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Authentication error';
     authError.textContent = message;
@@ -453,5 +321,64 @@ authForm.addEventListener('submit', async (e: SubmitEvent) => {
   }
 });
 
-// Start the app
-initApp();
+/**
+ * Initializes application, reactive table subscribers, and auto-connects sync if token exists.
+ */
+async function init(): Promise<void> {
+  updateUserUI();
+
+  // 1. Subscribe to reactive Table changes
+  todosTable.subscribe((events: TableChangeEvent<TodoItem>[]) => {
+    for (const { op, id, isRemote, data } of events) {
+      const origin = isRemote ? 'Remote Sync' : 'Local IDB';
+      const category = isRemote ? LogCategory.Remote : LogCategory.Local;
+      const title = data?.title ?? id;
+      logEvent(category, origin, `${op.toUpperCase()} "${title}"`);
+    }
+    renderTodos();
+  });
+
+  // 2. Monitor sync connection status changes
+  db.onSyncStatusChange((status: SyncStatus) => {
+    updateSyncStatusUI(status);
+    logEvent(LogCategory.Sync, 'SyncStatus', status.toUpperCase());
+  });
+
+  // 3. Connect sync if user previously logged in, or try demo account
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${wsProtocol}//${window.location.host}/sync`;
+
+  if (currentUser?.token) {
+    db.enableSync({ url: wsUrl, token: currentUser.token });
+  } else {
+    // Attempt auto-login demo user for instant multi-tab demonstration
+    const authClient = new BeamedAuthClient({
+      serverUrl: window.location.origin,
+    });
+    try {
+      let auth = await authClient
+        .login({ username: 'demo', password: 'password123' })
+        .catch(() => null);
+
+      if (!auth) {
+        auth = await authClient
+          .register({ username: 'demo', password: 'password123' })
+          .catch(() => null);
+      }
+
+      if (auth) {
+        currentUser = auth;
+        localStorage.setItem('beamed_todo_user', JSON.stringify(currentUser));
+        updateUserUI();
+        db.enableSync({ url: wsUrl, token: auth.token });
+      }
+    } catch {
+      // Offline mode
+    }
+  }
+
+  // Initial render from local IndexedDB
+  await renderTodos();
+}
+
+init();
