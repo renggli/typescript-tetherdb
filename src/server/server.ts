@@ -2,28 +2,25 @@ import * as http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { validateAppId } from '../shared/sanitize.js';
 import type { ServerLimits } from '../shared/types.js';
-import type { AuthAdapter } from './auth/adapter.js';
-import { FileAuthAdapter } from './auth/file.js';
-import { MemoryAuthAdapter } from './auth/memory.js';
-import type { StorageAdapter } from './storage/adapter.js';
-import { FileStorageAdapter } from './storage/file.js';
-import { MemoryStorageAdapter } from './storage/memory.js';
+import { FileStorage } from './storage/file/index.js';
+import { MemoryStorage } from './storage/memory/index.js';
+import type { Storage } from './storage/storage.js';
 import { SyncHub } from './sync-hub.js';
 
 /**
  * Configuration options for the TetherServer.
  */
 export interface TetherServerOptions {
-  /** Custom storage adapter instance. */
-  storage?: StorageAdapter;
+  /** Custom storage instance. */
+  storage?: Storage;
   /** Filesystem root directory for storage & auth (e.g. '.data'). */
   baseDir?: string;
-  /** Custom AuthAdapter instance. */
-  auth?: AuthAdapter;
   /** Server-side table and quota limits. */
   limits?: ServerLimits;
   /** Path for WebSocket upgrade requests (defaults to '/sync'). */
   wsPath?: string;
+  /** Initial apps and tables to declare on startup. */
+  apps?: Record<string, string[]> | Map<string, string[]>;
 }
 
 /**
@@ -57,56 +54,53 @@ export interface RunningServer {
  * application discovery (`/apps`, `/apps/:appId/tables`), and real-time streaming connections (`/sync`).
  */
 export class TetherServer {
-  private storage: StorageAdapter;
-  private authAdapter: AuthAdapter;
+  private storageEngine: Storage;
   private syncHub: SyncHub;
   private wss: WebSocketServer | null = null;
   private httpServer: http.Server | null = null;
   private wsPath: string;
+  private initialApps?: Record<string, string[]> | Map<string, string[]>;
 
   /**
    * Initializes a new TetherServer instance.
    *
-   * @param options - Configuration options for storage, authentication, and endpoints.
+   * @param options - Configuration options for storage and endpoints.
    */
   constructor(options: TetherServerOptions = {}) {
     if (options.storage) {
-      this.storage = options.storage;
+      this.storageEngine = options.storage;
     } else if (options.baseDir) {
-      this.storage = new FileStorageAdapter({
+      this.storageEngine = new FileStorage({
         baseDir: options.baseDir,
         limits: options.limits,
       });
     } else {
-      this.storage = new MemoryStorageAdapter({ limits: options.limits });
+      this.storageEngine = new MemoryStorage({ limits: options.limits });
     }
 
-    if (options.auth) {
-      this.authAdapter = options.auth;
-    } else if (options.baseDir) {
-      this.authAdapter = new FileAuthAdapter({
-        baseDir: options.baseDir,
-      });
-    } else {
-      this.authAdapter = new MemoryAuthAdapter();
-    }
-
-    this.syncHub = new SyncHub(this.storage, this.authAdapter, options.limits);
+    this.initialApps = options.apps;
+    this.syncHub = new SyncHub(this.storageEngine, options.limits);
     this.wsPath = options.wsPath ?? '/sync';
   }
 
   /**
-   * The authentication adapter instance.
+   * Declares an application and its tables.
+   *
+   * @param appId - Application identifier.
+   * @param tables - Array of table names.
    */
-  get auth(): AuthAdapter {
-    return this.authAdapter;
+  async declareApp(appId: string, tables: string[] = []): Promise<void> {
+    const app = await this.storageEngine.createApp(appId);
+    for (const t of tables) {
+      await app.createTable(t);
+    }
   }
 
   /**
-   * The underlying storage adapter instance.
+   * The underlying storage instance.
    */
-  get storageAdapter(): StorageAdapter {
-    return this.storage;
+  get storage(): Storage {
+    return this.storageEngine;
   }
 
   /**
@@ -123,46 +117,85 @@ export class TetherServer {
    */
   attach(server: http.Server): void {
     this.httpServer = server;
-    const wss = new WebSocketServer({ noServer: true });
-    this.wss = wss;
+    this.wss = new WebSocketServer({ noServer: true });
 
-    server.on('upgrade', (request, socket, head) => {
-      const { pathname } = new URL(
-        request.url ?? '/',
-        `http://${request.headers.host ?? 'localhost'}`,
-      );
-      if (pathname === this.wsPath) {
-        wss.handleUpgrade(request, socket, head, (ws) => {
-          wss.emit('connection', ws, request);
+    server.on('upgrade', (req, socket, head) => {
+      const url = new URL(req.url ?? '', `http://${req.headers.host}`);
+      if (url.pathname === this.wsPath) {
+        this.wss?.handleUpgrade(req, socket, head, (ws) => {
+          this.syncHub.handleConnection(ws);
         });
+      } else {
+        socket.destroy();
       }
     });
 
-    wss.on('connection', (ws) => {
-      this.syncHub.handleConnection(ws);
-    });
+    const existingListeners = server.listeners('request').slice();
+    server.removeAllListeners('request');
+
+    server.on(
+      'request',
+      (req: http.IncomingMessage, res: http.ServerResponse) => {
+        this.handleHttpRequest(req, res, () => {
+          for (const listener of existingListeners) {
+            listener.call(server, req, res);
+          }
+        });
+      },
+    );
   }
 
   /**
-   * Handles incoming HTTP requests for authentication, discovery, and health check endpoints.
+   * Starts an HTTP server listening on the specified port and host, attaching TetherServer.
    *
-   * @param req - The HTTP incoming request.
-   * @param res - The HTTP server response.
-   * @returns A promise resolving to `true` if the request was handled by TetherServer; otherwise `false`.
+   * @param port - Port number to bind (defaults to 8080).
+   * @param host - Host interface to bind (defaults to '0.0.0.0').
+   * @returns Running Node.js HTTP server.
    */
-  async handleHttpRequest(
+  async listen(port = 8080, host = '0.0.0.0'): Promise<http.Server> {
+    if (this.initialApps) {
+      const entries =
+        this.initialApps instanceof Map
+          ? Array.from(this.initialApps.entries())
+          : Object.entries(this.initialApps);
+      for (const [appId, tables] of entries) {
+        await this.declareApp(appId, tables);
+      }
+    }
+
+    const httpServer = http.createServer();
+    this.attach(httpServer);
+    await new Promise<void>((resolve, reject) => {
+      httpServer.listen(port, host, () => resolve());
+      httpServer.on('error', reject);
+    });
+    return httpServer;
+  }
+
+  /**
+   * Main HTTP request router for TetherDB authentication and discovery endpoints.
+   *
+   * @param req - Incoming HTTP request.
+   * @param res - Outgoing HTTP response.
+   * @param next - Next middleware / fallback handler callback.
+   */
+  handleHttpRequest(
     req: http.IncomingMessage,
     res: http.ServerResponse,
-  ): Promise<boolean> {
+    next: () => void = () => this._sendJson(res, 404, { error: 'Not found' }),
+  ): void {
     const url = new URL(
-      req.url ?? '/',
+      req.url ?? '',
       `http://${req.headers.host ?? 'localhost'}`,
     );
     const method = req.method?.toUpperCase();
+    const pathname = url.pathname;
 
-    // CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader(
+      'Access-Control-Allow-Methods',
+      'GET, POST, PUT, DELETE, OPTIONS',
+    );
     res.setHeader(
       'Access-Control-Allow-Headers',
       'Content-Type, Authorization',
@@ -171,36 +204,36 @@ export class TetherServer {
     if (method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
-      return true;
+      return;
     }
 
-    if (method === 'GET' && url.pathname === '/health') {
+    if (pathname === '/health' && method === 'GET') {
       this._handleGetHealth(res);
-      return true;
+      return;
     }
 
-    if (method === 'GET' && url.pathname === '/apps') {
-      await this._handleGetApps(req, res);
-      return true;
+    if (pathname === '/auth/register' && method === 'POST') {
+      this._handlePostRegister(req, res);
+      return;
     }
 
-    const tablesMatch = url.pathname.match(/^\/apps\/([^/]+)\/tables$/);
-    if (method === 'GET' && tablesMatch) {
-      await this._handleGetTables(req, res, tablesMatch[1] ?? 'default');
-      return true;
+    if (pathname === '/auth/login' && method === 'POST') {
+      this._handlePostLogin(req, res);
+      return;
     }
 
-    if (method === 'POST' && url.pathname === '/auth/register') {
-      await this._handlePostRegister(req, res);
-      return true;
+    if (pathname === '/apps' && method === 'GET') {
+      this._handleGetApps(req, res);
+      return;
     }
 
-    if (method === 'POST' && url.pathname === '/auth/login') {
-      await this._handlePostLogin(req, res);
-      return true;
+    const tablesMatch = pathname.match(/^\/apps\/([^/]+)\/tables$/);
+    if (tablesMatch && method === 'GET') {
+      this._handleGetTables(req, res, tablesMatch[1]);
+      return;
     }
 
-    return false;
+    next();
   }
 
   private _sendJson(
@@ -217,18 +250,11 @@ export class TetherServer {
   }
 
   private async _handleGetApps(
-    req: http.IncomingMessage,
+    _req: http.IncomingMessage,
     res: http.ServerResponse,
   ): Promise<void> {
-    const authHeader = req.headers.authorization;
-    let userId: string | undefined;
-    if (authHeader?.startsWith('Bearer ')) {
-      const token = authHeader.slice(7).trim();
-      const session = await this.authAdapter.verifyToken(token);
-      if (session) userId = session.userId;
-    }
-    const apps = await this.storage.listApps(userId);
-    this._sendJson(res, 200, { apps });
+    const apps = await this.storageEngine.getApps();
+    this._sendJson(res, 200, { apps: apps.map((a) => a.id) });
   }
 
   private async _handleGetTables(
@@ -242,8 +268,8 @@ export class TetherServer {
       return;
     }
     const token = authHeader.slice(7).trim();
-    const session = await this.authAdapter.verifyToken(token);
-    if (!session) {
+    const user = await this.storageEngine.getUserByToken(token);
+    if (!user) {
       this._sendJson(res, 401, { error: 'Invalid or expired token' });
       return;
     }
@@ -251,8 +277,15 @@ export class TetherServer {
     try {
       const rawAppId = decodeURIComponent(rawAppIdParam);
       const appId = validateAppId(rawAppId);
-      const tables = await this.storage.listStores(session.userId, appId);
-      this._sendJson(res, 200, { appId, tables });
+      const app = await this.storageEngine.getApp(appId);
+      if (!app) {
+        this._sendJson(res, 404, {
+          error: `Application "${appId}" not found`,
+        });
+        return;
+      }
+      const tables = await app.getTables();
+      this._sendJson(res, 200, { appId, tables: tables.map((t) => t.name) });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Invalid request';
       this._sendJson(res, 400, { error: message });
@@ -274,11 +307,16 @@ export class TetherServer {
         });
         return;
       }
-      const result = await this.authAdapter.register(
+      const user = await this.storageEngine.createUser(
         body.username,
         body.password,
       );
-      this._sendJson(res, 201, result);
+      const token = await user.createToken();
+      this._sendJson(res, 201, {
+        userId: user.id,
+        username: user.username,
+        token,
+      });
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Registration failed';
@@ -301,8 +339,17 @@ export class TetherServer {
         });
         return;
       }
-      const result = await this.authAdapter.login(body.username, body.password);
-      this._sendJson(res, 200, result);
+      const user = await this.storageEngine.getUserByUsername(body.username);
+      if (!user || !(await user.verifyPassword(body.password))) {
+        this._sendJson(res, 401, { error: 'Invalid username or password' });
+        return;
+      }
+      const token = await user.createToken();
+      this._sendJson(res, 200, {
+        userId: user.id,
+        username: user.username,
+        token,
+      });
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Authentication failed';
@@ -330,106 +377,80 @@ export class TetherServer {
       });
 
       req.on('end', () => {
+        if (!data.trim()) {
+          resolve({} as T);
+          return;
+        }
         try {
-          resolve((data ? JSON.parse(data) : {}) as T);
+          resolve(JSON.parse(data) as T);
         } catch {
-          reject(new Error('Invalid JSON body'));
+          reject(new Error('Invalid JSON request body'));
         }
       });
 
-      req.on('error', reject);
+      req.on('error', (err) => reject(err));
     });
   }
 
   /**
-   * Starts an HTTP and WebSocket server listening on the specified port and host.
-   *
-   * @param port - Port number to bind.
-   * @param host - Host interface to bind (defaults to '0.0.0.0').
-   * @returns A promise resolving to the running `http.Server`.
-   */
-  async listen(port: number, host = '0.0.0.0'): Promise<http.Server> {
-    if (this.authAdapter.init) {
-      await this.authAdapter.init();
-    }
-
-    const server = http.createServer(async (req, res) => {
-      const handled = await this.handleHttpRequest(req, res);
-      if (!handled) {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Not found' }));
-      }
-    });
-
-    this.attach(server);
-
-    return new Promise((resolve) => {
-      server.listen(port, host, () => {
-        resolve(server);
-      });
-    });
-  }
-
-  /**
-   * Closes the active WebSocket server, HTTP listener, and storage adapter.
+   * Closes the server and releases all bound ports and active WebSocket connections.
    */
   async close(): Promise<void> {
     if (this.wss) {
-      this.wss.close();
+      for (const client of this.wss.clients) {
+        client.terminate();
+      }
+      await new Promise<void>((resolve) => {
+        this.wss?.close(() => resolve());
+      });
       this.wss = null;
     }
-    const httpServer = this.httpServer;
-    if (httpServer) {
+
+    if (this.httpServer) {
       await new Promise<void>((resolve) => {
-        httpServer.close(() => resolve());
+        this.httpServer?.close(() => resolve());
       });
       this.httpServer = null;
     }
-    if (this.storage.close) {
-      await this.storage.close();
-    }
-    if (this.authAdapter.close) {
-      await this.authAdapter.close();
+
+    if (this.storageEngine.close) {
+      await this.storageEngine.close();
     }
   }
 }
 
 /**
- * Standard zero-configuration server starter for hosting TetherDB.
+ * Starts a TetherDB HTTP & WebSocket server instance.
  *
- * @example
- * ```ts
- * import { startServer } from 'tetherdb/server';
- *
- * const running = await startServer({
- *   port: 8080,
- *   storageDir: './data',
- * });
- * console.log(`TetherDB running at http://${running.host}:${running.port}`);
- * ```
- *
- * @param options - Server configuration options (port, host, storageDir, limits).
- * @returns A promise resolving to the running server handles.
+ * @param options - Startup configuration options including port and storage backend.
+ * @returns A promise resolving to a `RunningServer` handle.
  */
 export async function startServer(
   options: StartServerOptions = {},
 ): Promise<RunningServer> {
   const port =
-    options.port ??
-    (process.env.PORT ? Number.parseInt(process.env.PORT, 10) : 8080);
-  const host = options.host ?? process.env.HOST ?? '0.0.0.0';
+    options.port ?? (process.env.PORT ? Number(process.env.PORT) : 8080);
+  const host = options.host ?? '0.0.0.0';
 
   const server = new TetherServer(options);
-  const httpServer = await server.listen(port, host);
-  const addr = httpServer.address();
-  const actualPort = typeof addr === 'object' && addr ? addr.port : port;
+  const httpServer = http.createServer();
+  server.attach(httpServer);
+
+  await new Promise<void>((resolve, reject) => {
+    httpServer.listen(port, host, () => resolve());
+    httpServer.on('error', reject);
+  });
+
+  const address = httpServer.address();
+  const actualPort =
+    typeof address === 'object' && address ? address.port : port;
 
   return {
     server,
     httpServer,
     port: actualPort,
     host,
-    close: async () => {
+    async close() {
       await server.close();
     },
   };

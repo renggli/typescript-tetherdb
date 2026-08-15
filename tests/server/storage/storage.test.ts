@@ -2,24 +2,26 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { StorageAdapter } from '../../../src/server/storage/adapter.js';
-import { FileStorageAdapter } from '../../../src/server/storage/file.js';
-import { MemoryStorageAdapter } from '../../../src/server/storage/memory.js';
-import { SqliteStorageAdapter } from '../../../src/server/storage/sqlite.js';
+import {
+  FileStorage,
+  MemoryStorage,
+  SqliteStorage,
+  type Storage,
+} from '../../../src/server/storage/index.js';
 import { type ChangeRecord, OperationType } from '../../../src/shared/types.js';
 
-describe('Storage Adapters (src/server/storage/)', () => {
-  describe('MemoryStorageAdapter', () => {
-    runStorageTestSuite(() => new MemoryStorageAdapter());
+describe('Storage (src/server/storage/)', () => {
+  describe('MemoryStorage', () => {
+    runStorageTestSuite(() => new MemoryStorage());
   });
 
-  describe('SqliteStorageAdapter (in-memory)', () => {
-    runStorageTestSuite(() => new SqliteStorageAdapter({ inMemory: true }));
+  describe('SqliteStorage (in-memory)', () => {
+    runStorageTestSuite(() => new SqliteStorage({ inMemory: true }));
   });
 
-  describe('SqliteStorageAdapter (file-based)', () => {
+  describe('SqliteStorage (file-based)', () => {
     let tmpDir: string;
-    let adapter: SqliteStorageAdapter;
+    let storage: SqliteStorage;
 
     beforeEach(async () => {
       tmpDir = path.join(
@@ -27,20 +29,20 @@ describe('Storage Adapters (src/server/storage/)', () => {
         `tetherdb-sqlite-suite-${Math.random().toString(36).substring(2, 10)}`,
       );
       await fs.mkdir(tmpDir, { recursive: true });
-      adapter = new SqliteStorageAdapter({ baseDir: tmpDir });
+      storage = new SqliteStorage({ baseDir: tmpDir });
     });
 
     afterEach(async () => {
-      await adapter.close();
+      await storage.close();
       await fs.rm(tmpDir, { recursive: true, force: true });
     });
 
-    runStorageTestSuite(() => adapter);
+    runStorageTestSuite(() => storage);
   });
 
-  describe('FileStorageAdapter', () => {
+  describe('FileStorage', () => {
     let tmpDir: string;
-    let adapter: FileStorageAdapter;
+    let storage: FileStorage;
 
     beforeEach(async () => {
       tmpDir = path.join(
@@ -48,19 +50,23 @@ describe('Storage Adapters (src/server/storage/)', () => {
         `tetherdb-test-${Math.random().toString(36).substring(2, 10)}`,
       );
       await fs.mkdir(tmpDir, { recursive: true });
-      adapter = new FileStorageAdapter({ baseDir: tmpDir });
+      storage = new FileStorage({ baseDir: tmpDir });
     });
 
     afterEach(async () => {
-      await adapter.close();
+      await storage.close();
       await fs.rm(tmpDir, { recursive: true, force: true });
     });
 
-    runStorageTestSuite(() => adapter);
+    runStorageTestSuite(() => storage);
 
-    it('should write data in sharded per-user sub-directories on filesystem', async () => {
+    it('should write data in $basePath/<appId>/<userId>/<tableName>.json on filesystem', async () => {
+      const app = await storage.createApp('default');
+      const table = await app.createTable('settings');
+      const user = await storage.createUser('user_42', 'pass');
+
       const change: ChangeRecord = {
-        store: 'settings',
+        table: 'settings',
         id: 'theme',
         op: OperationType.Put,
         data: { dark: true },
@@ -68,199 +74,130 @@ describe('Storage Adapters (src/server/storage/)', () => {
         clientId: 'client-1',
       };
 
-      await adapter.applyChanges('user-42', [change]);
+      await app.applyChanges(user, [change]);
 
-      // Sharded layout: tmpDir / default / us / user-42 / ...
-      const shard = 'user-42'.slice(0, 2).toLowerCase();
-      const userDir = path.join(tmpDir, 'default', shard, 'user-42');
-      const storeFile = path.join(userDir, 'stores', 'settings.json');
+      // Direct layout: tmpDir / default / userId / settings.json
+      const userDir = path.join(tmpDir, 'default', user.id);
+      const tableFile = path.join(userDir, 'settings.json');
       const metaFile = path.join(userDir, 'meta.json');
 
-      const fileContent = await fs.readFile(storeFile, 'utf-8');
-      const storeObj = JSON.parse(fileContent);
-      expect(storeObj.theme.data).toEqual({ dark: true });
+      const fileContent = await fs.readFile(tableFile, 'utf-8');
+      const tableRecords = JSON.parse(fileContent);
+      expect(tableRecords[0].data).toEqual({ dark: true });
 
       const metaContent = await fs.readFile(metaFile, 'utf-8');
       const metaObj = JSON.parse(metaContent);
       expect(metaObj.currentSeq).toBe(1);
-    });
 
-    it('should reject path traversal attempts in userId or store name', async () => {
-      const evilChange: ChangeRecord = {
-        store: '../../../etc',
-        id: 'hack',
-        op: OperationType.Put,
-        data: 'pwned',
-        timestamp: Date.now(),
-      };
-
-      await expect(
-        adapter.applyChanges('user-1', [evilChange]),
-      ).rejects.toThrow();
-      await expect(
-        adapter.applyChanges('../../evil-user', [
-          {
-            store: 'safe',
-            id: '1',
-            op: OperationType.Put,
-            data: 'val',
-            timestamp: 100,
-          },
-        ]),
-      ).rejects.toThrow();
+      const record = await table.getRecord(user, 'theme');
+      expect(record?.data).toEqual({ dark: true });
     });
 
     it('should compact changelog beyond maxChangelogEntries and flag requiresSnapshot', async () => {
-      const compactingAdapter = new FileStorageAdapter({
+      const compactingStorage = new FileStorage({
         baseDir: tmpDir,
         limits: { maxChangelogEntries: 5 },
       });
+      const app = await compactingStorage.createApp('default');
+      await app.createTable('events');
+      const user = await compactingStorage.createUser(
+        'user_compaction',
+        'pass',
+      );
 
       // Apply 10 changes sequentially
       for (let i = 1; i <= 10; i++) {
-        await compactingAdapter.applyChanges('user-compaction', [
+        await app.applyChanges(user, [
           {
-            store: 'events',
+            table: 'events',
             id: `e-${i}`,
             op: OperationType.Put,
             data: `event-${i}`,
             timestamp: 1000 + i,
+            clientId: 'client-1',
           },
         ]);
       }
 
       // Asking for seq 1 (which was pruned) should return requiresSnapshot: true
-      const oldDiff = await compactingAdapter.getChangesSince(
-        'user-compaction',
-        1,
-      );
+      const oldDiff = await app.getChangesSince(user, 1);
       expect(oldDiff.requiresSnapshot).toBe(true);
 
       // Asking for recent seq 7 (retained in window) should return delta diff
-      const recentDiff = await compactingAdapter.getChangesSince(
-        'user-compaction',
-        7,
-      );
+      const recentDiff = await app.getChangesSince(user, 7);
       expect(recentDiff.requiresSnapshot).toBe(false);
       expect(recentDiff.changes).toHaveLength(3);
     });
 
-    it('should enforce server limits on record size and allowed stores', async () => {
-      const limitedAdapter = new FileStorageAdapter({
-        baseDir: tmpDir,
-        limits: {
-          allowedStores: ['todos', 'notes'],
-          maxRecordSizeBytes: 50,
-        },
-      });
+    it('should reject changes to undeclared tables or applications', async () => {
+      const strictStorage = new FileStorage({ baseDir: tmpDir });
+      const app = await strictStorage.createApp('myapp');
+      await app.createTable('allowed_table');
+      const user = await strictStorage.createUser('user_limits', 'pass');
 
-      // Disallowed store
+      // Disallowed table
       await expect(
-        limitedAdapter.applyChanges('user-limits', [
+        app.applyChanges(user, [
           {
-            store: 'secrets',
+            table: 'undeclared_table',
             id: '1',
             op: OperationType.Put,
             data: 'hello',
             timestamp: 100,
+            clientId: 'client-1',
           },
         ]),
-      ).rejects.toThrow(
-        'Table "secrets" is not in the allowed tables list for user "user-limits"',
-      );
+      ).rejects.toThrow('does not exist in app');
 
-      // Oversized record
-      await expect(
-        limitedAdapter.applyChanges('user-limits', [
-          {
-            store: 'todos',
-            id: '1',
-            op: OperationType.Put,
-            data: { text: 'A'.repeat(100) },
-            timestamp: 100,
-          },
-        ]),
-      ).rejects.toThrow(
-        'Record size (111 bytes) for record "1" in table "todos" exceeds maximum allowed size of 50 bytes for user "user-limits"',
-      );
-    });
-
-    it('should count only active records towards maxRecordsPerStore and allow new inserts after delete', async () => {
-      const capAdapter = new FileStorageAdapter({
-        baseDir: tmpDir,
-        limits: { maxRecordsPerStore: 2 },
-      });
-
-      // Insert 2 records (reaches limit)
-      await capAdapter.applyChanges('user-cap', [
-        {
-          store: 'todos',
-          id: '1',
-          op: OperationType.Put,
-          data: 'one',
-          timestamp: 100,
-        },
-        {
-          store: 'todos',
-          id: '2',
-          op: OperationType.Put,
-          data: 'two',
-          timestamp: 101,
-        },
-      ]);
-
-      // 3rd record should be rejected
-      await expect(
-        capAdapter.applyChanges('user-cap', [
-          {
-            store: 'todos',
-            id: '3',
-            op: OperationType.Put,
-            data: 'three',
-            timestamp: 102,
-          },
-        ]),
-      ).rejects.toThrow(
-        'Table "todos" has reached the maximum capacity of 2 records for user "user-cap"',
-      );
-
-      // Delete record 1 (tombstone created)
-      await capAdapter.applyChanges('user-cap', [
-        {
-          store: 'todos',
-          id: '1',
-          op: OperationType.Delete,
-          deleted: true,
-          timestamp: 103,
-        },
-      ]);
-
-      // Inserting record 3 should now succeed because active count is 1
-      const res = await capAdapter.applyChanges('user-cap', [
-        {
-          store: 'todos',
-          id: '3',
-          op: OperationType.Put,
-          data: 'three',
-          timestamp: 104,
-        },
-      ]);
-      expect(res.applied).toHaveLength(1);
+      // Nonexistent app
+      expect(await strictStorage.getApp('nonexistent_app')).toBeUndefined();
     });
   });
 });
 
-function runStorageTestSuite(createAdapter: () => StorageAdapter) {
-  let adapter: StorageAdapter;
+function runStorageTestSuite(createStorage: () => Storage) {
+  let storage: Storage;
 
-  beforeEach(() => {
-    adapter = createAdapter();
+  beforeEach(async () => {
+    storage = createStorage();
+    const app = await storage.createApp('default');
+    await app.createTable('todos');
+    await app.createTable('notes');
+    await app.createTable('items');
+  });
+
+  it('should create and authenticate users directly through UserStorage', async () => {
+    const user = await storage.createUser('alice', 'password123');
+    expect(user.id).toBeDefined();
+    expect(user.username).toBe('alice');
+
+    expect(await user.verifyPassword('password123')).toBe(true);
+    expect(await user.verifyPassword('wrongPassword')).toBe(false);
+
+    const token = await user.createToken();
+    expect(await user.verifyToken(token)).toBe(true);
+
+    const retrievedUser = await storage.getUserByToken(token);
+    expect(retrievedUser?.id).toBe(user.id);
+    expect(retrievedUser?.username).toBe('alice');
+
+    const byUsername = await storage.getUserByUsername('alice');
+    expect(byUsername?.id).toBe(user.id);
+
+    const allUsers = await storage.getUsers();
+    expect(allUsers.some((u) => u.id === user.id)).toBe(true);
   });
 
   it('should apply changes and assign sequential numbers', async () => {
+    const app = await storage.getApp('default');
+    expect(app).toBeDefined();
+    const todosTable = await app?.getTable('todos');
+    expect(todosTable).toBeDefined();
+    const user = await storage.createUser('user_apply', 'pass');
+
     const changes: ChangeRecord[] = [
       {
-        store: 'todos',
+        table: 'todos',
         id: 't1',
         op: OperationType.Put,
         data: { title: 'Item 1' },
@@ -268,7 +205,7 @@ function runStorageTestSuite(createAdapter: () => StorageAdapter) {
         clientId: 'c1',
       },
       {
-        store: 'todos',
+        table: 'todos',
         id: 't2',
         op: OperationType.Put,
         data: { title: 'Item 2' },
@@ -277,21 +214,29 @@ function runStorageTestSuite(createAdapter: () => StorageAdapter) {
       },
     ];
 
-    const res = await adapter.applyChanges('user-1', changes);
-    expect(res.applied).toHaveLength(2);
-    expect(res.newSeq).toBe(2);
+    const res = await app?.applyChanges(user, changes);
+    expect(res?.applied).toHaveLength(2);
+    expect(res?.newSeq).toBe(2);
 
-    const record = await adapter.getRecord('user-1', 'todos', 't1');
+    const record = await todosTable?.getRecord(user, 't1');
     expect(record?.data).toEqual({ title: 'Item 1' });
 
-    const all = await adapter.getAllRecords('user-1');
+    const all = await todosTable?.getAllRecords(user);
     expect(all).toHaveLength(2);
   });
 
   it('should isolate data between different users', async () => {
-    await adapter.applyChanges('user-A', [
+    const app = await storage.getApp('default');
+    expect(app).toBeDefined();
+    const notesTable = await app?.getTable('notes');
+    expect(notesTable).toBeDefined();
+
+    const userA = await storage.createUser('user_a', 'pass');
+    const userB = await storage.createUser('user_b', 'pass');
+
+    await app?.applyChanges(userA, [
       {
-        store: 'notes',
+        table: 'notes',
         id: 'secret',
         op: OperationType.Put,
         data: { secret: 'User A secret' },
@@ -300,20 +245,24 @@ function runStorageTestSuite(createAdapter: () => StorageAdapter) {
       },
     ]);
 
-    const userARecord = await adapter.getRecord('user-A', 'notes', 'secret');
+    const userARecord = await notesTable?.getRecord(userA, 'secret');
     expect(userARecord?.data).toEqual({ secret: 'User A secret' });
 
-    const userBRecord = await adapter.getRecord('user-B', 'notes', 'secret');
+    const userBRecord = await notesTable?.getRecord(userB, 'secret');
     expect(userBRecord).toBeUndefined();
 
-    const userBAll = await adapter.getAllRecords('user-B');
+    const userBAll = await notesTable?.getAllRecords(userB);
     expect(userBAll).toHaveLength(0);
   });
 
   it('should handle diffs since sequence', async () => {
-    await adapter.applyChanges('user-1', [
+    const app = await storage.getApp('default');
+    expect(app).toBeDefined();
+    const user = await storage.createUser('user_diff', 'pass');
+
+    await app?.applyChanges(user, [
       {
-        store: 'items',
+        table: 'items',
         id: '1',
         op: OperationType.Put,
         data: 'v1',
@@ -321,7 +270,7 @@ function runStorageTestSuite(createAdapter: () => StorageAdapter) {
         clientId: 'c',
       },
       {
-        store: 'items',
+        table: 'items',
         id: '2',
         op: OperationType.Put,
         data: 'v2',
@@ -329,7 +278,7 @@ function runStorageTestSuite(createAdapter: () => StorageAdapter) {
         clientId: 'c',
       },
       {
-        store: 'items',
+        table: 'items',
         id: '3',
         op: OperationType.Put,
         data: 'v3',
@@ -338,9 +287,9 @@ function runStorageTestSuite(createAdapter: () => StorageAdapter) {
       },
     ]);
 
-    const diff = await adapter.getChangesSince('user-1', 1);
-    expect(diff.changes).toHaveLength(2);
-    expect(diff.changes.map((c) => c.id)).toEqual(['2', '3']);
-    expect(diff.currentSeq).toBe(3);
+    const diff = await app?.getChangesSince(user, 1);
+    expect(diff?.changes).toHaveLength(2);
+    expect(diff?.changes.map((c) => c.id)).toEqual(['2', '3']);
+    expect(diff?.currentSeq).toBe(3);
   });
 }

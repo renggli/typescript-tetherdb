@@ -1,80 +1,156 @@
-import { describe, expect, it } from 'vitest';
-import { FileAuthAdapter } from '../../src/server/auth/file.js';
-import { MemoryAuthAdapter } from '../../src/server/auth/memory.js';
-import { SqliteAuthAdapter } from '../../src/server/auth/sqlite.js';
-import { FileStorageAdapter } from '../../src/server/storage/file.js';
-import { MemoryStorageAdapter } from '../../src/server/storage/memory.js';
-import { SqliteStorageAdapter } from '../../src/server/storage/sqlite.js';
-import { parseAuthSpec, parseStorageSpec } from '../../src/server/tetherdb.js';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  FileStorage,
+  MemoryStorage,
+  SqliteStorage,
+} from '../../src/server/storage/index.js';
+import {
+  type BackendType,
+  createBackend,
+  runCli,
+} from '../../src/server/tetherdb.js';
 
-describe('src/server/tetherdb.ts (CLI spec parsers)', () => {
-  describe('parseAuthSpec', () => {
-    it('should default to MemoryAuthAdapter when unspecified or set to "memory"', () => {
-      expect(parseAuthSpec()).toBeInstanceOf(MemoryAuthAdapter);
-      expect(parseAuthSpec('memory')).toBeInstanceOf(MemoryAuthAdapter);
+describe('src/server/tetherdb.ts (CLI commands and backends)', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = path.join(
+      os.tmpdir(),
+      `tetherdb-cli-test-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    );
+    await fs.mkdir(tmpDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    try {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup error
+    }
+  });
+
+  describe('createBackend', () => {
+    it('should create matching in-memory storage by default', () => {
+      const storage = createBackend();
+      expect(storage).toBeInstanceOf(MemoryStorage);
+
+      const explicitMem = createBackend('memory');
+      expect(explicitMem).toBeInstanceOf(MemoryStorage);
     });
 
-    it('should parse "sqlite" and "sqlite:path" specifications', () => {
-      const auth1 = parseAuthSpec('sqlite');
-      expect(auth1).toBeInstanceOf(SqliteAuthAdapter);
-
-      const auth2 = parseAuthSpec('sqlite:.custom_dir');
-      expect(auth2).toBeInstanceOf(SqliteAuthAdapter);
-
-      const auth3 = parseAuthSpec('sqlite', '.custom_fallback');
-      expect(auth3).toBeInstanceOf(SqliteAuthAdapter);
+    it('should create matching SQLite storage with shared baseDir', () => {
+      const storage = createBackend('sqlite', tmpDir);
+      expect(storage).toBeInstanceOf(SqliteStorage);
     });
 
-    it('should parse "file" and "file:path" specifications', () => {
-      const auth1 = parseAuthSpec('file');
-      expect(auth1).toBeInstanceOf(FileAuthAdapter);
-
-      const auth2 = parseAuthSpec('file:.custom_data');
-      expect(auth2).toBeInstanceOf(FileAuthAdapter);
-
-      const auth3 = parseAuthSpec('file', '.custom_fallback');
-      expect(auth3).toBeInstanceOf(FileAuthAdapter);
+    it('should create matching file storage with shared baseDir', () => {
+      const storage = createBackend('file', tmpDir);
+      expect(storage).toBeInstanceOf(FileStorage);
     });
 
-    it('should reject invalid auth specifications', () => {
-      expect(() => parseAuthSpec('invalid_auth_spec')).toThrow(
-        'Unknown auth spec',
-      );
+    it('should pass custom limits through createBackend', () => {
+      const storage = createBackend('memory', '.data', {
+        maxTablesPerUser: 5,
+      });
+      expect(storage).toBeInstanceOf(MemoryStorage);
+    });
+
+    it('should throw an error for unsupported backend types', () => {
+      expect(() =>
+        createBackend('unknown_backend' as unknown as BackendType),
+      ).toThrow('Unknown backend type');
     });
   });
 
-  describe('parseStorageSpec', () => {
-    it('should default to MemoryStorageAdapter when unspecified or set to "memory"', () => {
-      expect(parseStorageSpec()).toBeInstanceOf(MemoryStorageAdapter);
-      expect(parseStorageSpec('memory')).toBeInstanceOf(MemoryStorageAdapter);
-    });
-
-    it('should parse "sqlite" and "sqlite:path" specifications', () => {
-      const storage1 = parseStorageSpec('sqlite');
-      expect(storage1).toBeInstanceOf(SqliteStorageAdapter);
-
-      const storage2 = parseStorageSpec('sqlite:.custom_dir');
-      expect(storage2).toBeInstanceOf(SqliteStorageAdapter);
-
-      const storage3 = parseStorageSpec('sqlite', '.custom_fallback');
-      expect(storage3).toBeInstanceOf(SqliteStorageAdapter);
-    });
-
-    it('should parse "file" and "file:path" specifications', () => {
-      const storage1 = parseStorageSpec('file');
-      expect(storage1).toBeInstanceOf(FileStorageAdapter);
-
-      const storage2 = parseStorageSpec('file:.data_dir');
-      expect(storage2).toBeInstanceOf(FileStorageAdapter);
-
-      const storage3 = parseStorageSpec('file', '.custom_fallback');
-      expect(storage3).toBeInstanceOf(FileStorageAdapter);
-    });
-
-    it('should reject invalid storage specifications', () => {
-      expect(() => parseStorageSpec('redis://localhost')).toThrow(
-        'Unknown storage spec',
+  describe('CLI Subcommands', () => {
+    it('should show help message with --help flag', async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      await runCli(['--help']);
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('TetherDB CLI'),
       );
+      logSpy.mockRestore();
+    });
+
+    it('should support users list and users rm subcommands on SQLite backend', async () => {
+      const storage = createBackend('sqlite', tmpDir);
+      const user = await storage.createUser('alice', 'password123');
+      await storage.close?.();
+
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      // List users
+      await runCli(['users', 'list', `--sqlite=${tmpDir}`]);
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Registered users (1):'),
+      );
+
+      // Remove user
+      await runCli(['users', 'rm', user.id, `--sqlite=${tmpDir}`]);
+      expect(logSpy).toHaveBeenCalledWith(`Deleted user: ${user.id}`);
+
+      // List again (empty)
+      await runCli(['users', `--sqlite=${tmpDir}`]);
+      expect(logSpy).toHaveBeenCalledWith('No registered users found.');
+
+      logSpy.mockRestore();
+    });
+
+    it('should support apps and tables add/list/rm subcommands on SQLite and File backends', async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      // 1. Add app "rezeptario"
+      await runCli(['apps', 'add', 'rezeptario', `--sqlite=${tmpDir}`]);
+      expect(logSpy).toHaveBeenCalledWith('Created application: rezeptario');
+
+      // 2. Add tables "recipes" and "ingredients"
+      await runCli([
+        'tables',
+        'add',
+        'rezeptario',
+        'recipes',
+        'ingredients',
+        `--sqlite=${tmpDir}`,
+      ]);
+      expect(logSpy).toHaveBeenCalledWith(
+        'Added table "recipes" to application "rezeptario"',
+      );
+      expect(logSpy).toHaveBeenCalledWith(
+        'Added table "ingredients" to application "rezeptario"',
+      );
+
+      // 3. List tables
+      await runCli(['tables', 'list', 'rezeptario', `--sqlite=${tmpDir}`]);
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Tables for application "rezeptario" (2):'),
+      );
+
+      // 4. Remove a table
+      await runCli([
+        'tables',
+        'rm',
+        'rezeptario',
+        'ingredients',
+        `--sqlite=${tmpDir}`,
+      ]);
+      expect(logSpy).toHaveBeenCalledWith(
+        'Removed table "ingredients" from application "rezeptario"',
+      );
+
+      // 5. List apps
+      await runCli(['apps', 'list', `--sqlite=${tmpDir}`]);
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('• rezeptario (tables: recipes)'),
+      );
+
+      // 6. Delete app
+      await runCli(['apps', 'rm', 'rezeptario', `--sqlite=${tmpDir}`]);
+      expect(logSpy).toHaveBeenCalledWith('Deleted application: rezeptario');
+
+      logSpy.mockRestore();
     });
   });
 });

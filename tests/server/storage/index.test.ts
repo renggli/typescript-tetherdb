@@ -1,26 +1,33 @@
 import { describe, expect, it } from 'vitest';
 import { TetherServer } from '../../../src/server/server.js';
 import {
-  FileStorageAdapter,
-  MemoryStorageAdapter,
-  SqliteStorageAdapter,
-  type StorageAdapter,
+  type AppStorage,
+  FileStorage,
+  MemoryStorage,
+  SqliteStorage,
+  type Storage,
+  type TableStorage,
+  type UserStorage,
 } from '../../../src/server/storage/index.js';
 import { type ChangeRecord, OperationType } from '../../../src/shared/types.js';
 
-describe('src/server/storage/index.ts (Barrel Exports & Pluggable Integration)', () => {
-  it('should export all storage adapters and interfaces', () => {
-    expect(MemoryStorageAdapter).toBeDefined();
-    expect(FileStorageAdapter).toBeDefined();
-    expect(SqliteStorageAdapter).toBeDefined();
+describe('src/server/storage/index.ts (Barrel Exports & Custom Storage Integration)', () => {
+  it('should export all concrete storages and interfaces', () => {
+    expect(MemoryStorage).toBeDefined();
+    expect(FileStorage).toBeDefined();
+    expect(SqliteStorage).toBeDefined();
   });
 
-  it('should allow plugging a custom StorageAdapter into TetherServer', async () => {
+  it('should allow plugging a custom Storage into TetherServer', async () => {
     const customRecords = new Map<string, unknown>();
 
-    const customStorage: StorageAdapter = {
-      async getRecord(userId, store, id) {
-        const key = `${userId}:${store}:${id}`;
+    const customTable: TableStorage = {
+      name: 'custom_table',
+      get app() {
+        return customApp;
+      },
+      async getRecord(user, id) {
+        const key = `${user.id}:${id}`;
         const data = customRecords.get(key);
         if (data === undefined) return undefined;
         return {
@@ -30,13 +37,13 @@ describe('src/server/storage/index.ts (Barrel Exports & Pluggable Integration)',
           version: 1,
         };
       },
-      async getAllRecords(userId, store) {
+      async getAllRecords(user) {
         const items = [];
         for (const [key, data] of customRecords.entries()) {
-          const [u, s, id] = key.split(':');
-          if (u === userId && (!store || s === store)) {
+          const [u, id] = key.split(':');
+          if (u === user.id) {
             items.push({
-              store: s,
+              table: 'custom_table',
               id,
               data,
               timestamp: 1000,
@@ -46,14 +53,33 @@ describe('src/server/storage/index.ts (Barrel Exports & Pluggable Integration)',
         }
         return items;
       },
-      async applyChanges(userId, changes) {
+      async applyChanges(user, changes) {
         const applied: ChangeRecord[] = [];
         for (const c of changes) {
-          const key = `${userId}:${c.store}:${c.id}`;
+          const key = `${user.id}:${c.id}`;
           customRecords.set(key, c.data);
-          applied.push({ ...c, seq: 1, version: 1 });
+          applied.push({ ...c, seq: 1, version: 1, table: 'custom_table' });
         }
         return { applied, newSeq: 1 };
+      },
+      async delete() {
+        return true;
+      },
+    };
+
+    const customApp: AppStorage = {
+      id: 'default',
+      async createTable() {
+        return customTable;
+      },
+      async getTable() {
+        return customTable;
+      },
+      async getTables() {
+        return [customTable];
+      },
+      async applyChanges(user, changes) {
+        return customTable.applyChanges(user, changes);
       },
       async getChangesSince() {
         return { changes: [], currentSeq: 1, requiresSnapshot: false };
@@ -61,20 +87,68 @@ describe('src/server/storage/index.ts (Barrel Exports & Pluggable Integration)',
       async getCurrentSeq() {
         return 1;
       },
-      async listApps() {
-        return ['default'];
+      async delete() {
+        return true;
       },
-      async listStores() {
-        return ['custom_store'];
+    };
+
+    const customUser: UserStorage = {
+      id: 'u1',
+      username: 'custom_user',
+      createdAt: 1000,
+      async verifyPassword() {
+        return true;
+      },
+      async changePassword() {},
+      async createToken() {
+        return 'custom_token_123';
+      },
+      async verifyToken() {
+        return true;
+      },
+      async delete() {
+        return true;
+      },
+    };
+
+    const customStorage: Storage = {
+      async createApp() {
+        return customApp;
+      },
+      async getApp() {
+        return customApp;
+      },
+      async getApps() {
+        return [customApp];
+      },
+      async createUser() {
+        return customUser;
+      },
+      async getUser() {
+        return customUser;
+      },
+      async getUserByUsername() {
+        return customUser;
+      },
+      async getUserByToken() {
+        return customUser;
+      },
+      async getUsers() {
+        return [customUser];
       },
     };
 
     const server = new TetherServer({ storage: customStorage });
-    expect(server.storageAdapter).toBe(customStorage);
+    expect(server.storage).toBe(customStorage);
 
-    await server.storageAdapter.applyChanges('u1', [
+    const app = await server.storage.getApp('default');
+    expect(app).toBeDefined();
+    const table = await app?.getTable('custom_table');
+    expect(table).toBeDefined();
+
+    await table?.applyChanges(customUser, [
       {
-        store: 'custom_store',
+        table: 'custom_table',
         id: '1',
         op: OperationType.Put,
         data: 'custom_value',
@@ -83,11 +157,7 @@ describe('src/server/storage/index.ts (Barrel Exports & Pluggable Integration)',
       },
     ]);
 
-    const rec = await server.storageAdapter.getRecord(
-      'u1',
-      'custom_store',
-      '1',
-    );
+    const rec = await table?.getRecord(customUser, '1');
     expect(rec?.data).toBe('custom_value');
 
     await server.close();

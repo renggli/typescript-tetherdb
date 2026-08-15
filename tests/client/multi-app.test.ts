@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket as NodeWebSocket } from 'ws';
 import { TetherDB } from '../../src/client/db.js';
 import { startServer, TetherServer } from '../../src/server/server.js';
-import { MemoryStorageAdapter } from '../../src/server/storage/memory.js';
+import { MemoryStorage } from '../../src/server/storage/index.js';
 import { OperationType } from '../../src/shared/types.js';
 
 describe('Multi-Application Support & Server Discovery (src/client/)', () => {
@@ -24,7 +24,15 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
     await fs.mkdir(tmpDir, { recursive: true });
 
     server = new TetherServer({
-      storageDir: tmpDir,
+      baseDir: tmpDir,
+      apps: {
+        'todo-app': ['items'],
+        'notes-app': ['items'],
+        'chat-app': ['channels', 'messages'],
+        'docs-app': ['pages'],
+        'app-alpha': ['feed'],
+        'app-beta': ['feed'],
+      },
     });
 
     const httpServer = await server.listen(0, '127.0.0.1');
@@ -104,20 +112,24 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
     expect(noteRecords[0]?.title).toBe('First Note Item');
 
     // 4. Verify server discovery APIs
-    const apps = await server.storageAdapter.listApps(auth.userId);
-    expect(apps).toEqual(['notes-app', 'todo-app']);
+    const apps = await server.storage.getApps();
+    expect(apps.map((a) => a.id)).toContain('notes-app');
+    expect(apps.map((a) => a.id)).toContain('todo-app');
 
-    const todoStores = await server.storageAdapter.listStores(
-      auth.userId,
-      'todo-app',
-    );
-    expect(todoStores).toEqual(['items']);
+    // Check todo-app data
+    const user = await server.storage.getUser(auth.userId);
+    expect(user).toBeDefined();
+    if (!user) return;
+    const todoApp = await server.storage.getApp('todo-app');
+    const todosTable = await todoApp?.getTable('items');
+    const todoRecordsList = (await todosTable?.getAllRecords(user)) ?? [];
+    expect(todoRecordsList).toHaveLength(1);
 
-    const noteStores = await server.storageAdapter.listStores(
-      auth.userId,
-      'notes-app',
-    );
-    expect(noteStores).toEqual(['items']);
+    // Check notes-app data
+    const noteApp = await server.storage.getApp('notes-app');
+    expect(noteApp).toBeDefined();
+    const noteTables = (await noteApp?.getTables()) ?? [];
+    expect(noteTables.map((t) => t.name)).toEqual(['items']);
   });
 
   it('should support HTTP discovery endpoints GET /apps and GET /apps/:appId/tables', async () => {
@@ -228,68 +240,54 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
     expect(receivedB1).toHaveLength(0); // Beta received zero events from Alpha!
   });
 
-  it('should work correctly with MemoryStorageAdapter for multi-app storage', async () => {
-    const memory = new MemoryStorageAdapter();
-    const userId = 'user_mem_123';
+  it('should work correctly with MemoryStorage for multi-app storage', async () => {
+    const memory = new MemoryStorage();
+    const appOne = await memory.createApp('app-one');
+    const tableOne = await appOne.createTable('settings');
+    const appTwo = await memory.createApp('app-two');
+    const tableTwo = await appTwo.createTable('settings');
+    const user = await memory.createUser('user_mem_123', 'pass');
 
-    await memory.applyChanges(
-      userId,
-      [
-        {
-          store: 'settings',
-          id: 's1',
-          op: OperationType.Put,
-          data: { theme: 'dark' },
-          timestamp: 100,
-          clientId: 'c1',
-        },
-      ],
-      'app-one',
-    );
+    await tableOne.applyChanges(user, [
+      {
+        table: 'settings',
+        id: 's1',
+        op: OperationType.Put,
+        data: { theme: 'dark' },
+        timestamp: 100,
+        clientId: 'c1',
+      },
+    ]);
 
-    await memory.applyChanges(
-      userId,
-      [
-        {
-          store: 'settings',
-          id: 's1',
-          op: OperationType.Put,
-          data: { theme: 'light' },
-          timestamp: 200,
-          clientId: 'c2',
-        },
-      ],
-      'app-two',
-    );
+    await tableTwo.applyChanges(user, [
+      {
+        table: 'settings',
+        id: 's1',
+        op: OperationType.Put,
+        data: { theme: 'light' },
+        timestamp: 200,
+        clientId: 'c2',
+      },
+    ]);
 
-    const appOneRecord = await memory.getRecord(
-      userId,
-      'settings',
-      's1',
-      'app-one',
-    );
+    const appOneRecord = await tableOne.getRecord(user, 's1');
     expect(appOneRecord?.data).toEqual({ theme: 'dark' });
 
-    const appTwoRecord = await memory.getRecord(
-      userId,
-      'settings',
-      's1',
-      'app-two',
-    );
+    const appTwoRecord = await tableTwo.getRecord(user, 's1');
     expect(appTwoRecord?.data).toEqual({ theme: 'light' });
 
-    const apps = await memory.listApps(userId);
-    expect(apps).toEqual(['app-one', 'app-two']);
+    const apps = await memory.getApps();
+    expect(apps.map((a) => a.id)).toEqual(['app-one', 'app-two']);
 
-    const appOneStores = await memory.listStores(userId, 'app-one');
-    expect(appOneStores).toEqual(['settings']);
+    const appOneTables = await appOne.getTables();
+    expect(appOneTables.map((t) => t.name)).toEqual(['settings']);
   });
 
   it('should start and shut down cleanly via startServer helper', async () => {
     const runner = await startServer({
       port: 0,
       host: '127.0.0.1',
-      storageDir: path.join(tmpDir, 'startServerTest'),
+      baseDir: path.join(tmpDir, 'startServerTest'),
     });
 
     expect(runner.port).toBeGreaterThan(0);

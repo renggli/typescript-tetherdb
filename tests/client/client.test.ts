@@ -8,7 +8,7 @@ describe('TetherDB local operations (src/client/)', () => {
   beforeEach(() => {
     db = new TetherDB({
       name: `test-db-${Math.random().toString(36).substring(2, 8)}`,
-      stores: ['todos', 'notes'],
+      tables: ['todos', 'notes'],
     });
   });
 

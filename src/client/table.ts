@@ -48,7 +48,7 @@ export type TableChangeListener<T = unknown> = (
  * Abstract interface representing an object store table capable of ingesting remote sync records.
  */
 export interface ITable {
-  /** The unique name of the table / object store. */
+  /** The unique name of the table. */
   readonly name: string;
   /**
    * Notifies registered table subscribers of remote change events.
@@ -60,13 +60,13 @@ export interface ITable {
 
 /**
  * Typed table wrapper providing local-first CRUD operations and reactive event subscriptions
- * against an underlying IndexedDB object store.
+ * against an underlying IndexedDB table.
  * Operations are batched by default for maximum performance.
  *
  * @typeParam T - The data type of records stored in this table.
  */
 export class Table<T = unknown> implements ITable {
-  private storeName: string;
+  private tableName: string;
   private idb: IDBManager;
   private getClientId: () => string;
   private onLocalChange?: () => void;
@@ -75,28 +75,28 @@ export class Table<T = unknown> implements ITable {
   /**
    * Creates a new Table instance.
    *
-   * @param storeName - Name of the IndexedDB object store.
+   * @param tableName - Name of the table.
    * @param idb - IndexedDB transaction coordinator.
    * @param getClientId - Function providing the current client identifier.
    * @param onLocalChange - Optional callback invoked after local mutations are committed.
    */
   constructor(
-    storeName: string,
+    tableName: string,
     idb: IDBManager,
     getClientId: () => string,
     onLocalChange?: () => void,
   ) {
-    this.storeName = storeName;
+    this.tableName = tableName;
     this.idb = idb;
     this.getClientId = getClientId;
     this.onLocalChange = onLocalChange;
   }
 
   /**
-   * The name of the underlying object store.
+   * The name of the table.
    */
   get name(): string {
-    return this.storeName;
+    return this.tableName;
   }
 
   /**
@@ -106,7 +106,7 @@ export class Table<T = unknown> implements ITable {
    * @returns A promise resolving to the record data, or `null` if not found.
    */
   async get(id: string): Promise<T | null> {
-    const record = await this.idb.getRecord<T>(this.storeName, id);
+    const record = await this.idb.getRecord<T>(this.tableName, id);
     return record ? record.data : null;
   }
 
@@ -119,7 +119,7 @@ export class Table<T = unknown> implements ITable {
   async getAll(ids?: string[]): Promise<T[]> {
     if (ids !== undefined) {
       if (ids.length === 0) return [];
-      const map = await this.idb.getRecords<T>(this.storeName, ids);
+      const map = await this.idb.getRecords<T>(this.tableName, ids);
       const results: T[] = [];
       for (const id of ids) {
         const rec = map.get(id);
@@ -129,7 +129,7 @@ export class Table<T = unknown> implements ITable {
       }
       return results;
     }
-    const records = await this.idb.getAllRecords<T>(this.storeName);
+    const records = await this.idb.getAllRecords<T>(this.tableName);
     return records.map((r) => r.data);
   }
 
@@ -139,7 +139,7 @@ export class Table<T = unknown> implements ITable {
    * @returns A promise resolving to the number of deleted records.
    */
   async clear(): Promise<number> {
-    const records = await this.idb.getAllRecords<T>(this.storeName);
+    const records = await this.idb.getAllRecords<T>(this.tableName);
     const ids = records.map((r) => r.id);
     return this.deleteAll(ids);
   }
@@ -151,7 +151,7 @@ export class Table<T = unknown> implements ITable {
    * @returns A promise resolving to the stored record with metadata, or `undefined` if not found.
    */
   async getWithMetadata(id: string): Promise<StoredRecord<T> | undefined> {
-    return this.idb.getRecord<T>(this.storeName, id);
+    return this.idb.getRecord<T>(this.tableName, id);
   }
 
   /**
@@ -160,7 +160,7 @@ export class Table<T = unknown> implements ITable {
    * @returns A promise resolving to an array of stored records with metadata.
    */
   async getAllWithMetadata(): Promise<StoredRecord<T>[]> {
-    return this.idb.getAllRecords<T>(this.storeName);
+    return this.idb.getAllRecords<T>(this.tableName);
   }
 
   /**
@@ -186,7 +186,7 @@ export class Table<T = unknown> implements ITable {
     if (entries.length === 0) return [];
 
     const ids = entries.map((e) => e.id);
-    const existingMap = await this.idb.getRecords<T>(this.storeName, ids);
+    const existingMap = await this.idb.getRecords<T>(this.tableName, ids);
     const now = Date.now();
     const clientId = this.getClientId();
 
@@ -199,7 +199,7 @@ export class Table<T = unknown> implements ITable {
       const version = (existing?.version ?? 0) + 1;
 
       const change: ChangeRecord<T> = {
-        store: this.storeName,
+        table: this.tableName,
         id: entry.id,
         op: OperationType.Put,
         data: entry.data,
@@ -225,7 +225,7 @@ export class Table<T = unknown> implements ITable {
       savedData.push(entry.data);
     }
 
-    await this.idb.applyLocalChanges(this.storeName, mutations);
+    await this.idb.applyLocalChanges(this.tableName, mutations);
     this.notifyListeners(events);
     this.onLocalChange?.();
     return savedData;
@@ -252,7 +252,7 @@ export class Table<T = unknown> implements ITable {
   async deleteAll(ids: string[]): Promise<number> {
     if (ids.length === 0) return 0;
 
-    const existingMap = await this.idb.getRecords<T>(this.storeName, ids);
+    const existingMap = await this.idb.getRecords<T>(this.tableName, ids);
     const now = Date.now();
     const clientId = this.getClientId();
 
@@ -265,7 +265,7 @@ export class Table<T = unknown> implements ITable {
 
       const version = (existing.version ?? 0) + 1;
       const change: ChangeRecord<T> = {
-        store: this.storeName,
+        table: this.tableName,
         id,
         op: OperationType.Delete,
         timestamp: now,
@@ -288,7 +288,7 @@ export class Table<T = unknown> implements ITable {
     }
 
     if (mutations.length > 0) {
-      await this.idb.applyLocalChanges(this.storeName, mutations);
+      await this.idb.applyLocalChanges(this.tableName, mutations);
       this.notifyListeners(events);
       this.onLocalChange?.();
     }
@@ -326,7 +326,7 @@ export class Table<T = unknown> implements ITable {
         listener(events);
       } catch (err) {
         console.error(
-          `[TetherDB] Error in listener for ${this.storeName}:`,
+          `[TetherDB] Error in listener for ${this.tableName}:`,
           err,
         );
       }

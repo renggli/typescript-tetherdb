@@ -19,14 +19,11 @@ export interface TetherClientOptions {
   appId?: string;
   /** Schema version number (defaults to 1). */
   version?: number;
-  /** Pre-declared array of table/store names to create upon database opening. */
-  stores?: string[];
+  /** Pre-declared array of table names to create upon database opening. */
+  tables?: string[];
   /** Optional real-time WebSocket sync configuration. */
   sync?: SyncOptions;
 }
-
-/** Alias for TetherClientOptions. */
-export type TetherDBOptions = TetherClientOptions;
 
 /**
  * Options for registering or logging into a remote server from TetherDB.
@@ -69,11 +66,8 @@ export class TetherDB {
     this.name = options.name;
     this.appId = options.appId;
     this.clientId = generateClientId();
-    this.idb = new IDBManager(
-      options.name,
-      options.stores,
-      options.version ?? 1,
-    );
+    const initialTables = options.tables ?? [];
+    this.idb = new IDBManager(this.name, initialTables, options.version ?? 1);
 
     if (options.sync) {
       this.enableSync(options.sync);
@@ -154,7 +148,7 @@ export class TetherDB {
 
     this.syncClient = new TetherSyncClient(
       this.idb,
-      (storeName) => this.table(storeName),
+      (tableName) => this.table(tableName),
       () => this.clientId,
       syncOptions,
     );
@@ -259,7 +253,7 @@ export class TetherDB {
    * Tables are created dynamically on-demand if not already declared.
    *
    * @typeParam T - Data payload model type for records in this table.
-   * @param name - The table/store name.
+   * @param name - The table name.
    * @returns A typed `Table<T>` instance.
    */
   table<T = unknown>(name: string): Table<T> {
@@ -287,9 +281,6 @@ export class TetherDB {
     await this.idb.close();
   }
 }
-
-/** Alias for TetherDB. */
-export const TetherClientDB = TetherDB;
 
 /**
  * Converts an HTTP(S) URL to a WS(S) URL.

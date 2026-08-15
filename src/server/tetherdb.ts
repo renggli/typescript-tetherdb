@@ -1,149 +1,102 @@
 #!/usr/bin/env node
 import * as path from 'node:path';
 import type { ServerLimits } from '../shared/types.js';
-import type { AuthAdapter } from './auth/adapter.js';
-import { FileAuthAdapter } from './auth/file.js';
-import { MemoryAuthAdapter } from './auth/memory.js';
-import { SqliteAuthAdapter } from './auth/sqlite.js';
 import { startServer } from './server.js';
-import type { StorageAdapter } from './storage/adapter.js';
-import { FileStorageAdapter } from './storage/file.js';
-import { MemoryStorageAdapter } from './storage/memory.js';
-import { SqliteStorageAdapter } from './storage/sqlite.js';
+import { FileStorage } from './storage/file/index.js';
+import { MemoryStorage } from './storage/memory/index.js';
+import { SqliteStorage } from './storage/sqlite/index.js';
+import type { Storage } from './storage/storage.js';
 
 /**
- * Parses an auth backend specification string into an AuthAdapter instance.
- *
- * Supported formats:
- * - `memory` (default)
- * - `sqlite:<dir>` or `sqlite` (defaults to `<dir>/auth.sqlite`, baseDir defaults to `.data`)
- * - `file:<dir>` or `file` (defaults to `<dir>/auth/`, baseDir defaults to `.data`)
- *
- * @param spec - Auth backend specification string.
- * @param baseDir - Optional default fallback directory if unspecified in spec.
- * @returns Instantiated AuthAdapter.
+ * Backend persistence type for TetherDB server.
  */
-export function parseAuthSpec(spec?: string, baseDir?: string): AuthAdapter {
-  if (!spec || spec === 'memory') {
-    return new MemoryAuthAdapter();
-  }
-  if (spec.startsWith('sqlite:')) {
-    const dir = spec.slice('sqlite:'.length);
-    return new SqliteAuthAdapter({
-      baseDir: dir ? path.resolve(dir) : path.resolve(baseDir ?? '.data'),
-    });
-  }
-  if (spec === 'sqlite') {
-    return new SqliteAuthAdapter({
-      baseDir: path.resolve(baseDir ?? '.data'),
-    });
-  }
-  if (spec.startsWith('file:')) {
-    const dir = spec.slice('file:'.length);
-    return new FileAuthAdapter({
-      baseDir: dir ? path.resolve(dir) : path.resolve(baseDir ?? '.data'),
-    });
-  }
-  if (spec === 'file') {
-    return new FileAuthAdapter({
-      baseDir: path.resolve(baseDir ?? '.data'),
-    });
-  }
-  throw new Error(
-    `Unknown auth spec: "${spec}". Expected memory, sqlite:<dir>, or file:<dir>.`,
-  );
-}
+export type BackendType = 'memory' | 'file' | 'sqlite';
 
 /**
- * Parses a storage backend specification string into a StorageAdapter instance.
+ * Instantiates the matching Storage implementation for a given backend type and directory.
  *
- * Supported formats:
- * - `memory` (default)
- * - `sqlite:<dir>` or `sqlite` (creates `<dir>/<appId>.sqlite` per app, baseDir defaults to `.data`)
- * - `file:<dir>` or `file` (creates `<dir>/<appId>/...` per app, baseDir defaults to `.data`)
- *
- * @param spec - Storage backend specification string.
- * @param baseDir - Optional default fallback directory if unspecified in spec.
+ * @param backend - Target backend ('memory', 'file', or 'sqlite'). Defaults to 'memory'.
+ * @param baseDir - Directory path for file and sqlite backends. Defaults to '.data'.
  * @param limits - Optional server limits configuration.
- * @returns Instantiated StorageAdapter.
+ * @returns Instantiated `Storage` engine.
  */
-export function parseStorageSpec(
-  spec?: string,
-  baseDir?: string,
+export function createBackend(
+  backend: BackendType = 'memory',
+  baseDir: string = '.data',
   limits?: ServerLimits,
-): StorageAdapter {
-  if (!spec || spec === 'memory') {
-    return new MemoryStorageAdapter({ limits });
+): Storage {
+  const resolvedDir = path.resolve(baseDir);
+
+  switch (backend) {
+    case 'memory':
+      return new MemoryStorage({ limits });
+    case 'sqlite':
+      return new SqliteStorage({ baseDir: resolvedDir, limits });
+    case 'file':
+      return new FileStorage({ baseDir: resolvedDir, limits });
+    default:
+      throw new Error(
+        `Unknown backend type: "${backend}". Expected 'memory', 'file', or 'sqlite'.`,
+      );
   }
-  if (spec.startsWith('sqlite:')) {
-    const dir = spec.slice('sqlite:'.length);
-    return new SqliteStorageAdapter({
-      baseDir: dir ? path.resolve(dir) : path.resolve(baseDir ?? '.data'),
-      limits,
-    });
-  }
-  if (spec === 'sqlite') {
-    return new SqliteStorageAdapter({
-      baseDir: path.resolve(baseDir ?? '.data'),
-      limits,
-    });
-  }
-  if (spec.startsWith('file:')) {
-    const dir = spec.slice('file:'.length);
-    return new FileStorageAdapter({
-      baseDir: dir ? path.resolve(dir) : path.resolve(baseDir ?? '.data'),
-      limits,
-    });
-  }
-  if (spec === 'file') {
-    return new FileStorageAdapter({
-      baseDir: path.resolve(baseDir ?? '.data'),
-      limits,
-    });
-  }
-  throw new Error(
-    `Unknown storage spec: "${spec}". Expected memory, sqlite:<dir>, or file:<dir>.`,
-  );
 }
 
 /**
- * Standard command line interface for launching a TetherDB server.
+ * Standard command line interface for TetherDB.
+ *
+ * Commands:
+ * - `serve` (default): Starts HTTP & WebSocket sync server
+ * - `apps` / `apps list`: Lists registered applications
+ * - `apps add <appid>`: Registers a new application
+ * - `apps rm <appid>`: Deletes an application and all its data
+ * - `tables` / `tables list [appid]`: Lists tables registered for an application
+ * - `tables add <appid> <table1> [table2...]`: Registers one or more tables for an application
+ * - `tables rm <appid> <table1> [table2...]`: Deletes table(s) from an application
+ * - `users` / `users list`: Lists registered user accounts
+ * - `users rm <userid>`: Deletes a user account and their data
  */
 export async function runCli(
   args: string[] = process.argv.slice(2),
 ): Promise<void> {
   if (args.includes('--help') || args.includes('-h')) {
     console.log(`
-TetherDB Standard Server
+TetherDB CLI
 
 Usage:
-  npx tetherdb [options]
-  tetherdb [options]
+  npx tetherdb [command] [options]
+  tetherdb [command] [options]
 
-Options:
-  --port, -p <number>                         Port number to bind (default: 8080 or PORT env)
-  --host, -H <string>                         Host address to bind (default: 0.0.0.0 or HOST env)
-  --auth, -a <memory|sqlite:dir|file:dir>     Auth backend (default: memory)
-  --storage, -s <memory|sqlite:dir|file:dir>  Storage backend (default: memory)
-  --dir, -d <dir>                             Directory for data & auth (default: .data)
-  --help, -h                                  Show this help message
+Commands:
+  serve (default)                         Start HTTP and WebSocket synchronization server
+  apps [list]                             List all applications
+  apps add <appid>                        Register a new application
+  apps rm <appid>                         Delete an application and its data
+  tables [list] [appid]                   List tables for an application (default: default)
+  tables add <appid> <table1> [table2...] Add one or more tables to an application
+  tables rm <appid> <table1> [table2...]  Remove table(s) from an application
+  users [list]                            List all registered user accounts
+  users rm <userid>                       Delete a user account and associated data
 
-Endpoints:
-  WS   /sync              WebSocket real-time sync stream
-  POST /auth/register     User account registration
-  POST /auth/login        User account login
-  GET  /apps              List active applications
-  GET  /apps/:id/tables   List tables for an app (requires Bearer token)
-  GET  /health            Server liveness health check
+Server Options (for 'serve'):
+  --port, -p <number>                     Port number to bind (default: 8080 or PORT env)
+  --host, -H <string>                     Host address to bind (default: 0.0.0.0 or HOST env)
+
+Backend Options (for all commands):
+  --memory                                Run in-memory without disk persistence (default)
+  --file[=<dir>]                          Use filesystem directory for auth and data (default: .data)
+  --sqlite[=<dir>]                        Use SQLite databases for auth and data (default: .data)
+  --help, -h                              Show this help message
 `);
     return;
   }
 
+  // Determine subcommand
+  let command = 'serve';
+  const positionalArgs: string[] = [];
   let port = process.env.PORT ? Number.parseInt(process.env.PORT, 10) : 8080;
   let host = process.env.HOST ?? '0.0.0.0';
-  let baseDir = '.data';
-  let authSpec: string | undefined;
-  let storageSpec: string | undefined;
+  let backend: BackendType = 'memory';
+  let dir = '.data';
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -157,56 +110,245 @@ Endpoints:
       if (val) host = val;
     } else if (arg.startsWith('--host=')) {
       host = arg.slice('--host='.length);
-    } else if (arg === '--auth' || arg === '-a') {
-      authSpec = args[++i];
-    } else if (arg.startsWith('--auth=')) {
-      authSpec = arg.slice('--auth='.length);
-    } else if (arg === '--storage' || arg === '-s') {
-      storageSpec = args[++i];
-    } else if (arg.startsWith('--storage=')) {
-      storageSpec = arg.slice('--storage='.length);
-    } else if (arg === '--dir' || arg === '-d') {
-      const val = args[++i];
-      if (val) baseDir = val;
-    } else if (arg.startsWith('--dir=')) {
-      baseDir = arg.slice('--dir='.length);
+    } else if (arg === '--memory') {
+      backend = 'memory';
+    } else if (arg === '--file') {
+      backend = 'file';
+      const next = args[i + 1];
+      if (next && !next.startsWith('-')) {
+        dir = args[++i];
+      }
+    } else if (arg.startsWith('--file=')) {
+      backend = 'file';
+      const val = arg.slice('--file='.length);
+      if (val) dir = val;
+    } else if (arg === '--sqlite') {
+      backend = 'sqlite';
+      const next = args[i + 1];
+      if (next && !next.startsWith('-')) {
+        dir = args[++i];
+      }
+    } else if (arg.startsWith('--sqlite=')) {
+      backend = 'sqlite';
+      const val = arg.slice('--sqlite='.length);
+      if (val) dir = val;
+    } else if (!arg.startsWith('-')) {
+      positionalArgs.push(arg);
     }
   }
 
-  const auth = parseAuthSpec(authSpec, baseDir);
-  const storage = parseStorageSpec(storageSpec, baseDir);
+  if (positionalArgs.length > 0) {
+    command = positionalArgs[0];
+  }
 
-  const running = await startServer({
-    port,
-    host,
-    auth,
-    storage,
-  });
+  const storage = createBackend(backend, dir);
 
-  const authDesc = authSpec ?? 'memory';
-  const storageDesc = storageSpec ?? 'memory';
+  try {
+    switch (command) {
+      case 'serve': {
+        const running = await startServer({
+          port,
+          host,
+          storage,
+        });
 
-  console.log(`
+        const backendDesc =
+          backend === 'memory'
+            ? 'memory (ephemeral)'
+            : `${backend} (${path.resolve(dir)})`;
+
+        console.log(`
 ⚡ TetherDB Server running at: http://${running.host === '0.0.0.0' ? 'localhost' : running.host}:${running.port}
-🔒 Auth backend:              ${authDesc}
-💾 Storage backend:           ${storageDesc}
+💾 Backend mode:              ${backendDesc}
 🔌 WebSocket Sync endpoint:   ws://${running.host === '0.0.0.0' ? 'localhost' : running.host}:${running.port}/sync
 ✨ Multi-application ready on standard domain.
 `);
 
-  const shutdown = async () => {
-    console.log('\nStopping TetherDB server...');
-    await running.close();
-    process.exit(0);
-  };
+        const shutdown = async () => {
+          console.log('\nStopping TetherDB server...');
+          await running.close();
+          process.exit(0);
+        };
 
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+        process.on('SIGINT', shutdown);
+        process.on('SIGTERM', shutdown);
+        break;
+      }
+
+      case 'apps': {
+        const action = positionalArgs[1] ?? 'list';
+        if (action === 'list') {
+          const apps = await storage.getApps();
+          if (apps.length === 0) {
+            console.log('No applications found.');
+          } else {
+            console.log(`Applications (${apps.length}):`);
+            for (const app of apps) {
+              const tables = await app.getTables();
+              const tableList =
+                tables.length > 0
+                  ? tables.map((t) => t.name).join(', ')
+                  : 'no tables';
+              console.log(`  • ${app.id} (tables: ${tableList})`);
+            }
+          }
+        } else if (action === 'add') {
+          const appId = positionalArgs[2];
+          if (!appId) {
+            throw new Error('Usage: tetherdb apps add <appid>');
+          }
+          const existing = await storage.getApp(appId);
+          if (existing) {
+            console.log(`Application already exists: ${appId}`);
+          } else {
+            await storage.createApp(appId);
+            console.log(`Created application: ${appId}`);
+          }
+        } else if (action === 'rm') {
+          const appId = positionalArgs[2];
+          if (!appId) {
+            throw new Error('Usage: tetherdb apps rm <appid>');
+          }
+          const app = await storage.getApp(appId);
+          if (app) {
+            await app.delete();
+            console.log(`Deleted application: ${appId}`);
+          } else {
+            console.log(`Application not found: ${appId}`);
+          }
+        } else {
+          throw new Error(
+            `Unknown apps action: "${action}". Usage: apps [list|add <appid>|rm <appid>]`,
+          );
+        }
+        await storage.close?.();
+        break;
+      }
+
+      case 'tables': {
+        const action = positionalArgs[1] ?? 'list';
+        if (action === 'list') {
+          const appId = positionalArgs[2] ?? 'default';
+          const app = await storage.getApp(appId);
+          const tables = app ? await app.getTables() : [];
+          if (tables.length === 0) {
+            console.log(`No tables found for application "${appId}".`);
+          } else {
+            console.log(
+              `Tables for application "${appId}" (${tables.length}):`,
+            );
+            for (const t of tables) {
+              console.log(`  • ${t.name}`);
+            }
+          }
+        } else if (action === 'add') {
+          const appId = positionalArgs[2];
+          const tableNames = positionalArgs.slice(3);
+          if (!appId || tableNames.length === 0) {
+            throw new Error(
+              'Usage: tetherdb tables add <appid> <table1> [table2...]',
+            );
+          }
+          const app =
+            (await storage.getApp(appId)) ?? (await storage.createApp(appId));
+          for (const t of tableNames) {
+            const existing = await app.getTable(t);
+            if (existing) {
+              console.log(
+                `Table "${t}" already exists in application "${appId}"`,
+              );
+            } else {
+              await app.createTable(t);
+              console.log(`Added table "${t}" to application "${appId}"`);
+            }
+          }
+        } else if (action === 'rm') {
+          const appId = positionalArgs[2];
+          const tableNames = positionalArgs.slice(3);
+          if (!appId || tableNames.length === 0) {
+            throw new Error(
+              'Usage: tetherdb tables rm <appid> <table1> [table2...]',
+            );
+          }
+          const app = await storage.getApp(appId);
+          for (const t of tableNames) {
+            const table = app ? await app.getTable(t) : undefined;
+            if (table) {
+              await table.delete();
+              console.log(`Removed table "${t}" from application "${appId}"`);
+            } else {
+              console.log(`Table "${t}" not found in application "${appId}"`);
+            }
+          }
+        } else {
+          // If first arg after tables is an app name: "tables <appid>"
+          const appId = action;
+          const app = await storage.getApp(appId);
+          const tables = app ? await app.getTables() : [];
+          if (tables.length === 0) {
+            console.log(`No tables found for application "${appId}".`);
+          } else {
+            console.log(
+              `Tables for application "${appId}" (${tables.length}):`,
+            );
+            for (const t of tables) {
+              console.log(`  • ${t.name}`);
+            }
+          }
+        }
+        await storage.close?.();
+        break;
+      }
+
+      case 'users': {
+        const action = positionalArgs[1] ?? 'list';
+        if (action === 'list') {
+          const users = await storage.getUsers();
+          if (users.length === 0) {
+            console.log('No registered users found.');
+          } else {
+            console.log(`Registered users (${users.length}):`);
+            for (const u of users) {
+              const created = new Date(u.createdAt).toISOString();
+              console.log(`  • [${u.id}] ${u.username} (created: ${created})`);
+            }
+          }
+        } else if (action === 'rm') {
+          const userId = positionalArgs[2];
+          if (!userId) {
+            throw new Error('Usage: tetherdb users rm <userid>');
+          }
+          const user = await storage.getUser(userId);
+          if (user) {
+            await user.delete();
+            console.log(`Deleted user: ${userId}`);
+          } else {
+            console.log(`User not found: ${userId}`);
+          }
+        } else {
+          throw new Error(
+            `Unknown users action: "${action}". Usage: users [list|rm <userid>]`,
+          );
+        }
+        await storage.close?.();
+        break;
+      }
+
+      default:
+        throw new Error(
+          `Unknown command: "${command}". Run 'tetherdb --help' for available commands.`,
+        );
+    }
+  } catch (err) {
+    console.error('Command failed:', (err as Error).message);
+    await storage.close?.();
+    process.exit(1);
+  }
 }
 
 if (process.argv[1]?.endsWith('tetherdb.ts')) {
   runCli().catch((err) => {
-    console.error('Failed to start TetherDB server:', err);
+    console.error('Failed to start TetherDB CLI:', err);
     process.exit(1);
   });
 }

@@ -27,15 +27,18 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
     await fs.mkdir(tmpDir, { recursive: true });
 
     server = new TetherServer({
-      storageDir: tmpDir,
+      baseDir: tmpDir,
+      apps: {
+        default: ['todos', 'notes', 'items', 'tasks', 'messages', 'docs'],
+      },
     });
 
     await server.listen(port, '127.0.0.1');
     wsUrl = `ws://127.0.0.1:${port}/sync`;
 
     // Register user
-    const res = await server.auth.register('testuser', 'password123');
-    userToken = res.token;
+    const user = await server.storage.createUser('testuser', 'password123');
+    userToken = await user.createToken();
   });
 
   afterEach(async () => {
@@ -46,7 +49,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
   it('should sync local changes from Client A to server', async () => {
     const clientA = new TetherDB({
       name: `client-a-${Math.random().toString(36).substring(2, 8)}`,
-      stores: ['todos'],
+      tables: ['todos'],
       sync: {
         url: wsUrl,
         token: userToken,
@@ -60,10 +63,12 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
     // Wait for sync to flush
     await delay(200);
 
-    const session = await server.auth.verifyToken(userToken);
-    const serverRecords = await server.storageAdapter.getAllRecords(
-      session?.userId ?? '',
-    );
+    const user = await server.storage.getUserByToken(userToken);
+    expect(user).toBeDefined();
+    if (!user) return;
+    const defaultApp = await server.storage.getApp('default');
+    const todosTable = await defaultApp?.getTable('todos');
+    const serverRecords = (await todosTable?.getAllRecords(user)) ?? [];
     expect(serverRecords).toHaveLength(1);
     expect(serverRecords[0].data).toEqual({
       title: 'Buy groceries',
@@ -77,7 +82,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
     // Client A creates data
     const clientA = new TetherDB({
       name: `client-a-${Math.random().toString(36).substring(2, 8)}`,
-      stores: ['todos'],
+      tables: ['todos'],
       sync: {
         url: wsUrl,
         token: userToken,
@@ -95,7 +100,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
     // Client B connects from clean state
     const clientB = new TetherDB({
       name: `client-b-${Math.random().toString(36).substring(2, 8)}`,
-      stores: ['todos'],
+      tables: ['todos'],
       sync: {
         url: wsUrl,
         token: userToken,
@@ -120,7 +125,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
   it('should broadcast real-time changes between concurrent clients', async () => {
     const clientA = new TetherDB({
       name: `client-a-${Math.random().toString(36).substring(2, 8)}`,
-      stores: ['messages'],
+      tables: ['messages'],
       sync: {
         url: wsUrl,
         token: userToken,
@@ -130,7 +135,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
 
     const clientB = new TetherDB({
       name: `client-b-${Math.random().toString(36).substring(2, 8)}`,
-      stores: ['messages'],
+      tables: ['messages'],
       sync: {
         url: wsUrl,
         token: userToken,
@@ -171,7 +176,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
   it('should catch up with diff sync after being offline', async () => {
     const clientA = new TetherDB({
       name: `client-a-${Math.random().toString(36).substring(2, 8)}`,
-      stores: ['items'],
+      tables: ['items'],
       sync: {
         url: wsUrl,
         token: userToken,
@@ -187,7 +192,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
     const clientBName = `client-b-${Math.random().toString(36).substring(2, 8)}`;
     let clientB = new TetherDB({
       name: clientBName,
-      stores: ['items'],
+      tables: ['items'],
       sync: {
         url: wsUrl,
         token: userToken,
@@ -210,7 +215,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
     // Client B comes back online with the same IndexedDB database
     clientB = new TetherDB({
       name: clientBName,
-      stores: ['items'],
+      tables: ['items'],
       sync: {
         url: wsUrl,
         token: userToken,
@@ -230,11 +235,12 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
   });
 
   it('should enforce multi-tenant isolation across users', async () => {
-    const user2 = await server.auth.register('otheruser', 'password123');
+    const user2 = await server.storage.createUser('otheruser', 'password123');
+    const user2Token = await user2.createToken();
 
     const clientUser1 = new TetherDB({
       name: `client-u1-${Math.random().toString(36).substring(2, 8)}`,
-      stores: ['docs'],
+      tables: ['docs'],
       sync: {
         url: wsUrl,
         token: userToken,
@@ -244,10 +250,10 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
 
     const clientUser2 = new TetherDB({
       name: `client-u2-${Math.random().toString(36).substring(2, 8)}`,
-      stores: ['docs'],
+      tables: ['docs'],
       sync: {
         url: wsUrl,
-        token: user2.token,
+        token: user2Token,
         WebSocketClass: WebSocket,
       },
     });
@@ -269,13 +275,13 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
 
   it('should deliver snapshot and update local database in batch when diff is large', async () => {
     // Populate 60 changes in server storage for user
-    const session = await server.auth.verifyToken(userToken);
-    const userId = session?.userId ?? '';
+    const user = await server.storage.getUserByToken(userToken);
+    expect(user).toBeDefined();
 
     const changes = [];
     for (let i = 1; i <= 60; i++) {
       changes.push({
-        store: 'tasks',
+        table: 'tasks',
         id: `task-${i}`,
         op: OperationType.Put,
         data: { title: `Task ${i}` },
@@ -283,12 +289,15 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
         clientId: 'prepop',
       });
     }
-    await server.storageAdapter.applyChanges(userId, changes);
+    const defaultApp = await server.storage.getApp('default');
+    expect(defaultApp).toBeDefined();
+    if (!user) return;
+    await defaultApp?.applyChanges(user, changes);
 
     // New client connects with lastSyncSeq: 1 (so 59 changes diff > 50 threshold)
     const client = new TetherDB({
       name: `client-bulk-${Math.random().toString(36).substring(2, 8)}`,
-      stores: ['tasks'],
+      tables: ['tasks'],
       sync: {
         url: wsUrl,
         token: userToken,
@@ -308,7 +317,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
   it('should batch rapid local mutations and beam them to remote clients cohesively', async () => {
     const clientA = new TetherDB({
       name: `client-a-bulk-${Math.random().toString(36).substring(2, 8)}`,
-      stores: ['items'],
+      tables: ['items'],
       sync: {
         url: wsUrl,
         token: userToken,
@@ -318,7 +327,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
 
     const clientB = new TetherDB({
       name: `client-b-bulk-${Math.random().toString(36).substring(2, 8)}`,
-      stores: ['items'],
+      tables: ['items'],
       sync: {
         url: wsUrl,
         token: userToken,

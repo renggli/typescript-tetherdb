@@ -14,8 +14,8 @@ export enum OperationType {
  * @typeParam T - The data type of the record payload.
  */
 export interface ChangeRecord<T = unknown> {
-  /** The target table or store name. */
-  store: string;
+  /** The target table name. */
+  table: string;
   /** The unique record identifier within the table. */
   id: string;
   /** The mutation operation type. */
@@ -52,6 +52,8 @@ export interface StoredRecord<T = unknown> {
   version: number;
   /** Flag indicating whether the record is marked as deleted. */
   deleted?: boolean;
+  /** Identifier of client that performed the write. */
+  clientId?: string;
 }
 
 /**
@@ -60,8 +62,8 @@ export interface StoredRecord<T = unknown> {
  * @typeParam T - The data type of the record payload.
  */
 export interface RecordSnapshotItem<T = unknown> {
-  /** The table or store name. */
-  store: string;
+  /** The table name. */
+  table: string;
   /** The unique record identifier. */
   id: string;
   /** The record payload value. */
@@ -74,6 +76,8 @@ export interface RecordSnapshotItem<T = unknown> {
   deleted?: boolean;
   /** Optional application namespace identifier. */
   appId?: string;
+  /** Identifier of client that performed the write. */
+  clientId?: string;
 }
 
 /**
@@ -167,7 +171,7 @@ export type ServerMessage =
       type: ServerMessageType.SyncSnapshot;
       /** Sequence number corresponding to the snapshot state. */
       seq: number;
-      /** All active records across stores. */
+      /** All active records across tables. */
       snapshot: RecordSnapshotItem[];
     }
   | {
@@ -221,11 +225,15 @@ export interface SyncMetadata {
  */
 export interface ServerLimits {
   /** Optional allowlist of table names. If provided, only these tables can be created or modified. */
-  allowedStores?: string[];
+  allowedTables?: string[];
+  /** Optional allowlist of application IDs and their allowed table names. */
+  allowedApps?:
+    | Map<string, Set<string>>
+    | ReadonlyMap<string, ReadonlySet<string>>;
   /** Maximum number of distinct tables allowed per user (default: 50). */
-  maxStoresPerUser?: number;
+  maxTablesPerUser?: number;
   /** Maximum number of active records allowed per table (default: 10,000). */
-  maxRecordsPerStore?: number;
+  maxRecordsPerTable?: number;
   /** Maximum allowed payload size in bytes for an individual record (default: 512 KB). */
   maxRecordSizeBytes?: number;
   /** Maximum allowed size in bytes for a single change batch payload (default: 5 MB). */

@@ -7,17 +7,18 @@ import {
 import {
   type ClientMessage,
   ClientMessageType,
+  type RecordSnapshotItem,
   type ServerLimits,
   type ServerMessage,
   ServerMessageType,
 } from '../shared/types.js';
-import type { AuthAdapter } from './auth/adapter.js';
-import type { StorageAdapter } from './storage/adapter.js';
+import type { Storage } from './storage/storage.js';
+import type { UserStorage } from './storage/user.js';
 
 interface ActiveClient {
   ws: WebSocket;
   clientId: string;
-  userId: string;
+  user: UserStorage;
   appId: string;
 }
 
@@ -26,8 +27,7 @@ interface ActiveClient {
  * snapshot/diff delivery, change ingestion, acknowledgments, and peer broadcasts per application and user.
  */
 export class SyncHub {
-  private storage: StorageAdapter;
-  private authAdapter: AuthAdapter;
+  private storage: Storage;
   private limits: ServerLimits;
   private userClients: Map<string, Set<ActiveClient>> = new Map(); // key = `${appId}:${userId}`
   private wsToClient: Map<WebSocket, ActiveClient> = new Map();
@@ -35,17 +35,11 @@ export class SyncHub {
   /**
    * Initializes a new SyncHub instance.
    *
-   * @param storage - Pluggable backend storage adapter.
-   * @param auth - User authentication and token verification adapter.
+   * @param storage - Pluggable backend storage engine.
    * @param limits - Optional server quota and payload limits.
    */
-  constructor(
-    storage: StorageAdapter,
-    auth: AuthAdapter,
-    limits: ServerLimits = {},
-  ) {
+  constructor(storage: Storage, limits: ServerLimits = {}) {
     this.storage = storage;
-    this.authAdapter = auth;
     this.limits = limits;
   }
 
@@ -58,7 +52,7 @@ export class SyncHub {
     ws.on('message', async (data) => {
       const client = this.wsToClient.get(ws);
       const userContext = client
-        ? ` (app: "${client.appId}", user: "${client.userId}", client: "${client.clientId}")`
+        ? ` (app: "${client.appId}", user: "${client.user.id}", client: "${client.clientId}")`
         : '';
 
       try {
@@ -86,7 +80,7 @@ export class SyncHub {
     ws.on('error', (err) => {
       const client = this.wsToClient.get(ws);
       const userContext = client
-        ? ` (app: "${client.appId}", user: "${client.userId}", client: "${client.clientId}")`
+        ? ` (app: "${client.appId}", user: "${client.user.id}", client: "${client.clientId}")`
         : '';
       console.error(
         `[TetherServer] WebSocket client error${userContext}:`,
@@ -101,7 +95,7 @@ export class SyncHub {
     if (!client) return;
 
     this.wsToClient.delete(ws);
-    const channelKey = `${client.appId}:${client.userId}`;
+    const channelKey = `${client.appId}:${client.user.id}`;
     const set = this.userClients.get(channelKey);
     if (set) {
       set.delete(client);
@@ -138,8 +132,8 @@ export class SyncHub {
           return;
         }
 
-        const session = await this.authAdapter.verifyToken(msg.token);
-        if (!session) {
+        const user = await this.storage.getUserByToken(msg.token);
+        if (!user) {
           this.send(ws, {
             type: ServerMessageType.AuthError,
             message: 'Invalid or expired authentication token',
@@ -149,20 +143,30 @@ export class SyncHub {
         }
 
         const appId = validateAppId(msg.appId);
+        const app = await this.storage.getApp(appId);
+        if (!app) {
+          this.send(ws, {
+            type: ServerMessageType.AuthError,
+            message: `Application "${appId}" does not exist. Create it first using "tetherdb apps add ${appId}".`,
+          });
+          ws.close();
+          return;
+        }
+
         const clientId = validateIdentifier(
           msg.clientId ?? 'client_anon',
           'clientId',
-          session.userId,
+          user.id,
         );
         const client: ActiveClient = {
           ws,
           clientId,
-          userId: session.userId,
+          user,
           appId,
         };
 
         this.wsToClient.set(ws, client);
-        const channelKey = `${appId}:${session.userId}`;
+        const channelKey = `${appId}:${user.id}`;
         let set = this.userClients.get(channelKey);
         if (!set) {
           set = new Set();
@@ -170,13 +174,10 @@ export class SyncHub {
         }
         set.add(client);
 
-        const currentSeq = await this.storage.getCurrentSeq(
-          session.userId,
-          appId,
-        );
+        const currentSeq = await app.getCurrentSeq(user);
         this.send(ws, {
           type: ServerMessageType.AuthSuccess,
-          userId: session.userId,
+          userId: user.id,
           currentSeq,
         });
 
@@ -210,7 +211,7 @@ export class SyncHub {
 
         if (!Array.isArray(msg.changes)) {
           throw new Error(
-            `Invalid change batch: changes must be an array for user "${client.userId}" in app "${client.appId}".`,
+            `Invalid change batch: changes must be an array for user "${client.user.id}" in app "${client.appId}".`,
           );
         }
 
@@ -218,20 +219,26 @@ export class SyncHub {
         const batchBytes = calculateByteSize(msg.changes);
         if (batchBytes > maxBatchSize) {
           throw new Error(
-            `Change batch size (${batchBytes} bytes) exceeds maximum allowed size of ${maxBatchSize} bytes for user "${client.userId}".`,
+            `Change batch size (${batchBytes} bytes) exceeds maximum allowed size of ${maxBatchSize} bytes for user "${client.user.id}".`,
           );
         }
 
         const batchId = validateIdentifier(
           msg.batchId,
           'batchId',
-          client.userId,
+          client.user.id,
         );
 
-        const { applied, newSeq } = await this.storage.applyChanges(
-          client.userId,
+        const app = await this.storage.getApp(client.appId);
+        if (!app) {
+          throw new Error(
+            `Application "${client.appId}" does not exist. Create it first using "tetherdb apps add ${client.appId}".`,
+          );
+        }
+
+        const { applied, newSeq } = await app.applyChanges(
+          client.user,
           msg.changes,
-          client.appId,
         );
 
         // Acknowledge to sender
@@ -245,21 +252,16 @@ export class SyncHub {
         if (applied.length > 0) {
           this.broadcastToAppUser(
             client.appId,
-            client.userId,
+            client.user.id,
             client.clientId,
             {
               type: ServerMessageType.BroadcastChanges,
               fromClientId: client.clientId,
-              seq: newSeq,
               changes: applied,
+              seq: newSeq,
             },
           );
         }
-        break;
-      }
-
-      case ClientMessageType.Ping: {
-        this.send(ws, { type: ServerMessageType.Pong });
         break;
       }
 
@@ -275,18 +277,21 @@ export class SyncHub {
     client: ActiveClient,
     lastSyncSeq?: number,
   ): Promise<void> {
+    const app = await this.storage.getApp(client.appId);
+    if (!app) {
+      throw new Error(`Application "${client.appId}" not found.`);
+    }
+
     const seq = lastSyncSeq ?? 0;
     if (seq === 0) {
       // Client has no sync point: deliver full snapshot for this app
-      const snapshot = await this.storage.getAllRecords(
-        client.userId,
-        undefined,
-        client.appId,
-      );
-      const currentSeq = await this.storage.getCurrentSeq(
-        client.userId,
-        client.appId,
-      );
+      const tables = await app.getTables();
+      const snapshot: RecordSnapshotItem[] = [];
+      for (const table of tables) {
+        const records = await table.getAllRecords(client.user);
+        snapshot.push(...records);
+      }
+      const currentSeq = await app.getCurrentSeq(client.user);
       this.send(client.ws, {
         type: ServerMessageType.SyncSnapshot,
         seq: currentSeq,
@@ -295,15 +300,16 @@ export class SyncHub {
     } else {
       // Client has lastSyncSeq: deliver diff or snapshot if compacted
       const { changes, currentSeq, requiresSnapshot } =
-        await this.storage.getChangesSince(client.userId, seq, client.appId);
+        await app.getChangesSince(client.user, seq);
 
       // If changelog was pruned OR diff is large (> 50 changes), deliver full snapshot for maximum efficiency
       if (requiresSnapshot || changes.length > 50) {
-        const snapshot = await this.storage.getAllRecords(
-          client.userId,
-          undefined,
-          client.appId,
-        );
+        const tables = await app.getTables();
+        const snapshot: RecordSnapshotItem[] = [];
+        for (const table of tables) {
+          const records = await table.getAllRecords(client.user);
+          snapshot.push(...records);
+        }
         this.send(client.ws, {
           type: ServerMessageType.SyncSnapshot,
           seq: currentSeq,

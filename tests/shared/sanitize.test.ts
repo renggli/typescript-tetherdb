@@ -4,9 +4,11 @@ import {
   MAX_USERNAME_LENGTH,
   MIN_USERNAME_LENGTH,
   normalizeUsername,
+  parseAllowedSpec,
+  validateAppAndTable,
   validateIdentifier,
   validateRecordId,
-  validateStoreName,
+  validateTableName,
   validateUserId,
   validateUsername,
 } from '../../src/shared/sanitize.js';
@@ -30,38 +32,38 @@ describe('src/shared/sanitize.ts', () => {
     });
   });
 
-  describe('validateStoreName', () => {
-    it('should accept valid store names', () => {
-      expect(validateStoreName('todos')).toBe('todos');
-      expect(validateStoreName('user_notes-2026')).toBe('user_notes-2026');
+  describe('validateTableName', () => {
+    it('should accept valid table names', () => {
+      expect(validateTableName('todos')).toBe('todos');
+      expect(validateTableName('user_notes-2026')).toBe('user_notes-2026');
     });
 
     it('should enforce allowlist if specified', () => {
       const allowed = ['todos', 'notes'];
-      expect(validateStoreName('todos', allowed, 'u1')).toBe('todos');
-      expect(() => validateStoreName('secrets', allowed, 'u1')).toThrow(
+      expect(validateTableName('todos', allowed, 'u1')).toBe('todos');
+      expect(() => validateTableName('secrets', allowed, 'u1')).toThrow(
         'Table "secrets" is not in the allowed tables list for user "u1"',
       );
     });
 
     it('should reject reserved system keywords', () => {
-      expect(() => validateStoreName('__proto__')).toThrow(
+      expect(() => validateTableName('__proto__')).toThrow(
         'reserved system keyword',
       );
-      expect(() => validateStoreName('prototype')).toThrow(
+      expect(() => validateTableName('prototype')).toThrow(
         'reserved system keyword',
       );
-      expect(() => validateStoreName('meta')).toThrow(
+      expect(() => validateTableName('meta')).toThrow(
         'reserved system keyword',
       );
-      expect(() => validateStoreName('changelog')).toThrow(
+      expect(() => validateTableName('changelog')).toThrow(
         'reserved system keyword',
       );
     });
 
-    it('should reject path traversal store names', () => {
-      expect(() => validateStoreName('../etc')).toThrow('Invalid table name');
-      expect(() => validateStoreName('store/name')).toThrow(
+    it('should reject path traversal table names', () => {
+      expect(() => validateTableName('../etc')).toThrow('Invalid table name');
+      expect(() => validateTableName('table/name')).toThrow(
         'Invalid table name',
       );
     });
@@ -183,6 +185,51 @@ describe('src/shared/sanitize.ts', () => {
       const circular: Record<string, unknown> = {};
       circular.self = circular;
       expect(calculateByteSize(circular)).toBe(0);
+    });
+  });
+
+  describe('parseAllowedSpec', () => {
+    it('should parse semicolon and colon separated app and table lists', () => {
+      const parsed = parseAllowedSpec(
+        'app2:table1,table2;app1:table3,table4,table5',
+      );
+      expect(parsed).toBeDefined();
+      expect(parsed?.get('app2')).toEqual(new Set(['table1', 'table2']));
+      expect(parsed?.get('app1')).toEqual(
+        new Set(['table3', 'table4', 'table5']),
+      );
+    });
+
+    it('should allow app without tables restriction', () => {
+      const parsed = parseAllowedSpec('app1;app2:t1');
+      expect(parsed?.get('app1')).toEqual(new Set());
+      expect(parsed?.get('app2')).toEqual(new Set(['t1']));
+    });
+
+    it('should return undefined for empty or whitespace spec', () => {
+      expect(parseAllowedSpec()).toBeUndefined();
+      expect(parseAllowedSpec('')).toBeUndefined();
+      expect(parseAllowedSpec('   ')).toBeUndefined();
+    });
+  });
+
+  describe('validateAppAndTable', () => {
+    it('should validate allowed apps and table permissions', () => {
+      const allowedApps = parseAllowedSpec('app1:t1,t2;app2:t3');
+      const limits = { allowedApps };
+
+      expect(validateAppAndTable('app1', 't1', limits, 'u1')).toEqual({
+        safeAppId: 'app1',
+        safeTableName: 't1',
+      });
+
+      expect(() => validateAppAndTable('app3', 't1', limits, 'u1')).toThrow(
+        'not in the allowed applications list',
+      );
+
+      expect(() => validateAppAndTable('app1', 't3', limits, 'u1')).toThrow(
+        'not in the allowed tables list',
+      );
     });
   });
 });

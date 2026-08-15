@@ -12,9 +12,9 @@
 const SAFE_IDENTIFIER_REGEX = /^[a-zA-Z0-9_-]{2,128}$/;
 
 /**
- * Regex for valid table/store names (alphanumeric, underscores, hyphens).
+ * Regex for valid table names (alphanumeric, underscores, hyphens).
  */
-const SAFE_STORE_REGEX = /^[a-zA-Z0-9_-]{1,64}$/;
+const SAFE_TABLE_REGEX = /^[a-zA-Z0-9_-]{1,64}$/;
 
 /**
  * Regex for valid usernames (alphanumeric, underscores, hyphens, and dots).
@@ -27,9 +27,9 @@ const SAFE_USERNAME_REGEX = /^[a-zA-Z0-9_.-]{2,64}$/;
 const SAFE_APP_ID_REGEX = /^[a-zA-Z0-9_.-]{1,64}$/;
 
 /**
- * Reserved keywords and prototype properties that must never be used as store or metadata keys.
+ * Reserved keywords and prototype properties that must never be used as table or metadata keys.
  */
-const RESERVED_STORE_NAMES: ReadonlySet<string> = new Set([
+const RESERVED_TABLE_NAMES: ReadonlySet<string> = new Set([
   '__proto__',
   'prototype',
   'constructor',
@@ -87,49 +87,126 @@ export function validateAppId(appId?: string): string {
 }
 
 /**
- * Validates a store/table name ensuring it is safe from path traversal and not reserved.
+ * Validates a table name ensuring it is safe from path traversal and not reserved.
  * Includes user context in errors when provided.
  *
- * @param storeName - The table/store name to validate.
- * @param allowedStores - Optional allowlist of permitted table names.
+ * @param tableName - The table name to validate.
+ * @param allowedTables - Optional allowlist of permitted table names.
  * @param userId - Optional target user ID for contextual error reporting.
- * @returns The validated store name.
- * @throws Error if the store name is invalid, reserved, or not in the allowlist.
+ * @returns The validated table name.
+ * @throws Error if the table name is invalid, reserved, or not in the allowlist.
  */
-export function validateStoreName(
-  storeName: string,
-  allowedStores?: ReadonlySet<string> | readonly string[],
+export function validateTableName(
+  tableName: string,
+  allowedTables?: ReadonlySet<string> | readonly string[],
   userId?: string,
 ): string {
   const userSuffix = userId ? ` for user "${userId}"` : '';
 
-  if (typeof storeName !== 'string' || !SAFE_STORE_REGEX.test(storeName)) {
+  if (typeof tableName !== 'string' || !SAFE_TABLE_REGEX.test(tableName)) {
     throw new Error(
-      `Invalid table name: "${storeName}"${userSuffix}. Table names must be 1-64 alphanumeric characters, hyphens, or underscores.`,
+      `Invalid table name: "${tableName}"${userSuffix}. Table names must be 1-64 alphanumeric characters, hyphens, or underscores.`,
     );
   }
 
-  const normalized = storeName.toLowerCase();
-  if (RESERVED_STORE_NAMES.has(normalized)) {
+  const normalized = tableName.toLowerCase();
+  if (RESERVED_TABLE_NAMES.has(normalized)) {
     throw new Error(
-      `Table name "${storeName}" is a reserved system keyword and cannot be used${userSuffix}.`,
+      `Table name "${tableName}" is a reserved system keyword and cannot be used${userSuffix}.`,
     );
   }
 
-  if (allowedStores !== undefined) {
-    const isAllowed = Array.isArray(allowedStores)
-      ? allowedStores.includes(storeName)
-      : allowedStores instanceof Set
-        ? allowedStores.has(storeName)
-        : (allowedStores as ReadonlySet<string>).has(storeName);
+  if (allowedTables !== undefined) {
+    const isAllowed = Array.isArray(allowedTables)
+      ? allowedTables.includes(tableName)
+      : allowedTables instanceof Set
+        ? allowedTables.has(tableName)
+        : (allowedTables as ReadonlySet<string>).has(tableName);
     if (!isAllowed) {
       throw new Error(
-        `Table "${storeName}" is not in the allowed tables list${userSuffix}.`,
+        `Table "${tableName}" is not in the allowed tables list${userSuffix}.`,
       );
     }
   }
 
-  return storeName;
+  return tableName;
+}
+
+/**
+ * Parses an allowed apps and tables configuration string.
+ * Example format: "app2:table1,table2;app1:table3,table4,table5"
+ *
+ * @param spec - Raw configuration string.
+ * @returns Map of application IDs to sets of allowed table names.
+ */
+export function parseAllowedSpec(
+  spec?: string,
+): Map<string, Set<string>> | undefined {
+  if (!spec?.trim()) return undefined;
+  const map = new Map<string, Set<string>>();
+  const entries = spec
+    .split(';')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  for (const entry of entries) {
+    const colonIdx = entry.indexOf(':');
+    if (colonIdx === -1) {
+      const appId = validateAppId(entry.trim());
+      if (appId) map.set(appId, new Set());
+    } else {
+      const rawAppId = entry.slice(0, colonIdx).trim();
+      const safeAppId = validateAppId(rawAppId);
+      const tablesStr = entry.slice(colonIdx + 1).trim();
+      const tables = tablesStr
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean);
+      map.set(safeAppId, new Set(tables));
+    }
+  }
+
+  return map;
+}
+
+/**
+ * Validates application ID and table name against server limits and allowed apps configuration.
+ *
+ * @param appId - Target application identifier.
+ * @param tableName - Target table name.
+ * @param limits - Server limits containing allowedApps or allowedTables.
+ * @param userId - Contextual user ID for error reporting.
+ * @returns Object with validated safeAppId and safeTableName.
+ */
+export function validateAppAndTable(
+  appId: string | undefined,
+  tableName: string,
+  limits?: {
+    allowedApps?:
+      | Map<string, Set<string>>
+      | ReadonlyMap<string, ReadonlySet<string>>;
+    allowedTables?: string[];
+  },
+  userId?: string,
+): { safeAppId: string; safeTableName: string } {
+  const safeAppId = validateAppId(appId);
+  const userSuffix = userId ? ` for user "${userId}"` : '';
+
+  if (limits?.allowedApps && limits.allowedApps.size > 0) {
+    if (!limits.allowedApps.has(safeAppId)) {
+      throw new Error(
+        `Application "${safeAppId}" is not in the allowed applications list${userSuffix}.`,
+      );
+    }
+    const allowedForApp = limits.allowedApps.get(safeAppId);
+    if (allowedForApp && allowedForApp.size > 0) {
+      validateTableName(tableName, allowedForApp, userId);
+      return { safeAppId, safeTableName: tableName };
+    }
+  }
+
+  validateTableName(tableName, limits?.allowedTables, userId);
+  return { safeAppId, safeTableName: tableName };
 }
 
 /**
@@ -137,18 +214,18 @@ export function validateStoreName(
  * Includes table and user context in errors when provided.
  *
  * @param id - The record identifier to validate.
- * @param storeName - Optional table name context.
+ * @param tableName - Optional table name context.
  * @param userId - Optional user ID context.
  * @returns The validated record ID.
  * @throws Error if the record ID is invalid or exceeds max length.
  */
 export function validateRecordId(
   id: string,
-  storeName?: string,
+  tableName?: string,
   userId?: string,
 ): string {
   const contextParts: string[] = [];
-  if (storeName) contextParts.push(`table: "${storeName}"`);
+  if (tableName) contextParts.push(`table: "${tableName}"`);
   if (userId) contextParts.push(`user: "${userId}"`);
   const contextSuffix =
     contextParts.length > 0 ? ` (${contextParts.join(', ')})` : '';

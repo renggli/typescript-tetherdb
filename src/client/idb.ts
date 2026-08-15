@@ -39,27 +39,25 @@ export interface LocalMutationItem<T = unknown> {
 }
 
 /**
- * Atomic transaction coordinator managing user object stores alongside
+ * Atomic transaction coordinator managing user table stores alongside
  * internal outbox changelogs and sync metadata stores.
  * All mutations and ingestion workflows are batched by default.
  */
 export class IDBManager {
   private dbPromise: Promise<IDBDatabase> | null = null;
   private dbName: string;
-  private version: number;
-  private storeNames: Set<string>;
+  private tableNames: Set<string>;
 
   /**
    * Creates a new IDBManager instance.
    *
    * @param dbName - Name of the IndexedDB database.
-   * @param initialStores - Array of application table/store names to initialize.
-   * @param version - Database schema version (defaults to 1).
+   * @param initialTables - Array of application table names to initialize.
+   * @param _version - Database schema version (reserved for future use).
    */
-  constructor(dbName: string, initialStores: string[] = [], version = 1) {
+  constructor(dbName: string, initialTables: string[] = [], _version = 1) {
     this.dbName = dbName;
-    this.version = version;
-    this.storeNames = new Set(initialStores);
+    this.tableNames = new Set(initialTables);
   }
 
   /**
@@ -71,7 +69,7 @@ export class IDBManager {
     if (this.dbPromise) return this.dbPromise;
 
     this.dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open(this.dbName, this.version);
+      const request = indexedDB.open(this.dbName);
 
       request.onupgradeneeded = (_event) => {
         const db = request.result;
@@ -84,14 +82,50 @@ export class IDBManager {
         if (!db.objectStoreNames.contains(META_STORE)) {
           db.createObjectStore(META_STORE, { keyPath: 'key' });
         }
-        for (const storeName of this.storeNames) {
-          if (!db.objectStoreNames.contains(storeName)) {
-            db.createObjectStore(storeName, { keyPath: 'id' });
+        for (const tableName of this.tableNames) {
+          if (!db.objectStoreNames.contains(tableName)) {
+            db.createObjectStore(tableName, { keyPath: 'id' });
           }
         }
       };
 
-      request.onsuccess = () => resolve(request.result);
+      request.onsuccess = () => {
+        const db = request.result;
+        const missing = Array.from(this.tableNames).filter(
+          (t) => !db.objectStoreNames.contains(t),
+        );
+        if (
+          !db.objectStoreNames.contains(OUTBOX_STORE) ||
+          !db.objectStoreNames.contains(META_STORE) ||
+          missing.length > 0
+        ) {
+          const nextVersion = db.version + 1;
+          db.close();
+          const upgradeRequest = indexedDB.open(this.dbName, nextVersion);
+          upgradeRequest.onupgradeneeded = () => {
+            const uDb = upgradeRequest.result;
+            if (!uDb.objectStoreNames.contains(OUTBOX_STORE)) {
+              uDb.createObjectStore(OUTBOX_STORE, {
+                keyPath: 'localId',
+                autoIncrement: true,
+              });
+            }
+            if (!uDb.objectStoreNames.contains(META_STORE)) {
+              uDb.createObjectStore(META_STORE, { keyPath: 'key' });
+            }
+            for (const tableName of this.tableNames) {
+              if (!uDb.objectStoreNames.contains(tableName)) {
+                uDb.createObjectStore(tableName, { keyPath: 'id' });
+              }
+            }
+          };
+          upgradeRequest.onsuccess = () => resolve(upgradeRequest.result);
+          upgradeRequest.onerror = () => reject(upgradeRequest.error);
+          return;
+        }
+        resolve(db);
+      };
+
       request.onerror = () => reject(request.error);
     });
 
@@ -99,35 +133,55 @@ export class IDBManager {
   }
 
   /**
-   * Dynamically ensures that multiple application object stores exist in IndexedDB.
+   * Dynamically ensures that multiple application tables exist in IndexedDB.
    *
-   * @param storeNames - Array of table/object store names to ensure.
+   * @param tableNames - Array of table names to ensure.
    */
-  async ensureStores(storeNames: string[]): Promise<void> {
-    const missing = storeNames.filter((s) => !this.storeNames.has(s));
-    if (missing.length === 0) return;
-
-    for (const s of missing) {
-      this.storeNames.add(s);
+  async ensureTables(tableNames: string[]): Promise<void> {
+    for (const s of tableNames) {
+      this.tableNames.add(s);
     }
 
     const db = await this.getDB();
-    const needsUpgrade = missing.some((s) => !db.objectStoreNames.contains(s));
+    const needsUpgrade = tableNames.some(
+      (s) => !db.objectStoreNames.contains(s),
+    );
     if (!needsUpgrade) return;
 
+    const nextVersion = db.version + 1;
     db.close();
-    this.version += 1;
-    this.dbPromise = null;
-    await this.getDB();
+    this.dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
+      const upgradeReq = indexedDB.open(this.dbName, nextVersion);
+      upgradeReq.onupgradeneeded = () => {
+        const uDb = upgradeReq.result;
+        if (!uDb.objectStoreNames.contains(OUTBOX_STORE)) {
+          uDb.createObjectStore(OUTBOX_STORE, {
+            keyPath: 'localId',
+            autoIncrement: true,
+          });
+        }
+        if (!uDb.objectStoreNames.contains(META_STORE)) {
+          uDb.createObjectStore(META_STORE, { keyPath: 'key' });
+        }
+        for (const t of this.tableNames) {
+          if (!uDb.objectStoreNames.contains(t)) {
+            uDb.createObjectStore(t, { keyPath: 'id' });
+          }
+        }
+      };
+      upgradeReq.onsuccess = () => resolve(upgradeReq.result);
+      upgradeReq.onerror = () => reject(upgradeReq.error);
+    });
+    await this.dbPromise;
   }
 
   /**
-   * Ensures a single application object store exists in IndexedDB.
+   * Ensures a single application table exists in IndexedDB.
    *
-   * @param storeName - Name of the store to ensure.
+   * @param tableName - Name of the table to ensure.
    */
-  async ensureStore(storeName: string): Promise<void> {
-    await this.ensureStores([storeName]);
+  async ensureTable(tableName: string): Promise<void> {
+    await this.ensureTables([tableName]);
   }
 
   /**
@@ -143,7 +197,7 @@ export class IDBManager {
       const tx = db.transaction(META_STORE, 'readonly');
       const store = tx.objectStore(META_STORE);
       const req = store.get(key);
-      req.onsuccess = () => resolve(req.result ? req.result.value : undefined);
+      req.onsuccess = () => resolve(req.result?.value);
       req.onerror = () => reject(req.error);
     });
   }
@@ -151,11 +205,10 @@ export class IDBManager {
   /**
    * Sets a metadata value in the internal metadata store.
    *
-   * @typeParam T - Value type.
    * @param key - The metadata key identifier.
    * @param value - The value to store.
    */
-  async setMeta<T = unknown>(key: string, value: T): Promise<void> {
+  async setMeta(key: string, value: unknown): Promise<void> {
     const db = await this.getDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(META_STORE, 'readwrite');
@@ -170,19 +223,19 @@ export class IDBManager {
    * Retrieves a single stored record by table and identifier.
    *
    * @typeParam T - Expected payload type.
-   * @param storeName - Table/store name.
+   * @param tableName - Table name.
    * @param id - Record identifier.
    * @returns Stored record or `undefined` if not found.
    */
   async getRecord<T = unknown>(
-    storeName: string,
+    tableName: string,
     id: string,
   ): Promise<StoredRecord<T> | undefined> {
-    await this.ensureStore(storeName);
+    await this.ensureTable(tableName);
     const db = await this.getDB();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(storeName, 'readonly');
-      const store = tx.objectStore(storeName);
+      const tx = db.transaction(tableName, 'readonly');
+      const store = tx.objectStore(tableName);
       const req = store.get(id);
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
@@ -193,21 +246,21 @@ export class IDBManager {
    * Retrieves multiple stored records by their identifiers in a single readonly transaction.
    *
    * @typeParam T - Expected payload type.
-   * @param storeName - Table/store name.
+   * @param tableName - Table name.
    * @param ids - Array of record identifiers.
    * @returns Map of found stored records keyed by id.
    */
   async getRecords<T = unknown>(
-    storeName: string,
+    tableName: string,
     ids: string[],
   ): Promise<Map<string, StoredRecord<T>>> {
     if (ids.length === 0) return new Map();
-    await this.ensureStore(storeName);
+    await this.ensureTable(tableName);
     const db = await this.getDB();
 
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(storeName, 'readonly');
-      const store = tx.objectStore(storeName);
+      const tx = db.transaction(tableName, 'readonly');
+      const store = tx.objectStore(tableName);
       const results = new Map<string, StoredRecord<T>>();
 
       for (const id of ids) {
@@ -228,17 +281,17 @@ export class IDBManager {
    * Retrieves stored records from a specified table.
    *
    * @typeParam T - Data payload type.
-   * @param storeName - Table/store name.
+   * @param tableName - Table name.
    * @returns Array of stored records with metadata.
    */
   async getAllRecords<T = unknown>(
-    storeName: string,
+    tableName: string,
   ): Promise<StoredRecord<T>[]> {
-    await this.ensureStore(storeName);
+    await this.ensureTable(tableName);
     const db = await this.getDB();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(storeName, 'readonly');
-      const store = tx.objectStore(storeName);
+      const tx = db.transaction(tableName, 'readonly');
+      const store = tx.objectStore(tableName);
       const req = store.getAll();
       req.onsuccess = () => resolve(req.result ?? []);
       req.onerror = () => reject(req.error);
@@ -250,21 +303,21 @@ export class IDBManager {
    * within a single IndexedDB transaction.
    *
    * @typeParam T - Data payload type.
-   * @param storeName - Target table name.
+   * @param tableName - Target table name.
    * @param mutations - List of mutations to apply and queue into outbox.
    * @returns Array of newly stored records with updated metadata.
    */
   async applyLocalChanges<T = unknown>(
-    storeName: string,
+    tableName: string,
     mutations: LocalMutationItem<T>[],
   ): Promise<StoredRecord<T>[]> {
     if (mutations.length === 0) return [];
-    await this.ensureStore(storeName);
+    await this.ensureTable(tableName);
     const db = await this.getDB();
 
     return new Promise((resolve, reject) => {
-      const tx = db.transaction([storeName, OUTBOX_STORE], 'readwrite');
-      const dataStore = tx.objectStore(storeName);
+      const tx = db.transaction([tableName, OUTBOX_STORE], 'readwrite');
+      const dataStore = tx.objectStore(tableName);
       const outboxStore = tx.objectStore(OUTBOX_STORE);
       const records: StoredRecord<T>[] = [];
       const now = Date.now();
@@ -298,14 +351,50 @@ export class IDBManager {
   }
 
   /**
-   * Ingests a complete snapshot of records across tables in a single atomic IndexedDB transaction.
+   * Retrieves all currently queued outbox entries awaiting sync.
    *
-   * @param snapshot - All active snapshot record items across stores.
-   * @param seq - Global sequence number corresponding to the snapshot.
+   * @param limit - Optional maximum number of entries to retrieve.
+   * @returns Array of pending outbox queue items.
+   */
+  async getPendingOutbox(limit?: number): Promise<OutboxEntry[]> {
+    const db = await this.getDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(OUTBOX_STORE, 'readonly');
+      const store = tx.objectStore(OUTBOX_STORE);
+      const req = limit ? store.getAll(null, limit) : store.getAll();
+      req.onsuccess = () => resolve(req.result ?? []);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  /**
+   * Clears acknowledged changes from the outbox by their local database IDs.
+   *
+   * @param localIds - Array of auto-incremented local outbox IDs to remove.
+   */
+  async removeOutboxEntries(localIds: number[]): Promise<void> {
+    if (localIds.length === 0) return;
+    const db = await this.getDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(OUTBOX_STORE, 'readwrite');
+      const store = tx.objectStore(OUTBOX_STORE);
+      for (const id of localIds) {
+        store.delete(id);
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  /**
+   * Applies an entire snapshot batch across tables atomically in a single transaction.
+   *
+   * @param snapshot - Array of record items to persist.
+   * @param seq - Global sequence number corresponding to this snapshot.
    */
   async applySnapshotBatch(
     snapshot: Array<{
-      store: string;
+      table: string;
       id: string;
       data: unknown;
       timestamp: number;
@@ -314,26 +403,23 @@ export class IDBManager {
     }>,
     seq: number,
   ): Promise<void> {
-    if (snapshot.length === 0) {
-      await this.setMeta('lastSyncSeq', seq);
-      return;
-    }
-
-    const storesInSnapshot = Array.from(new Set(snapshot.map((s) => s.store)));
-    await this.ensureStores(storesInSnapshot);
+    const tablesInSnapshot = Array.from(
+      new Set(snapshot.map((item) => item.table)),
+    ).filter(Boolean);
+    await this.ensureTables(tablesInSnapshot);
     const db = await this.getDB();
 
     return new Promise((resolve, reject) => {
-      const txStores = [...storesInSnapshot, META_STORE];
+      const txStores = [...tablesInSnapshot, META_STORE];
       const tx = db.transaction(txStores, 'readwrite');
 
-      const storeObjects = new Map<string, IDBObjectStore>();
-      for (const s of storesInSnapshot) {
-        storeObjects.set(s, tx.objectStore(s));
+      const tableObjects = new Map<string, IDBObjectStore>();
+      for (const t of tablesInSnapshot) {
+        tableObjects.set(t, tx.objectStore(t));
       }
 
       for (const item of snapshot) {
-        const objStore = storeObjects.get(item.store);
+        const objStore = tableObjects.get(item.table);
         if (objStore) {
           if (item.deleted) {
             objStore.delete(item.id);
@@ -351,6 +437,7 @@ export class IDBManager {
 
       const metaStore = tx.objectStore(META_STORE);
       metaStore.put({ key: 'lastSyncSeq', value: seq });
+      metaStore.put({ key: 'lastSyncTimestamp', value: Date.now() });
 
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
@@ -358,10 +445,11 @@ export class IDBManager {
   }
 
   /**
-   * Ingests an array of remote change diff operations in a single atomic IndexedDB transaction.
+   * Applies a batch of incoming remote delta mutations atomically across tables
+   * in a single IndexedDB transaction without generating local outbox echo entries.
    *
-   * @param changes - Array of change records received from server.
-   * @param seq - New sequence number to store in metadata.
+   * @param changes - Array of change records received from the server.
+   * @param seq - New sequence number to record upon transaction commit.
    */
   async applyRemoteChangesBatch(
     changes: ChangeRecord[],
@@ -372,21 +460,23 @@ export class IDBManager {
       return;
     }
 
-    const storesInChanges = Array.from(new Set(changes.map((c) => c.store)));
-    await this.ensureStores(storesInChanges);
+    const tablesInChanges = Array.from(
+      new Set(changes.map((c) => c.table)),
+    ).filter(Boolean);
+    await this.ensureTables(tablesInChanges);
     const db = await this.getDB();
 
     return new Promise((resolve, reject) => {
-      const txStores = [...storesInChanges, META_STORE];
+      const txStores = [...tablesInChanges, META_STORE];
       const tx = db.transaction(txStores, 'readwrite');
 
-      const storeObjects = new Map<string, IDBObjectStore>();
-      for (const s of storesInChanges) {
-        storeObjects.set(s, tx.objectStore(s));
+      const tableObjects = new Map<string, IDBObjectStore>();
+      for (const t of tablesInChanges) {
+        tableObjects.set(t, tx.objectStore(t));
       }
 
       for (const change of changes) {
-        const objStore = storeObjects.get(change.store);
+        const objStore = tableObjects.get(change.table);
         if (objStore) {
           const isDelete =
             change.op === OperationType.Delete || Boolean(change.deleted);
@@ -406,6 +496,7 @@ export class IDBManager {
 
       const metaStore = tx.objectStore(META_STORE);
       metaStore.put({ key: 'lastSyncSeq', value: seq });
+      metaStore.put({ key: 'lastSyncTimestamp', value: Date.now() });
 
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
@@ -413,53 +504,17 @@ export class IDBManager {
   }
 
   /**
-   * Retrieves all queued entries currently awaiting synchronization from the outbox.
-   *
-   * @param limit - Optional maximum number of entries to retrieve.
-   * @returns Array of outbox queue entries.
-   */
-  async getPendingOutbox(limit?: number): Promise<OutboxEntry[]> {
-    const db = await this.getDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(OUTBOX_STORE, 'readonly');
-      const store = tx.objectStore(OUTBOX_STORE);
-      const req = store.getAll(undefined, limit);
-      req.onsuccess = () => resolve(req.result ?? []);
-      req.onerror = () => reject(req.error);
-    });
-  }
-
-  /**
-   * Deletes acknowledged mutation entries from the outbox store by localId.
-   *
-   * @param localIds - Array of outbox primary keys to remove.
-   */
-  async removeOutboxEntries(localIds: number[]): Promise<void> {
-    if (localIds.length === 0) return;
-    const db = await this.getDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(OUTBOX_STORE, 'readwrite');
-      const store = tx.objectStore(OUTBOX_STORE);
-      for (const id of localIds) {
-        store.delete(id);
-      }
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  }
-
-  /**
-   * Clears all user application object stores, outbox queue entries, and metadata.
+   * Clears all local table stores, outbox changelog entries, and metadata.
    */
   async clearAllData(): Promise<void> {
     const db = await this.getDB();
-    const stores = Array.from(db.objectStoreNames);
-    if (stores.length === 0) return;
+    const storeNames = Array.from(db.objectStoreNames);
+    if (storeNames.length === 0) return;
 
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(stores, 'readwrite');
-      for (const storeName of stores) {
-        tx.objectStore(storeName).clear();
+      const tx = db.transaction(storeNames, 'readwrite');
+      for (const name of storeNames) {
+        tx.objectStore(name).clear();
       }
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);

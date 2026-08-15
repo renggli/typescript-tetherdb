@@ -338,7 +338,7 @@ export class TetherSyncClient {
   ): Promise<void> {
     await this.idb.applySnapshotBatch(snapshot, seq);
 
-    const eventsByStore = new Map<
+    const eventsByTable = new Map<
       string,
       Array<{
         op: OperationType;
@@ -349,10 +349,10 @@ export class TetherSyncClient {
     >();
 
     for (const item of snapshot) {
-      let list = eventsByStore.get(item.store);
+      let list = eventsByTable.get(item.table);
       if (!list) {
         list = [];
-        eventsByStore.set(item.store, list);
+        eventsByTable.set(item.table, list);
       }
       list.push({
         op: item.deleted ? OperationType.Delete : OperationType.Put,
@@ -362,8 +362,8 @@ export class TetherSyncClient {
       });
     }
 
-    for (const [storeName, events] of eventsByStore.entries()) {
-      const table = this.getTable(storeName);
+    for (const [tableName, events] of eventsByTable.entries()) {
+      const table = this.getTable(tableName);
       table.notifyRemoteChanges(events);
     }
   }
@@ -374,7 +374,7 @@ export class TetherSyncClient {
   ): Promise<void> {
     await this.idb.applyRemoteChangesBatch(changes, seq);
 
-    const eventsByStore = new Map<
+    const eventsByTable = new Map<
       string,
       Array<{
         op: OperationType;
@@ -385,10 +385,10 @@ export class TetherSyncClient {
     >();
 
     for (const change of changes) {
-      let list = eventsByStore.get(change.store);
+      let list = eventsByTable.get(change.table);
       if (!list) {
         list = [];
-        eventsByStore.set(change.store, list);
+        eventsByTable.set(change.table, list);
       }
       const isDelete =
         change.op === OperationType.Delete || Boolean(change.deleted);
@@ -400,8 +400,8 @@ export class TetherSyncClient {
       });
     }
 
-    for (const [storeName, events] of eventsByStore.entries()) {
-      const table = this.getTable(storeName);
+    for (const [tableName, events] of eventsByTable.entries()) {
+      const table = this.getTable(tableName);
       table.notifyRemoteChanges(events);
     }
   }

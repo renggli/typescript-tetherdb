@@ -1,10 +1,13 @@
 /**
- * TetherDB Server Storage — Storage adapter interfaces and implementations.
+ * TetherDB Server Storage — Modular storage architecture.
  *
  * @module tetherdb/server/storage
  */
 
-export * from './adapter.js';
-export * from './file.js';
-export * from './memory.js';
-export * from './sqlite.js';
+export * from './app.js';
+export * from './file/index.js';
+export * from './memory/index.js';
+export * from './sqlite/index.js';
+export * from './storage.js';
+export * from './table.js';
+export * from './user.js';

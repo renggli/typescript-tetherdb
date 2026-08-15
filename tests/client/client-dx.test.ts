@@ -8,7 +8,6 @@ import {
   TetherDB,
 } from '../../src/client/index.js';
 import { TetherServer } from '../../src/server/server.js';
-import { MemoryStorageAdapter } from '../../src/server/storage/memory.js';
 
 describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', () => {
   let server: TetherServer;
@@ -22,7 +21,7 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
 
   beforeEach(async () => {
     server = new TetherServer({
-      storage: new MemoryStorageAdapter(),
+      apps: { default: ['notes', 'todos', 'items'] },
     });
     httpServer = await server.listen(0, '127.0.0.1');
     const addr = httpServer.address();
@@ -137,10 +136,12 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
     expect(outboxAfter).toHaveLength(0);
 
     // Server storage should now have the 2 records
-    const serverRecords = await server.storageAdapter.getAllRecords(
-      authResult.userId,
-      'todos',
-    );
+    const user = await server.storage.getUser(authResult.userId);
+    expect(user).toBeDefined();
+    if (!user) return;
+    const defaultApp = await server.storage.getApp('default');
+    const todosTable = await defaultApp?.getTable('todos');
+    const serverRecords = (await todosTable?.getAllRecords(user)) ?? [];
     expect(serverRecords).toHaveLength(2);
   });
 
