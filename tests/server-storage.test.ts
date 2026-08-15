@@ -32,7 +32,7 @@ describe('Storage Adapters', () => {
 
     runStorageTestSuite(() => adapter);
 
-    it('should write data in per-user sub-directories on filesystem', async () => {
+    it('should write data in sharded per-user sub-directories on filesystem', async () => {
       const change: ChangeRecord = {
         store: 'settings',
         id: 'theme',
@@ -44,7 +44,9 @@ describe('Storage Adapters', () => {
 
       await adapter.applyChanges('user-42', [change]);
 
-      const userDir = path.join(tmpDir, 'user-42');
+      // Sharded layout: tmpDir / us / user-42 / ...
+      const shard = 'user-42'.slice(0, 2).toLowerCase();
+      const userDir = path.join(tmpDir, shard, 'user-42');
       const storeFile = path.join(userDir, 'stores', 'settings.json');
       const metaFile = path.join(userDir, 'meta.json');
 
@@ -55,6 +57,102 @@ describe('Storage Adapters', () => {
       const metaContent = await fs.readFile(metaFile, 'utf-8');
       const metaObj = JSON.parse(metaContent);
       expect(metaObj.currentSeq).toBe(1);
+    });
+
+    it('should reject path traversal attempts in userId or store name', async () => {
+      const evilChange: ChangeRecord = {
+        store: '../../../etc',
+        id: 'hack',
+        op: OperationType.Put,
+        data: 'pwned',
+        timestamp: Date.now(),
+      };
+
+      await expect(
+        adapter.applyChanges('user-1', [evilChange]),
+      ).rejects.toThrow();
+      await expect(
+        adapter.applyChanges('../../evil-user', [
+          {
+            store: 'safe',
+            id: '1',
+            op: OperationType.Put,
+            data: 'val',
+            timestamp: 100,
+          },
+        ]),
+      ).rejects.toThrow();
+    });
+
+    it('should compact changelog beyond maxChangelogEntries and flag requiresSnapshot', async () => {
+      const compactingAdapter = new FileStorageAdapter({
+        baseDir: tmpDir,
+        limits: { maxChangelogEntries: 5 },
+      });
+
+      // Apply 10 changes sequentially
+      for (let i = 1; i <= 10; i++) {
+        await compactingAdapter.applyChanges('user-compaction', [
+          {
+            store: 'events',
+            id: `e-${i}`,
+            op: OperationType.Put,
+            data: `event-${i}`,
+            timestamp: 1000 + i,
+          },
+        ]);
+      }
+
+      // Asking for seq 1 (which was pruned) should return requiresSnapshot: true
+      const oldDiff = await compactingAdapter.getChangesSince(
+        'user-compaction',
+        1,
+      );
+      expect(oldDiff.requiresSnapshot).toBe(true);
+
+      // Asking for recent seq 7 (retained in window) should return delta diff
+      const recentDiff = await compactingAdapter.getChangesSince(
+        'user-compaction',
+        7,
+      );
+      expect(recentDiff.requiresSnapshot).toBe(false);
+      expect(recentDiff.changes).toHaveLength(3);
+    });
+
+    it('should enforce server limits on record size and allowed stores', async () => {
+      const limitedAdapter = new FileStorageAdapter({
+        baseDir: tmpDir,
+        limits: {
+          allowedStores: ['todos', 'notes'],
+          maxRecordSizeBytes: 50,
+        },
+      });
+
+      // Disallowed store
+      await expect(
+        limitedAdapter.applyChanges('user-limits', [
+          {
+            store: 'secrets',
+            id: '1',
+            op: OperationType.Put,
+            data: 'hello',
+            timestamp: 100,
+          },
+        ]),
+      ).rejects.toThrow('not in the allowed stores list');
+
+      // Oversized record
+      await expect(
+        limitedAdapter.applyChanges('user-limits', [
+          {
+            store: 'todos',
+            id: '1',
+            op: OperationType.Put,
+            data: { text: 'A'.repeat(100) },
+            timestamp: 100,
+          },
+        ]),
+      ).rejects.toThrow('Record size');
     });
   });
 });

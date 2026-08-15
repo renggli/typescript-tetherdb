@@ -1,6 +1,7 @@
 import * as http from 'node:http';
 import * as path from 'node:path';
 import { WebSocketServer } from 'ws';
+import type { ServerLimits } from '../shared/types.js';
 import { AuthManager, type AuthManagerOptions } from './auth.js';
 import type { StorageAdapter } from './storage/adapter.js';
 import { FileStorageAdapter } from './storage/file.js';
@@ -17,6 +18,8 @@ export interface BeamedServerOptions {
   storageDir?: string;
   /** Custom AuthManager instance or configuration options. */
   auth?: AuthManager | AuthManagerOptions;
+  /** Server-side table and quota limits. */
+  limits?: ServerLimits;
   /** Path for WebSocket upgrade requests (defaults to '/sync'). */
   wsPath?: string;
 }
@@ -42,9 +45,12 @@ export class BeamedServer {
     if (options.storage) {
       this.storage = options.storage;
     } else if (options.storageDir) {
-      this.storage = new FileStorageAdapter({ baseDir: options.storageDir });
+      this.storage = new FileStorageAdapter({
+        baseDir: options.storageDir,
+        limits: options.limits,
+      });
     } else {
-      this.storage = new MemoryStorageAdapter();
+      this.storage = new MemoryStorageAdapter({ limits: options.limits });
     }
 
     if (options.auth instanceof AuthManager) {
@@ -61,7 +67,7 @@ export class BeamedServer {
       this.authManager = new AuthManager(authOpts);
     }
 
-    this.syncHub = new SyncHub(this.storage, this.authManager);
+    this.syncHub = new SyncHub(this.storage, this.authManager, options.limits);
     this.wsPath = options.wsPath ?? '/sync';
   }
 

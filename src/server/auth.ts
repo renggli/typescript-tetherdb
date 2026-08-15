@@ -1,6 +1,7 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { validateUsername } from '../shared/sanitize.js';
 
 /**
  * Persisted user account credentials and metadata.
@@ -134,12 +135,14 @@ export class AuthManager {
     password: string,
   ): Promise<{ user: { id: string; username: string }; token: string }> {
     await this.init();
-    const cleanUsername = username.trim();
-    if (!cleanUsername || cleanUsername.length < 2) {
-      throw new Error('Username must be at least 2 characters long');
-    }
-    if (!password || password.length < 4) {
-      throw new Error('Password must be at least 4 characters long');
+    const cleanUsername = validateUsername(username);
+
+    if (
+      typeof password !== 'string' ||
+      password.length < 4 ||
+      password.length > 1024
+    ) {
+      throw new Error('Password must be between 4 and 1024 characters long');
     }
 
     const key = cleanUsername.toLowerCase();
@@ -147,7 +150,7 @@ export class AuthManager {
       throw new Error('Username already exists');
     }
 
-    const id = `usr_${crypto.randomUUID().replace(/-/g, '').substring(0, 16)}`;
+    const id = crypto.randomUUID();
     const salt = crypto.randomBytes(16).toString('hex');
     const passwordHash = this.hashPassword(password, salt);
 
@@ -182,7 +185,12 @@ export class AuthManager {
     password: string,
   ): Promise<{ user: { id: string; username: string }; token: string }> {
     await this.init();
-    const key = username.trim().toLowerCase();
+    const cleanUsername = validateUsername(username);
+    if (typeof password !== 'string' || password.length === 0) {
+      throw new Error('Invalid username or password');
+    }
+
+    const key = cleanUsername.toLowerCase();
     const account = this.users.get(key);
     if (!account) {
       throw new Error('Invalid username or password');
@@ -201,51 +209,63 @@ export class AuthManager {
   }
 
   /**
-   * Generates an HMAC-signed session token for a given user.
+   * Generates a signed HMAC-SHA256 authentication session token.
    *
-   * @param userId - Target user identifier.
-   * @param username - Target username.
-   * @returns Signed URL-safe token string.
+   * @param userId - Target user account identifier.
+   * @param username - Authenticated username.
+   * @returns Base64url-encoded signed token string.
    */
   generateToken(userId: string, username: string): string {
     const payload = JSON.stringify({
       userId,
       username,
-      exp: Date.now() + 1000 * 60 * 60 * 24 * 30,
+      iat: Date.now(),
     });
-    const payloadB64 = Buffer.from(payload).toString('base64url');
-    const sig = crypto
+    const encodedPayload = Buffer.from(payload).toString('base64url');
+    const signature = crypto
       .createHmac('sha256', this.tokenSecret)
-      .update(payloadB64)
+      .update(encodedPayload)
       .digest('base64url');
-    return `${payloadB64}.${sig}`;
+    return `${encodedPayload}.${signature}`;
   }
 
   /**
-   * Verifies an HMAC-signed session token and checks expiration.
+   * Verifies an HMAC-signed authentication session token and returns the decoded session payload.
    *
-   * @param token - Token string to verify.
-   * @returns The decoded `AuthSession` if valid and unexpired; otherwise `null`.
+   * @param token - Base64url-encoded signed session token.
+   * @returns The decoded `AuthSession` object, or `null` if the token is invalid, tampered with, or expired.
    */
   verifyToken(token: string): AuthSession | null {
+    if (typeof token !== 'string' || !token.includes('.')) {
+      return null;
+    }
+
+    const [encodedPayload, signature] = token.split('.');
+    if (!encodedPayload || !signature) {
+      return null;
+    }
+
+    const expectedSig = crypto
+      .createHmac('sha256', this.tokenSecret)
+      .update(encodedPayload)
+      .digest('base64url');
+
+    if (signature !== expectedSig) {
+      return null;
+    }
+
     try {
-      const parts = token.split('.');
-      if (parts.length !== 2) return null;
-      const [payloadB64, sig] = parts;
-      const expectedSig = crypto
-        .createHmac('sha256', this.tokenSecret)
-        .update(payloadB64)
-        .digest('base64url');
-
-      if (sig !== expectedSig) return null;
-
-      const payload = JSON.parse(
-        Buffer.from(payloadB64, 'base64url').toString('utf-8'),
+      const decoded = Buffer.from(encodedPayload, 'base64url').toString(
+        'utf-8',
       );
-      if (payload.exp && Date.now() > payload.exp) {
+      const payload: { userId?: unknown; username?: unknown } =
+        JSON.parse(decoded);
+      if (
+        typeof payload.userId !== 'string' ||
+        typeof payload.username !== 'string'
+      ) {
         return null;
       }
-
       return {
         userId: payload.userId,
         username: payload.username,

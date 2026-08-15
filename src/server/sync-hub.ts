@@ -1,7 +1,9 @@
 import type { WebSocket } from 'ws';
+import { calculateByteSize, validateIdentifier } from '../shared/sanitize.js';
 import {
   type ClientMessage,
   ClientMessageType,
+  type ServerLimits,
   type ServerMessage,
   ServerMessageType,
 } from '../shared/types.js';
@@ -21,6 +23,7 @@ interface ActiveClient {
 export class SyncHub {
   private storage: StorageAdapter;
   private authManager: AuthManager;
+  private limits: ServerLimits;
   private userClients: Map<string, Set<ActiveClient>> = new Map();
   private wsToClient: Map<WebSocket, ActiveClient> = new Map();
 
@@ -29,10 +32,16 @@ export class SyncHub {
    *
    * @param storage - Pluggable backend storage adapter.
    * @param authManager - User authentication and token verification manager.
+   * @param limits - Optional server quota and payload limits.
    */
-  constructor(storage: StorageAdapter, authManager: AuthManager) {
+  constructor(
+    storage: StorageAdapter,
+    authManager: AuthManager,
+    limits: ServerLimits = {},
+  ) {
     this.storage = storage;
     this.authManager = authManager;
+    this.limits = limits;
   }
 
   /**
@@ -47,10 +56,12 @@ export class SyncHub {
         const msg: ClientMessage = JSON.parse(raw);
         await this.handleMessage(ws, msg);
       } catch (err) {
-        console.error('[BeamedServer] Error handling WebSocket message:', err);
+        const errorMsg =
+          err instanceof Error ? err.message : 'Invalid message format';
+        console.error('[BeamedServer] WebSocket message error:', errorMsg);
         this.send(ws, {
           type: ServerMessageType.Error,
-          message: 'Invalid message format',
+          message: errorMsg,
         });
       }
     });
@@ -89,8 +100,23 @@ export class SyncHub {
     ws: WebSocket,
     msg: ClientMessage,
   ): Promise<void> {
+    if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string') {
+      throw new Error(
+        'Invalid message format: Message must be an object with a type string.',
+      );
+    }
+
     switch (msg.type) {
       case ClientMessageType.Auth: {
+        if (typeof msg.token !== 'string' || !msg.token) {
+          this.send(ws, {
+            type: ServerMessageType.AuthError,
+            message: 'Missing or invalid authentication token',
+          });
+          ws.close();
+          return;
+        }
+
         const session = this.authManager.verifyToken(msg.token);
         if (!session) {
           this.send(ws, {
@@ -101,9 +127,13 @@ export class SyncHub {
           return;
         }
 
+        const clientId = validateIdentifier(
+          msg.clientId ?? 'client_anon',
+          'clientId',
+        );
         const client: ActiveClient = {
           ws,
-          clientId: msg.clientId,
+          clientId,
           userId: session.userId,
         };
 
@@ -150,6 +180,20 @@ export class SyncHub {
           return;
         }
 
+        if (!Array.isArray(msg.changes)) {
+          throw new Error('Invalid change batch: changes must be an array.');
+        }
+
+        const maxBatchSize = this.limits.maxBatchSizeBytes ?? 5 * 1024 * 1024;
+        const batchBytes = calculateByteSize(msg.changes);
+        if (batchBytes > maxBatchSize) {
+          throw new Error(
+            `Change batch size (${batchBytes} bytes) exceeds maximum allowed size of ${maxBatchSize} bytes.`,
+          );
+        }
+
+        const batchId = validateIdentifier(msg.batchId, 'batchId');
+
         const { applied, newSeq } = await this.storage.applyChanges(
           client.userId,
           msg.changes,
@@ -158,7 +202,7 @@ export class SyncHub {
         // Acknowledge to sender
         this.send(ws, {
           type: ServerMessageType.ChangeAck,
-          batchId: msg.batchId,
+          batchId,
           appliedSeq: newSeq,
         });
 
@@ -178,6 +222,12 @@ export class SyncHub {
         this.send(ws, { type: ServerMessageType.Pong });
         break;
       }
+
+      default: {
+        throw new Error(
+          `Unsupported message type: "${(msg as { type: string }).type}"`,
+        );
+      }
     }
   }
 
@@ -196,17 +246,25 @@ export class SyncHub {
         snapshot,
       });
     } else {
-      // Client has lastSyncSeq: deliver diff of changes since that seq
-      const { changes, currentSeq } = await this.storage.getChangesSince(
-        client.userId,
-        seq,
-      );
-      this.send(client.ws, {
-        type: ServerMessageType.SyncDiff,
-        fromSeq: seq,
-        toSeq: currentSeq,
-        changes,
-      });
+      // Client has lastSyncSeq: deliver diff or snapshot if compacted
+      const { changes, currentSeq, requiresSnapshot } =
+        await this.storage.getChangesSince(client.userId, seq);
+
+      if (requiresSnapshot) {
+        const snapshot = await this.storage.getAllRecords(client.userId);
+        this.send(client.ws, {
+          type: ServerMessageType.SyncSnapshot,
+          seq: currentSeq,
+          snapshot,
+        });
+      } else {
+        this.send(client.ws, {
+          type: ServerMessageType.SyncDiff,
+          fromSeq: seq,
+          toSeq: currentSeq,
+          changes,
+        });
+      }
     }
   }
 

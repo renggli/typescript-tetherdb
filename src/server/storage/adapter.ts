@@ -47,15 +47,21 @@ export interface StorageAdapter {
 
   /**
    * Retrieves all change operations recorded for a user since a given sequence number.
+   * If the requested `fromSeq` is older than the compacted changelog retention window,
+   * `requiresSnapshot` will be true, indicating the client should receive a full snapshot instead.
    *
    * @param userId - Target user account identifier.
    * @param fromSeq - Starting sequence number (exclusive).
-   * @returns Array of applied change records and current sequence number.
+   * @returns Array of applied change records, current sequence number, and optional snapshot requirement flag.
    */
   getChangesSince(
     userId: string,
     fromSeq: number,
-  ): Promise<{ changes: ChangeRecord[]; currentSeq: number }>;
+  ): Promise<{
+    changes: ChangeRecord[];
+    currentSeq: number;
+    requiresSnapshot?: boolean;
+  }>;
 
   /**
    * Retrieves the current global sequence number for a user's dataset.

@@ -2,12 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { AuthManager } from '../src/server/auth.js';
 
 describe('AuthManager', () => {
-  it('should register a new user and return token', async () => {
+  it('should register a new user with UUID (no usr_ prefix) and return token', async () => {
     const auth = new AuthManager();
     const result = await auth.register('alice', 'supersecret');
 
     expect(result.user.username).toBe('alice');
-    expect(result.user.id).toMatch(/^usr_/);
+    // Standard RFC4122 UUID regex (no usr_ prefix)
+    expect(result.user.id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
+    expect(result.user.id.startsWith('usr_')).toBe(false);
     expect(result.token).toBeDefined();
 
     // Verify token
@@ -25,6 +29,22 @@ describe('AuthManager', () => {
     );
     await expect(auth.register('BOB', 'password456')).rejects.toThrow(
       'already exists',
+    );
+  });
+
+  it('should reject unsafe or malicious usernames', async () => {
+    const auth = new AuthManager();
+    await expect(auth.register('../evil', 'password123')).rejects.toThrow(
+      'Invalid username',
+    );
+    await expect(auth.register('evil/user', 'password123')).rejects.toThrow(
+      'Invalid username',
+    );
+    await expect(auth.register('__proto__', 'password123')).rejects.toThrow(
+      'reserved',
+    );
+    await expect(auth.register('a', 'password123')).rejects.toThrow(
+      'Invalid username',
     );
   });
 
@@ -49,7 +69,10 @@ describe('AuthManager', () => {
 
   it('should reject tampered tokens', () => {
     const auth = new AuthManager();
-    const token = auth.generateToken('usr_123', 'alice');
+    const token = auth.generateToken(
+      '12345678-1234-1234-1234-123456789abc',
+      'alice',
+    );
     const tampered = `${token.slice(0, -4)}abcd`;
 
     expect(auth.verifyToken(tampered)).toBeNull();
