@@ -1,0 +1,21 @@
+{
+  "name": "@beameddb/example-todo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --experimental-strip-types src/server.ts",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "beameddb": "file:../..",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.7.2",
+    "vite": "^6.2.0"
+  }
+}

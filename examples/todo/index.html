@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BeamedDB — Real-time Collaborative Todo</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main class="app-container">
+    <header>
+      <div class="header-top">
+        <div class="brand">
+          <div class="brand-icon">⚡</div>
+          <h1>BeamedDB Todo</h1>
+        </div>
+        <button type="button" id="userBadgeBtn" class="user-badge" title="Click to switch account">
+          <span>👤</span>
+          <span id="currentUsername">demo</span>
+        </button>
+      </div>
+
+      <div class="status-bar">
+        <div id="statusPill" class="status-pill status-disconnected">
+          <span class="status-dot"></span>
+          <span id="statusText">Connecting...</span>
+        </div>
+        <span id="itemCount" class="text-muted">0 items</span>
+      </div>
+    </header>
+
+    <!-- Todo App Card -->
+    <div class="card">
+      <form id="newTodoForm" class="input-form">
+        <input 
+          type="text" 
+          id="newTodoInput" 
+          placeholder="What needs to be done?" 
+          autocomplete="off"
+          required
+        >
+        <button type="submit" class="btn btn-primary">Add</button>
+      </form>
+
+      <div class="controls-bar">
+        <div class="filters">
+          <button type="button" class="filter-btn active" data-filter="all">All</button>
+          <button type="button" class="filter-btn" data-filter="active">Active</button>
+          <button type="button" class="filter-btn" data-filter="completed">Completed</button>
+        </div>
+        <button type="button" id="clearCompletedBtn" class="clear-btn">Clear completed</button>
+      </div>
+
+      <ul id="todoList" class="todo-list">
+        <!-- Rendered by app.js -->
+      </ul>
+
+      <div id="emptyState" class="empty-state">
+        No todos yet. Add one above!
+      </div>
+    </div>
+
+    <!-- BeamedDB Live Activity Log -->
+    <div class="card log-card">
+      <div class="log-header">
+        <h2>⚡ BeamedDB Live Events</h2>
+        <span class="log-badge">Reactive Stream</span>
+      </div>
+      <div id="activityLog" class="log-entries">
+        <!-- Live events appended here -->
+      </div>
+    </div>
+
+    <footer class="footer-info">
+      Offline-first IndexedDB storage with two-way WebSocket sync. Open multiple tabs to test live collaboration!
+    </footer>
+  </main>
+
+  <!-- Auth Dialog Modal -->
+  <dialog id="authDialog">
+    <div class="modal-header">
+      <h2 id="modalTitle">Account Access</h2>
+      <button type="button" id="closeAuthModalBtn" class="modal-close">✕</button>
+    </div>
+
+    <div class="modal-tabs">
+      <button type="button" id="tabLogin" class="modal-tab active">Login</button>
+      <button type="button" id="tabRegister" class="modal-tab">Register</button>
+    </div>
+
+    <form id="authForm" class="modal-form">
+      <div class="form-group">
+        <label for="authUsername">Username</label>
+        <input type="text" id="authUsername" required minlength="2" autocomplete="username">
+      </div>
+
+      <div class="form-group">
+        <label for="authPassword">Password</label>
+        <input type="password" id="authPassword" required minlength="4" autocomplete="current-password">
+      </div>
+
+      <div id="authError" class="modal-error"></div>
+
+      <button type="submit" id="authSubmitBtn" class="btn btn-primary">Login</button>
+    </form>
+  </dialog>
+
+  <script type="module" src="/src/client.ts"></script>
+</body>
+</html>

@@ -3,6 +3,7 @@
 .idea
 .stylelintcache
 .vscode/*
+.data/
 *.local
 *.log
 *.module.css.d.ts

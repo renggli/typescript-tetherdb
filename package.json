@@ -51,13 +51,17 @@
   "files": [
     "dist"
   ],
+  "workspaces": [
+    "examples/todo"
+  ],
   "scripts": {
     "build": "tsup",
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "biome check --write .",
     "format": "biome format --write .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "example:todo": "npm --workspace=@beameddb/example-todo run dev"
   },
   "dependencies": {
     "ws": "^8.18.0"

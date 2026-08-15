@@ -34,7 +34,9 @@ export interface AuthSession {
 export interface AuthManagerOptions {
   /** Optional file path for persisting user accounts JSON. */
   usersFilePath?: string;
-  /** Secret key for HMAC token signing (auto-generated if omitted). */
+  /** Optional file path for persisting or loading the token signing secret. */
+  secretFilePath?: string;
+  /** Secret key for HMAC token signing (auto-generated or loaded from secretFilePath if omitted). */
   tokenSecret?: string;
 }
 
@@ -46,6 +48,8 @@ export class AuthManager {
   private users: Map<string, UserAccount> = new Map(); // username -> UserAccount
   private usersById: Map<string, UserAccount> = new Map(); // id -> UserAccount
   private usersFilePath?: string;
+  private secretFilePath?: string;
+  private customTokenSecretProvided: boolean;
   private tokenSecret: string;
   private isLoaded = false;
 
@@ -58,16 +62,35 @@ export class AuthManager {
     this.usersFilePath = options.usersFilePath
       ? path.resolve(options.usersFilePath)
       : undefined;
+    this.secretFilePath = options.secretFilePath
+      ? path.resolve(options.secretFilePath)
+      : undefined;
+    this.customTokenSecretProvided = options.tokenSecret !== undefined;
     this.tokenSecret =
       options.tokenSecret ??
       `beameddb-default-secret-${crypto.randomBytes(16).toString('hex')}`;
   }
 
   /**
-   * Loads persisted user accounts from disk if a usersFilePath was configured.
+   * Loads persisted user accounts and signing secret from disk if paths were configured.
    */
   async init(): Promise<void> {
     if (this.isLoaded) return;
+
+    if (this.secretFilePath && !this.customTokenSecretProvided) {
+      try {
+        const rawSecret = await fs.readFile(this.secretFilePath, 'utf-8');
+        const trimmed = rawSecret.trim();
+        if (trimmed.length > 0) {
+          this.tokenSecret = trimmed;
+        }
+      } catch {
+        const dir = path.dirname(this.secretFilePath);
+        await fs.mkdir(dir, { recursive: true });
+        await fs.writeFile(this.secretFilePath, this.tokenSecret, 'utf-8');
+      }
+    }
+
     if (this.usersFilePath) {
       try {
         const raw = await fs.readFile(this.usersFilePath, 'utf-8');

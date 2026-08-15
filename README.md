@@ -115,9 +115,27 @@ await todos.delete("task-1");
 
 ---
 
+## Example Todo Application
+
+BeamedDB includes a full-featured, offline-first collaborative Todo application in `examples/todo/` demonstrating real-time synchronization across multiple browser tabs:
+
+```bash
+# Build library bundles and start the example server
+npm run build
+npm run example:todo
+```
+
+Then open `http://localhost:3000` in multiple browser tabs or windows to see instant bi-directional updates, offline persistence, and account switching.
+
+---
+
 ## Running Tests & Building
 
 ```bash
+# Auto-format and lint checks
+npm run format
+npm run check
+
 # Run unit and end-to-end tests
 npm test
 

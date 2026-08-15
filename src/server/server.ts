@@ -1,4 +1,5 @@
 import * as http from 'node:http';
+import * as path from 'node:path';
 import { WebSocketServer } from 'ws';
 import { AuthManager, type AuthManagerOptions } from './auth.js';
 import type { StorageAdapter } from './storage/adapter.js';
@@ -49,7 +50,15 @@ export class BeamedServer {
     if (options.auth instanceof AuthManager) {
       this.authManager = options.auth;
     } else {
-      this.authManager = new AuthManager(options.auth);
+      const authOpts: AuthManagerOptions = { ...options.auth };
+      if (options.storageDir) {
+        authOpts.usersFilePath =
+          authOpts.usersFilePath ?? path.join(options.storageDir, 'users.json');
+        authOpts.secretFilePath =
+          authOpts.secretFilePath ??
+          path.join(options.storageDir, 'secret.key');
+      }
+      this.authManager = new AuthManager(authOpts);
     }
 
     this.syncHub = new SyncHub(this.storage, this.authManager);
