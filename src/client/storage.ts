@@ -13,20 +13,6 @@ export const OUTBOX_STORE = '__tether_outbox';
 export const META_STORE = '__tether_meta';
 
 /**
- * Options for configuring a Database instance.
- */
-export interface DatabaseOptions {
-  /** Unique client instance identifier. Defaults to auto-generated ID. */
-  clientId?: string;
-  /** Initial application tables to pre-declare. */
-  initialTables?: string[];
-  /** Database schema version (defaults to 1). */
-  version?: number;
-  /** Optional callback invoked after local mutations are committed. */
-  onLocalChange?: () => void;
-}
-
-/**
  * Represents a pending mutation queue item within the internal IndexedDB outbox.
  */
 export interface OutboxEntry {
@@ -41,7 +27,7 @@ export interface OutboxEntry {
 }
 
 /**
- * Mutation item payload passed to `Database.applyLocalChanges`.
+ * Mutation item payload passed to `Storage.applyLocalChanges`.
  */
 export interface LocalMutationItem<T = unknown> {
   /** Target record identifier. */
@@ -55,38 +41,37 @@ export interface LocalMutationItem<T = unknown> {
 }
 
 /**
- * Atomic transaction coordinator managing user table stores alongside
- * internal outbox changelogs and sync metadata stores.
- * All mutations and ingestion workflows are batched by default.
+ * Atomic transaction and local persistence manager wrapping IndexedDB.
+ * Coordinates user table stores, pending outbox changelogs, and sync metadata.
  */
-export class Database {
+export class Storage {
   readonly name: string;
   readonly clientId: string;
-  private dbPromise: Promise<IDBDatabase> | null = null;
-  private tableNames: Set<string>;
+  private databasePromise: Promise<IDBDatabase> | null = null;
   private tables: Map<string, ITable> = new Map();
-  private onLocalChangeCallback?: () => void;
+  private localChangeListeners: Set<() => void> = new Set();
 
   /**
-   * Creates a new Database instance.
+   * Creates a new Storage instance.
    *
    * @param name - Name of the IndexedDB database.
-   * @param options - Configuration options for tables, schema version, client ID, and local change notifications.
    */
-  constructor(name: string, options: DatabaseOptions = {}) {
+  constructor(name: string) {
     this.name = name;
-    this.clientId = options.clientId ?? generateClientId();
-    this.tableNames = new Set(options.initialTables ?? []);
-    this.onLocalChangeCallback = options.onLocalChange;
+    this.clientId = generateClientId();
   }
 
   /**
-   * Sets or updates the callback invoked after local changes are persisted.
+   * Registers a listener callback invoked whenever local mutations are committed.
    *
-   * @param callback - Notification callback or undefined to clear.
+   * @param listener - Callback function.
+   * @returns Unsubscribe function to remove the listener.
    */
-  setOnLocalChange(callback?: () => void): void {
-    this.onLocalChangeCallback = callback;
+  onLocalChange(listener: () => void): () => void {
+    this.localChangeListeners.add(listener);
+    return () => {
+      this.localChangeListeners.delete(listener);
+    };
   }
 
   /**
@@ -111,71 +96,10 @@ export class Database {
    *
    * @returns A promise resolving to the open IDBDatabase instance.
    */
-  async getDB(): Promise<IDBDatabase> {
-    if (this.dbPromise) return this.dbPromise;
-
-    this.dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open(this.name);
-
-      request.onupgradeneeded = (_event) => {
-        const db = request.result;
-        if (!db.objectStoreNames.contains(OUTBOX_STORE)) {
-          db.createObjectStore(OUTBOX_STORE, {
-            keyPath: 'localId',
-            autoIncrement: true,
-          });
-        }
-        if (!db.objectStoreNames.contains(META_STORE)) {
-          db.createObjectStore(META_STORE, { keyPath: 'key' });
-        }
-        for (const tableName of this.tableNames) {
-          if (!db.objectStoreNames.contains(tableName)) {
-            db.createObjectStore(tableName, { keyPath: 'id' });
-          }
-        }
-      };
-
-      request.onsuccess = () => {
-        const db = request.result;
-        const missing = Array.from(this.tableNames).filter(
-          (t) => !db.objectStoreNames.contains(t),
-        );
-        if (
-          !db.objectStoreNames.contains(OUTBOX_STORE) ||
-          !db.objectStoreNames.contains(META_STORE) ||
-          missing.length > 0
-        ) {
-          const nextVersion = db.version + 1;
-          db.close();
-          const upgradeRequest = indexedDB.open(this.name, nextVersion);
-          upgradeRequest.onupgradeneeded = () => {
-            const uDb = upgradeRequest.result;
-            if (!uDb.objectStoreNames.contains(OUTBOX_STORE)) {
-              uDb.createObjectStore(OUTBOX_STORE, {
-                keyPath: 'localId',
-                autoIncrement: true,
-              });
-            }
-            if (!uDb.objectStoreNames.contains(META_STORE)) {
-              uDb.createObjectStore(META_STORE, { keyPath: 'key' });
-            }
-            for (const tableName of this.tableNames) {
-              if (!uDb.objectStoreNames.contains(tableName)) {
-                uDb.createObjectStore(tableName, { keyPath: 'id' });
-              }
-            }
-          };
-          upgradeRequest.onsuccess = () => resolve(upgradeRequest.result);
-          upgradeRequest.onerror = () => reject(upgradeRequest.error);
-        } else {
-          resolve(db);
-        }
-      };
-
-      request.onerror = () => reject(request.error);
-    });
-
-    return this.dbPromise;
+  async getDatabase(): Promise<IDBDatabase> {
+    if (this.databasePromise) return this.databasePromise;
+    this.databasePromise = this.openDatabase();
+    return this.databasePromise;
   }
 
   /**
@@ -184,41 +108,13 @@ export class Database {
    * @param tableNames - Array of table names to ensure.
    */
   async ensureTables(tableNames: string[]): Promise<void> {
-    for (const s of tableNames) {
-      this.tableNames.add(s);
-    }
-
-    const db = await this.getDB();
-    const needsUpgrade = tableNames.some(
-      (s) => !db.objectStoreNames.contains(s),
-    );
-    if (!needsUpgrade) return;
+    const db = await this.getDatabase();
+    const missing = tableNames.filter((s) => !db.objectStoreNames.contains(s));
+    if (missing.length === 0) return;
 
     const nextVersion = db.version + 1;
-    db.close();
-    this.dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
-      const upgradeReq = indexedDB.open(this.name, nextVersion);
-      upgradeReq.onupgradeneeded = () => {
-        const uDb = upgradeReq.result;
-        if (!uDb.objectStoreNames.contains(OUTBOX_STORE)) {
-          uDb.createObjectStore(OUTBOX_STORE, {
-            keyPath: 'localId',
-            autoIncrement: true,
-          });
-        }
-        if (!uDb.objectStoreNames.contains(META_STORE)) {
-          uDb.createObjectStore(META_STORE, { keyPath: 'key' });
-        }
-        for (const t of this.tableNames) {
-          if (!uDb.objectStoreNames.contains(t)) {
-            uDb.createObjectStore(t, { keyPath: 'id' });
-          }
-        }
-      };
-      upgradeReq.onsuccess = () => resolve(upgradeReq.result);
-      upgradeReq.onerror = () => reject(upgradeReq.error);
-    });
-    await this.dbPromise;
+    this.databasePromise = this.upgradeDatabase(db, nextVersion, missing);
+    await this.databasePromise;
   }
 
   /**
@@ -238,7 +134,7 @@ export class Database {
    * @returns The stored metadata value, or `undefined` if not set.
    */
   async getMeta<T = unknown>(key: string): Promise<T | undefined> {
-    const db = await this.getDB();
+    const db = await this.getDatabase();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(META_STORE, 'readonly');
       const store = tx.objectStore(META_STORE);
@@ -255,7 +151,7 @@ export class Database {
    * @param value - The value to store.
    */
   async setMeta(key: string, value: unknown): Promise<void> {
-    const db = await this.getDB();
+    const db = await this.getDatabase();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(META_STORE, 'readwrite');
       const store = tx.objectStore(META_STORE);
@@ -271,7 +167,7 @@ export class Database {
    * @param key - The metadata key identifier.
    */
   async deleteMeta(key: string): Promise<void> {
-    const db = await this.getDB();
+    const db = await this.getDatabase();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(META_STORE, 'readwrite');
       const store = tx.objectStore(META_STORE);
@@ -286,6 +182,7 @@ export class Database {
    *
    * @typeParam T - Expected payload type.
    * @param tableName - Table name.
+   * @param id - Record identifier.
    * @returns Stored record or `undefined` if not found.
    */
   async getRecord<T = unknown>(
@@ -293,7 +190,7 @@ export class Database {
     id: string,
   ): Promise<StoredRecord<T> | undefined> {
     await this.ensureTable(tableName);
-    const db = await this.getDB();
+    const db = await this.getDatabase();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(tableName, 'readonly');
       const store = tx.objectStore(tableName);
@@ -317,7 +214,7 @@ export class Database {
   ): Promise<Map<string, StoredRecord<T>>> {
     if (ids.length === 0) return new Map();
     await this.ensureTable(tableName);
-    const db = await this.getDB();
+    const db = await this.getDatabase();
 
     return new Promise((resolve, reject) => {
       const tx = db.transaction(tableName, 'readonly');
@@ -349,7 +246,7 @@ export class Database {
     tableName: string,
   ): Promise<StoredRecord<T>[]> {
     await this.ensureTable(tableName);
-    const db = await this.getDB();
+    const db = await this.getDatabase();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(tableName, 'readonly');
       const store = tx.objectStore(tableName);
@@ -374,7 +271,7 @@ export class Database {
   ): Promise<StoredRecord<T>[]> {
     if (mutations.length === 0) return [];
     await this.ensureTable(tableName);
-    const db = await this.getDB();
+    const db = await this.getDatabase();
 
     return new Promise((resolve, reject) => {
       const tx = db.transaction([tableName, OUTBOX_STORE], 'readwrite');
@@ -407,7 +304,7 @@ export class Database {
       }
 
       tx.oncomplete = () => {
-        this.onLocalChangeCallback?.();
+        this.notifyLocalChange();
         resolve(records);
       };
       tx.onerror = () => reject(tx.error);
@@ -421,7 +318,7 @@ export class Database {
    * @returns Array of pending outbox queue items.
    */
   async getPendingOutbox(limit?: number): Promise<OutboxEntry[]> {
-    const db = await this.getDB();
+    const db = await this.getDatabase();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(OUTBOX_STORE, 'readonly');
       const store = tx.objectStore(OUTBOX_STORE);
@@ -438,7 +335,7 @@ export class Database {
    */
   async removeOutboxEntries(localIds: number[]): Promise<void> {
     if (localIds.length === 0) return;
-    const db = await this.getDB();
+    const db = await this.getDatabase();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(OUTBOX_STORE, 'readwrite');
       const store = tx.objectStore(OUTBOX_STORE);
@@ -471,7 +368,7 @@ export class Database {
       new Set(snapshot.map((item) => item.table)),
     ).filter(Boolean);
     await this.ensureTables(tablesInSnapshot);
-    const db = await this.getDB();
+    const db = await this.getDatabase();
 
     return new Promise((resolve, reject) => {
       const txStores = [...tablesInSnapshot, META_STORE];
@@ -528,7 +425,7 @@ export class Database {
       new Set(changes.map((c) => c.table)),
     ).filter(Boolean);
     await this.ensureTables(tablesInChanges);
-    const db = await this.getDB();
+    const db = await this.getDatabase();
 
     return new Promise((resolve, reject) => {
       const txStores = [...tablesInChanges, META_STORE];
@@ -573,7 +470,7 @@ export class Database {
    * @param clearOutbox - Whether to clear the pending outbox queue as well (defaults to `true`).
    */
   async clearTables(clearOutbox = true): Promise<void> {
-    const db = await this.getDB();
+    const db = await this.getDatabase();
     const storeNames = Array.from(db.objectStoreNames).filter((name) => {
       if (name === META_STORE) return false;
       if (name === OUTBOX_STORE && !clearOutbox) return false;
@@ -594,9 +491,8 @@ export class Database {
   /**
    * Clears all local table stores, outbox changelog entries, and metadata.
    */
-
   async clearAllData(): Promise<void> {
-    const db = await this.getDB();
+    const db = await this.getDatabase();
     const storeNames = Array.from(db.objectStoreNames);
     if (storeNames.length === 0) return;
 
@@ -614,10 +510,83 @@ export class Database {
    * Closes the active IndexedDB connection.
    */
   async close(): Promise<void> {
-    if (this.dbPromise) {
-      const db = await this.dbPromise;
+    if (this.databasePromise) {
+      const db = await this.databasePromise;
       db.close();
-      this.dbPromise = null;
+      this.databasePromise = null;
+    }
+  }
+
+  // -- Private Helpers ------------------------------------------------------
+
+  private notifyLocalChange(): void {
+    for (const listener of this.localChangeListeners) {
+      try {
+        listener();
+      } catch (err) {
+        console.error('[Storage] Local change listener error:', err);
+      }
+    }
+  }
+
+  private async openDatabase(): Promise<IDBDatabase> {
+    return new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(this.name);
+
+      request.onupgradeneeded = () => {
+        this.createInternalStores(request.result);
+      };
+
+      request.onsuccess = () => {
+        const db = request.result;
+        if (
+          !db.objectStoreNames.contains(OUTBOX_STORE) ||
+          !db.objectStoreNames.contains(META_STORE)
+        ) {
+          const nextVersion = db.version + 1;
+          this.upgradeDatabase(db, nextVersion, []).then(resolve).catch(reject);
+        } else {
+          resolve(db);
+        }
+      };
+
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  private async upgradeDatabase(
+    currentDb: IDBDatabase,
+    nextVersion: number,
+    newTables: string[],
+  ): Promise<IDBDatabase> {
+    currentDb.close();
+    return new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(this.name, nextVersion);
+
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        this.createInternalStores(db);
+        for (const tableName of newTables) {
+          if (!db.objectStoreNames.contains(tableName)) {
+            db.createObjectStore(tableName, { keyPath: 'id' });
+          }
+        }
+      };
+
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  private createInternalStores(db: IDBDatabase): void {
+    if (!db.objectStoreNames.contains(OUTBOX_STORE)) {
+      db.createObjectStore(OUTBOX_STORE, {
+        keyPath: 'localId',
+        autoIncrement: true,
+      });
+    }
+    if (!db.objectStoreNames.contains(META_STORE)) {
+      db.createObjectStore(META_STORE, { keyPath: 'key' });
     }
   }
 }

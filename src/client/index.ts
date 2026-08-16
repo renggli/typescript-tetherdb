@@ -4,8 +4,25 @@
  * @module tetherdb/client
  */
 
-export * from './auth.js';
-export * from './client.js';
-export * from './database.js';
-export * from './sync.js';
-export * from './table.js';
+export {
+  AuthStatus,
+  DataMode,
+  type LoginOptions,
+  type LogoutOptions,
+  type RegisterOptions,
+} from './auth.js';
+export {
+  TetherClient,
+  type TetherClientOptions,
+} from './client.js';
+export {
+  SyncStatus,
+  type WebSocketConstructor,
+} from './sync.js';
+export {
+  type ITable,
+  Table,
+  type TableChangeEvent,
+  type TableChangeListener,
+  type TablePutEntry,
+} from './table.js';

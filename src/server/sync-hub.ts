@@ -185,10 +185,12 @@ export class SyncHub {
         set.add(client);
 
         const currentSeq = await app.getCurrentSeq(user);
+        const refreshedToken = await user.createToken();
         this.send(webSocket, {
           type: ServerMessageType.AuthSuccess,
           userId: user.id,
           currentSeq,
+          token: refreshedToken,
         });
 
         // Initial sync: snapshot or diff

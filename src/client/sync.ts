@@ -7,7 +7,7 @@ import {
   type ServerMessage,
   ServerMessageType,
 } from '../shared/types.js';
-import type { Database } from './database.js';
+import type { Storage } from './storage.js';
 
 /**
  * Operational state of the synchronization coordinator.
@@ -51,6 +51,10 @@ export interface SyncOptions {
   pingIntervalMs?: number;
   /** Custom WebSocket constructor for Node.js environments. */
   WebSocketClass?: WebSocketConstructor;
+  /** Callback invoked when the server provides a refreshed session token. */
+  onTokenRefresh?: (token: string) => void;
+  /** Callback invoked when the server rejects authentication. */
+  onAuthError?: (message: string) => void;
 }
 
 /**
@@ -62,7 +66,7 @@ export class Sync {
   readonly appId: string;
   readonly clientId: string;
   private token?: string;
-  private database: Database;
+  private storage: Storage;
   private options: SyncOptions;
   private webSocket: WebSocket | null = null;
   private currentStatus: SyncStatus = SyncStatus.Disconnected;
@@ -78,10 +82,10 @@ export class Sync {
   /**
    * Creates a new Sync instance.
    *
-   * @param database - Database transaction coordinator.
+   * @param storage - Local storage coordinator.
    * @param options - Configuration options for sync and connection.
    */
-  constructor(database: Database, options: SyncOptions) {
+  constructor(storage: Storage, options: SyncOptions) {
     if (!options.appId) {
       throw new Error('Missing required appId in SyncOptions.');
     }
@@ -90,7 +94,7 @@ export class Sync {
     }
     this.url = options.url;
     this.token = options.token;
-    this.database = database;
+    this.storage = storage;
     this.appId = options.appId;
     this.clientId = options.clientId;
     this.options = {
@@ -264,7 +268,7 @@ export class Sync {
 
     this.isPushing = true;
     try {
-      const pending = await this.database.getPendingOutbox(500);
+      const pending = await this.storage.getPendingOutbox(500);
       if (pending.length === 0) return;
 
       const batchId = `batch_${Math.random().toString(36).substring(2, 10)}`;
@@ -348,7 +352,7 @@ export class Sync {
 
   private async sendAuth() {
     const lastSyncSeq =
-      (await this.database.getMeta<number>('lastSyncSeq')) ?? 0;
+      (await this.storage.getMeta<number>('lastSyncSeq')) ?? 0;
     this.send({
       type: ClientMessageType.Auth,
       token: this.token ?? '',
@@ -363,6 +367,10 @@ export class Sync {
       case ServerMessageType.AuthSuccess: {
         this.reconnectAttempts = 0;
         this.setStatus(SyncStatus.Connected);
+        if (msg.token) {
+          this.token = msg.token;
+          this.options.onTokenRefresh?.(msg.token);
+        }
         this.startPing();
         await this.pushOutbox();
         break;
@@ -371,6 +379,7 @@ export class Sync {
         console.error('[Sync] Authentication failed:', msg.message);
         this.setStatus(SyncStatus.Error);
         this.disconnect();
+        this.options.onAuthError?.(msg.message);
         break;
       }
       case ServerMessageType.SyncSnapshot: {
@@ -391,10 +400,10 @@ export class Sync {
         const localIds = this.pendingBatches.get(msg.batchId);
         if (localIds) {
           this.pendingBatches.delete(msg.batchId);
-          await this.database.removeOutboxEntries(localIds);
+          await this.storage.removeOutboxEntries(localIds);
         }
         if (msg.appliedSeq !== undefined) {
-          await this.database.setMeta('lastSyncSeq', msg.appliedSeq);
+          await this.storage.setMeta('lastSyncSeq', msg.appliedSeq);
         }
         await this.pushOutbox();
         break;
@@ -428,10 +437,10 @@ export class Sync {
       });
     }
 
-    await this.database.applySnapshotBatch(records, seq);
+    await this.storage.applySnapshotBatch(records, seq);
 
     for (const [tableName, events] of tableEvents.entries()) {
-      const table = this.database.table(tableName);
+      const table = this.storage.table(tableName);
       table.notifyRemoteChanges(events);
     }
   }
@@ -459,10 +468,10 @@ export class Sync {
       });
     }
 
-    await this.database.applyRemoteChangesBatch(changes, seq);
+    await this.storage.applyRemoteChangesBatch(changes, seq);
 
     for (const [tableName, events] of tableEvents.entries()) {
-      const table = this.database.table(tableName);
+      const table = this.storage.table(tableName);
       table.notifyRemoteChanges(events);
     }
   }

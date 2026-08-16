@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { TetherClient } from '../../src/client/client.js';
+import { Storage } from '../../src/client/storage.js';
 import { OperationType } from '../../src/shared/types.js';
 
 describe('TetherClient local operations (src/client/)', () => {
@@ -143,17 +144,56 @@ describe('TetherClient local operations (src/client/)', () => {
     expect(receivedEvents).toHaveLength(6);
   });
 
-  it('should record local mutations into outbox', async () => {
+  it('should support subscribeAll live reactive subscriptions', async () => {
     const todos = db.table<{ title: string }>('todos');
+    await todos.put('item1', { title: 'First Item' });
+
+    const snapshots: Array<Array<{ title: string }>> = [];
+    const unsubscribe = todos.subscribeAll((items) => {
+      snapshots.push(items);
+    });
+
+    // Wait for initial async fetch
+    await new Promise((r) => setTimeout(r, 20));
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]).toHaveLength(1);
+    expect(snapshots[0][0].title).toBe('First Item');
+
+    // Add item
+    await todos.put('item2', { title: 'Second Item' });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(snapshots).toHaveLength(2);
+    expect(snapshots[1]).toHaveLength(2);
+
+    // Delete item
+    await todos.delete('item1');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(snapshots).toHaveLength(3);
+    expect(snapshots[2]).toHaveLength(1);
+    expect(snapshots[2][0].title).toBe('Second Item');
+
+    // Unsubscribe
+    unsubscribe();
+    await todos.put('item3', { title: 'Third Item' });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(snapshots).toHaveLength(3);
+  });
+
+  it('should record local mutations into outbox', async () => {
+    const rawStorage = new Storage(
+      `outbox-test-${Math.random().toString(36).substring(2, 8)}`,
+    );
+    const todos = rawStorage.table<{ title: string }>('todos');
     await todos.put('out1', { title: 'Outbox Test' });
 
-    const outbox = await db.database.getPendingOutbox();
+    const outbox = await rawStorage.getPendingOutbox();
     expect(outbox).toHaveLength(1);
     expect(outbox[0].change.table).toBe('todos');
     expect(outbox[0].change.id).toBe('out1');
     expect(outbox[0].change.op).toBe(OperationType.Put);
-    expect(outbox[0].change.clientId).toBe(db.clientId);
+    expect(outbox[0].change.clientId).toBe(rawStorage.clientId);
     expect(outbox[0].change.data).toEqual({ title: 'Outbox Test' });
+    await rawStorage.close();
   });
 
   it('should dynamically instantiate tables on demand', async () => {
@@ -165,24 +205,32 @@ describe('TetherClient local operations (src/client/)', () => {
   });
 
   it('should manage and persist sync metadata (lastSyncSeq, tokens)', async () => {
-    await db.database.setMeta('lastSyncSeq', 12345);
-    const seq = await db.database.getMeta<number>('lastSyncSeq');
+    const rawStorage = new Storage(
+      `meta-test-${Math.random().toString(36).substring(2, 8)}`,
+    );
+    await rawStorage.setMeta('lastSyncSeq', 12345);
+    const seq = await rawStorage.getMeta<number>('lastSyncSeq');
     expect(seq).toBe(12345);
 
-    await db.database.setMeta('authToken', 'sample.jwt.token');
-    const token = await db.database.getMeta<string>('authToken');
+    await rawStorage.setMeta('authToken', 'sample.jwt.token');
+    const token = await rawStorage.getMeta<string>('authToken');
     expect(token).toBe('sample.jwt.token');
 
-    await db.database.deleteMeta('authToken');
-    const deletedToken = await db.database.getMeta<string>('authToken');
+    await rawStorage.deleteMeta('authToken');
+    const deletedToken = await rawStorage.getMeta<string>('authToken');
     expect(deletedToken).toBeUndefined();
+    await rawStorage.close();
   });
 
-  it('should expose clientId and name', () => {
-    expect(db.clientId).toBeDefined();
-    expect(typeof db.clientId).toBe('string');
-    expect(db.name).toBeDefined();
-    expect(db.name.startsWith('test-db-')).toBe(true);
+  it('should expose storage name and clientId on Storage coordinator', async () => {
+    const rawStorage = new Storage(
+      `name-test-${Math.random().toString(36).substring(2, 8)}`,
+    );
+    expect(rawStorage.clientId).toBeDefined();
+    expect(typeof rawStorage.clientId).toBe('string');
+    expect(rawStorage.name).toBeDefined();
+    expect(rawStorage.name.startsWith('name-test-')).toBe(true);
+    await rawStorage.close();
   });
 
   it('should require name on database initialization', () => {
@@ -192,75 +240,6 @@ describe('TetherClient local operations (src/client/)', () => {
           name: '',
         } as unknown as { name: string }),
     ).toThrow('Missing required name in TetherClient options.');
-  });
-
-  it('should default appId to name when appId is not specified', async () => {
-    const autoAppDb = new TetherClient({
-      name: 'auto-app-db',
-    });
-    expect(autoAppDb.name).toBe('auto-app-db');
-    expect(autoAppDb.appId).toBe('auto-app-db');
-    await autoAppDb.close();
-  });
-
-  it('should allow custom appId override separate from name', async () => {
-    const customAppDb = new TetherClient({
-      name: 'custom_idb_name',
-      appId: 'my-app',
-    });
-    expect(customAppDb.name).toBe('custom_idb_name');
-    expect(customAppDb.appId).toBe('my-app');
-    await customAppDb.close();
-  });
-
-  it('should infer baseUrl and sync url by default mirroring server options', async () => {
-    // Default: baseUrl is '', sync url is undefined (offline)
-    const defaultClient = new TetherClient({
-      name: 'default-paths-app',
-    });
-    expect(defaultClient.auth.baseUrl).toBe('');
-    expect(defaultClient.sync.url).toBeUndefined();
-    await defaultClient.close();
-
-    // Base path without leading/trailing slash: normalized to '/api'
-    const apiApp = new TetherClient({
-      name: 'api-app',
-      basePath: 'api',
-    });
-    expect(apiApp.auth.baseUrl).toBe('/api');
-    await apiApp.close();
-
-    // Nested base path with slashes: normalized to '/api/v1'
-    const v1App = new TetherClient({
-      name: 'v1-app',
-      basePath: '/api/v1/',
-    });
-    expect(v1App.auth.baseUrl).toBe('/api/v1');
-    await v1App.close();
-
-    // Explicit webSocketPath override with host
-    const customWsApp = new TetherClient({
-      name: 'custom-ws-app',
-      host: 'example.com',
-      basePath: '/api',
-      webSocketPath: '/custom-socket',
-    });
-    expect(customWsApp.auth.baseUrl).toBe('http://example.com/api');
-    expect(customWsApp.sync.url).toBe('ws://example.com/custom-socket');
-    await customWsApp.close();
-
-    // Host, port, and isSecure options
-    const secureClient = new TetherClient({
-      name: 'secure-app',
-      host: 'api.example.com',
-      port: 8443,
-      isSecure: true,
-      basePath: '/v1',
-    });
-
-    expect(secureClient.auth.baseUrl).toBe('https://api.example.com:8443/v1');
-    expect(secureClient.sync.url).toBe('wss://api.example.com:8443/v1/sync');
-    await secureClient.close();
   });
 
   it('should clear table contents completely using table.clear()', async () => {

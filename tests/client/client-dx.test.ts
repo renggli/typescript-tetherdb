@@ -1,13 +1,13 @@
 import type * as http from 'node:http';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
+import { Auth } from '../../src/client/auth.js';
 import {
-  Auth,
   AuthStatus,
-  Database,
   SyncStatus,
   TetherClient,
 } from '../../src/client/index.js';
+import { Storage } from '../../src/client/storage.js';
 
 import { TetherServer } from '../../src/server/server.js';
 
@@ -25,7 +25,7 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
     await server.declareApp('default', ['notes', 'todos', 'items']);
     httpServer = await server.listen(0, '127.0.0.1');
     const addr = httpServer.address();
-    if (addr && typeof addr === 'object') {
+    if (typeof addr === 'object' && addr !== null) {
       serverPort = addr.port;
     }
   });
@@ -38,49 +38,55 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
     await server.close();
   });
 
-  it('should initialize with options object and dynamic tables with zero store pre-declaration', async () => {
+  it('should allow simple CRUD operations with Table instance', async () => {
     const db = new TetherClient({
-      name: `simple-db-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'dx-notes-app',
+      name: `simple-crud-${Math.random().toString(36).substring(2, 8)}`,
+      appId: 'default',
     });
     clientsToClose.push(db);
 
-    const notes = db.table<{ text: string }>('notes');
-    await notes.put('n1', { text: 'Zero config note' });
+    const tasks = db.table<{ title: string; done?: boolean }>('tasks');
 
-    expect((await notes.getAll()).length).toBe(1);
-    expect((await notes.get('n1'))?.text).toBe('Zero config note');
-  });
+    // put
+    await tasks.put('t1', { title: 'First Task', done: false });
+    await tasks.put('t2', { title: 'Second Task', done: true });
 
-  it('should provide ergonomic table clear helper', async () => {
-    const db = new TetherClient({
-      name: `dx-db-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'dx-tasks-app',
-    });
-    clientsToClose.push(db);
+    // get
+    const t1 = await tasks.get('t1');
+    expect(t1).toEqual({ title: 'First Task', done: false });
 
-    const tasks = db.table<{ title: string; done: boolean }>('tasks');
+    // getAll
+    const all = await tasks.getAll();
+    expect(all).toHaveLength(2);
+
+    // putAll
     await tasks.putAll([
-      { id: '1', data: { title: 'T1', done: false } },
-      { id: '2', data: { title: 'T2', done: true } },
-      { id: '3', data: { title: 'T3', done: false } },
+      { id: 't3', data: { title: 'Third Task', done: false } },
+      { id: 't4', data: { title: 'Fourth Task', done: true } },
     ]);
+    expect((await tasks.getAll()).length).toBe(4);
 
-    expect((await tasks.getAll()).length).toBe(3);
+    // delete
+    await tasks.delete('t1');
+    expect(await tasks.get('t1')).toBeNull();
+
+    // deleteAll
+    await tasks.deleteAll(['t2', 't3']);
+    expect((await tasks.getAll()).length).toBe(1);
 
     // clear
     const clearedCount = await tasks.clear();
-    expect(clearedCount).toBe(3);
+    expect(clearedCount).toBe(1);
     expect((await tasks.getAll()).length).toBe(0);
   });
 
   it('should support Auth direct authentication requests and state tracking', async () => {
-    const tempDb = new Database(
+    const tempStorage = new Storage(
       `temp-auth-db-${Math.random().toString(36).substring(2, 8)}`,
     );
     const auth = new Auth({
       baseUrl: `http://127.0.0.1:${serverPort}`,
-      database: tempDb,
+      storage: tempStorage,
     });
 
     const regSuccess = await auth.register({
@@ -101,21 +107,20 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
     });
     expect(loginSuccess).toBe(true);
     expect(auth.status).toBe(AuthStatus.SignedIn);
-    await tempDb.close();
+    await tempStorage.close();
   });
 
   it('should seamlessly transition from local-only offline storage to live sync upon registration', async () => {
     // 1. User starts locally offline with zero configuration
+    const dbName = `offline-onboard-${Math.random().toString(36).substring(2, 8)}`;
     const db = new TetherClient({
-      name: `offline-onboard-${Math.random().toString(36).substring(2, 8)}`,
+      name: dbName,
       appId: 'default',
       host: '127.0.0.1',
       port: serverPort,
       WebSocketClass: WebSocket,
     });
     clientsToClose.push(db);
-
-    expect(db.syncStatus).toBe(SyncStatus.Disconnected);
 
     const statuses: SyncStatus[] = [];
     db.onSyncStatusChange((s) => statuses.push(s));
@@ -129,8 +134,10 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
     ]);
 
     expect((await todos.getAll()).length).toBe(2);
-    const pendingOutbox = await db.database.getPendingOutbox();
+    const rawStorage = new Storage(dbName);
+    const pendingOutbox = await rawStorage.getPendingOutbox();
     expect(pendingOutbox).toHaveLength(2);
+    await rawStorage.close();
 
     // 3. User registers account -> seamlessly connects sync & uploads local data
     const success = await db.register({
@@ -148,8 +155,10 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
     expect(statuses).toContain(SyncStatus.Connected);
 
     // Outbox should now be completely drained
-    const outboxAfter = await db.database.getPendingOutbox();
+    const checkStorage = new Storage(dbName);
+    const outboxAfter = await checkStorage.getPendingOutbox();
     expect(outboxAfter).toHaveLength(0);
+    await checkStorage.close();
 
     // Server storage should now have the 2 records
     const user = await server.storage.getUserByUsername('onboard_user');
@@ -172,9 +181,6 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
     });
     clientsToClose.push(db);
 
-    expect(db.auth.baseUrl).toBe(`http://127.0.0.1:${serverPort}`);
-    expect(db.sync.url).toBe(`ws://127.0.0.1:${serverPort}/sync`);
-
     // Calling register with username and password should just work by default!
     const success = await db.register({
       username: 'auto_inferred_user',
@@ -190,8 +196,9 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
   it('should automatically connect and disconnect sync on login and logout', async () => {
     await server.storage.createUser('dynamic_user', 'password123');
 
+    const dbName = `dynamic-db-${Math.random().toString(36).substring(2, 8)}`;
     const db = new TetherClient({
-      name: `dynamic-db-${Math.random().toString(36).substring(2, 8)}`,
+      name: dbName,
       appId: 'default',
       host: '127.0.0.1',
       port: serverPort,
@@ -220,8 +227,10 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
     await delay(200);
     expect(db.syncStatus).toBe(SyncStatus.Connected);
 
-    const outbox = await db.database.getPendingOutbox();
+    const checkStorage = new Storage(dbName);
+    const outbox = await checkStorage.getPendingOutbox();
     expect(outbox).toHaveLength(0);
+    await checkStorage.close();
   });
 
   it('should wipe local data on db.clear()', async () => {

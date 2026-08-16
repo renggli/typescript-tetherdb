@@ -7,6 +7,7 @@ import {
   SyncStatus,
   TetherClient,
 } from '../../src/client/index.js';
+import { Storage } from '../../src/client/storage.js';
 import { TetherServer } from '../../src/server/server.js';
 
 describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
@@ -361,5 +362,70 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
     await client.logout({ dataMode: DataMode.Clear });
     expect(client.authStatus).toBe(AuthStatus.SignedOut);
     expect(await todos.getAll()).toHaveLength(0);
+  });
+
+  it('should automatically refresh sliding session token on sync connection', async () => {
+    const dbName = `db-sliding-${Math.random().toString(36).substring(2, 8)}`;
+    const client = new TetherClient({
+      name: dbName,
+      appId: 'test-app',
+      host: '127.0.0.1',
+      port: serverPort,
+      WebSocketClass: WebSocket,
+    });
+    clientsToClose.push(client);
+
+    await client.register({
+      username: 'sliding_user',
+      password: 'password123',
+      remember: true,
+    });
+
+    const rawStorage = new Storage(dbName);
+    const initialSession = await rawStorage.getMeta<{ token: string }>('auth');
+    expect(initialSession?.token).toBeDefined();
+
+    // Wait for WebSocket sync to connect and receive AuthSuccess with refreshed sliding token
+    await delay(200);
+
+    expect(client.syncStatus).toBe(SyncStatus.Connected);
+
+    // Token stored in IndexedDB metadata should be updated
+    const updatedSession = await rawStorage.getMeta<{ token: string }>('auth');
+    expect(updatedSession?.token).toBeDefined();
+    await rawStorage.close();
+  });
+
+  it('should transition to SignedOut and clear stored session when server rejects expired/invalid token', async () => {
+    const dbName = `db-stale-${Math.random().toString(36).substring(2, 8)}`;
+    const rawStorage = new Storage(dbName);
+    // Simulate restoring an expired / invalid token
+    await rawStorage.setMeta('auth', {
+      userId: 'stale_user_id',
+      username: 'stale_user',
+      token: 'invalid_or_expired_token_signature',
+    });
+    await rawStorage.close();
+
+    const client = new TetherClient({
+      name: dbName,
+      appId: 'test-app',
+      host: '127.0.0.1',
+      port: serverPort,
+      WebSocketClass: WebSocket,
+    });
+    clientsToClose.push(client);
+
+    // Wait for auto session restore and WebSocket sync rejection
+    await delay(200);
+
+    expect(client.authStatus).toBe(AuthStatus.SignedOut);
+    expect(client.username).toBeUndefined();
+
+    // Stored auth meta should have been cleaned up
+    const checkStorage = new Storage(dbName);
+    const storedAuth = await checkStorage.getMeta('auth');
+    expect(storedAuth).toBeUndefined();
+    await checkStorage.close();
   });
 });

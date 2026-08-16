@@ -38,7 +38,7 @@ The codebase is organized into three decoupled layers with clear subpath exports
   - Exported as `tetherdb/client`.
   - **TetherClient (`client.ts`)**: Main reactive facade client with local-first storage, multi-app support, auto-session, and auth helpers.
   - **Auth (`auth.ts`)**: Internal authentication coordinator managing sessions, metadata, and auth HTTP endpoints.
-  - **Database (`database.ts`)**: Atomic transaction coordinator managing user object stores alongside internal outbox and metadata stores.
+  - **Storage (`storage.ts`)**: Atomic transaction coordinator managing user object stores alongside internal outbox and metadata stores.
   - **Tables (`table.ts`)**: Typed table wrappers providing local-first CRUD operations and reactive event subscriptions.
   - **Sync (`sync.ts`)**: Two-way WebSocket sync coordinator managing initial snapshot / diff downloads, outbox queue flushing, acknowledgments, and auto-reconnect backoff.
 

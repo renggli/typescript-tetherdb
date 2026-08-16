@@ -6,13 +6,11 @@ import {
   type LogoutOptions,
   type RegisterOptions,
 } from './auth.js';
-
-import { Database } from './database.js';
+import { Storage } from './storage.js';
 import { Sync, type SyncStatus, type WebSocketConstructor } from './sync.js';
 import type { Table } from './table.js';
 
 export {
-  Auth,
   AuthStatus,
   DataMode,
   type LoginOptions,
@@ -28,8 +26,6 @@ export interface TetherClientOptions {
   name: string;
   /** Application namespace identifier (defaults to `name`). */
   appId?: string;
-  /** Schema version number (defaults to 1). */
-  version?: number;
   /** Remote server host or hostname (e.g. 'localhost' or 'api.example.com'). Defaults to current browser hostname. */
   host?: string;
   /** Remote server port number (e.g. 8080). Defaults to current browser port. */
@@ -57,14 +53,9 @@ export interface TetherClientOptions {
  * local-first storage, automatic auth lifecycle, and background synchronization.
  */
 export class TetherClient {
-  /** Internal IndexedDB database coordinator. */
-  readonly database: Database;
-
-  /** Internal authentication coordinator. */
-  readonly auth: Auth;
-
-  /** Real-time WebSocket synchronization coordinator. */
-  readonly sync: Sync;
+  private readonly storage: Storage;
+  private readonly auth: Auth;
+  private readonly sync: Sync;
 
   /**
    * Initializes a new TetherClient instance and wires reactive auth & sync coordination.
@@ -75,16 +66,16 @@ export class TetherClient {
     if (!options.name) {
       throw new Error('Missing required name in TetherClient options.');
     }
+    this.storage = this.createStorage(options);
+    this.auth = this.createAuth(options, this.storage);
+    this.sync = this.createSync(options, this.storage);
 
-    this.database = this.createDatabase(options);
-    this.auth = this.createAuth(options, this.database);
-    this.sync = this.createSync(options, this.database);
-
-    this.database.setOnLocalChange(() => {
+    // Push local changes reactively.
+    this.storage.onLocalChange(() => {
       this.sync.schedulePush();
     });
 
-    // Coordinate auth and sync lifecycle reactively
+    // Coordinate auth and sync lifecycle reactively.
     this.auth.onStatusChange((status) => {
       if (status === AuthStatus.SignedIn && this.auth.token) {
         this.sync.connect(this.auth.token);
@@ -94,28 +85,7 @@ export class TetherClient {
     });
   }
 
-  /**
-   * Name of the local IndexedDB database.
-   */
-  get name(): string {
-    return this.database.name;
-  }
-
-  /**
-   * Application namespace identifier.
-   */
-  get appId(): string {
-    return this.sync.appId;
-  }
-
-  /**
-   * Unique client instance identifier.
-   */
-  get clientId(): string {
-    return this.database.clientId;
-  }
-
-  // -- Database ------------------------------------------------------
+  // -- Database / Storage ------------------------------------------------------
 
   /**
    * Obtains a typed table reference for reading, mutating, and subscribing to records.
@@ -126,14 +96,14 @@ export class TetherClient {
    * @returns A typed `Table<T>` instance.
    */
   table<T = unknown>(name: string): Table<T> {
-    return this.database.table<T>(name);
+    return this.storage.table<T>(name);
   }
 
   /**
    * Clears all local application tables, outbox entries, and sync metadata.
    */
   async clear(): Promise<void> {
-    await this.database.clearAllData();
+    await this.storage.clearAllData();
   }
 
   /**
@@ -141,7 +111,7 @@ export class TetherClient {
    */
   async close(): Promise<void> {
     this.sync.destroy();
-    await this.database.close();
+    await this.storage.close();
   }
 
   // -- Authentication ------------------------------------------------------
@@ -221,29 +191,33 @@ export class TetherClient {
 
   // -- Private Helpers ------------------------------------------------------
 
-  private createDatabase(options: TetherClientOptions): Database {
-    return new Database(options.name, {
-      version: options.version,
-    });
+  private createStorage(options: TetherClientOptions): Storage {
+    return new Storage(options.name);
   }
 
-  private createAuth(options: TetherClientOptions, database: Database): Auth {
+  private createAuth(options: TetherClientOptions, storage: Storage): Auth {
     return new Auth({
       baseUrl: this.resolveBaseUrl(options),
-      database,
+      storage,
       fetchFn: options.fetch,
     });
   }
 
-  private createSync(options: TetherClientOptions, database: Database): Sync {
-    return new Sync(database, {
+  private createSync(options: TetherClientOptions, storage: Storage): Sync {
+    return new Sync(storage, {
       url: this.resolveWebSocketUrl(options),
       appId: options.appId ?? options.name,
-      clientId: database.clientId,
+      clientId: storage.clientId,
       WebSocketClass: options.WebSocketClass,
       reconnectIntervalMs: options.reconnectIntervalMs,
       maxReconnectIntervalMs: options.maxReconnectIntervalMs,
       pingIntervalMs: options.pingIntervalMs,
+      onTokenRefresh: (token) => {
+        this.auth.handleTokenRefresh(token);
+      },
+      onAuthError: (message) => {
+        this.auth.handleAuthError(message);
+      },
     });
   }
 

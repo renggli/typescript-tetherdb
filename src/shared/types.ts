@@ -161,6 +161,8 @@ export type ServerMessage =
       userId: string;
       /** Current global sequence number of the user's data on the server. */
       currentSeq: number;
+      /** Refreshed session token for sliding session validity. */
+      token?: string;
     }
   | {
       type: ServerMessageType.AuthError;

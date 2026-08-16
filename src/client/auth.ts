@@ -1,4 +1,4 @@
-import type { Database } from './database.js';
+import type { Storage } from './storage.js';
 
 /**
  * Data reconciliation and persistence strategy for auth and session operations.
@@ -90,7 +90,7 @@ export interface StoredAuthSession {
  */
 export interface AuthDependencies {
   baseUrl: string;
-  database: Database;
+  storage: Storage;
   fetchFn?: typeof fetch;
 }
 
@@ -100,7 +100,7 @@ export interface AuthDependencies {
  */
 export class Auth {
   readonly baseUrl: string;
-  private database: Database;
+  private storage: Storage;
   private fetchFn: typeof fetch;
 
   private currentAuthStatus: AuthStatus = AuthStatus.SignedOut;
@@ -112,7 +112,7 @@ export class Auth {
 
   constructor(dependencies: AuthDependencies) {
     this.baseUrl = dependencies.baseUrl;
-    this.database = dependencies.database;
+    this.storage = dependencies.storage;
 
     const rawFetch =
       dependencies.fetchFn ??
@@ -176,7 +176,7 @@ export class Auth {
    */
   async restoreSession(): Promise<void> {
     try {
-      const session = await this.database.getMeta<StoredAuthSession>('auth');
+      const session = await this.storage.getMeta<StoredAuthSession>('auth');
       if (session?.token && session.username) {
         this.currentUserId = session.userId;
         this.currentUsername = session.username;
@@ -201,7 +201,7 @@ export class Auth {
     try {
       const dataMode = options.dataMode ?? DataMode.Local;
       if (dataMode === DataMode.Clear) {
-        await this.database.clearTables();
+        await this.storage.clearTables();
       }
 
       const res = await this.fetchFn(`${this.baseUrl}/auth/register`, {
@@ -223,13 +223,13 @@ export class Auth {
       this.currentToken = data.token;
 
       if (options.remember) {
-        await this.database.setMeta('auth', {
+        await this.storage.setMeta('auth', {
           token: data.token,
           userId: data.userId,
           username: data.username,
         });
       } else {
-        await this.database.deleteMeta('auth');
+        await this.storage.deleteMeta('auth');
       }
 
       this.setStatus(AuthStatus.SignedIn);
@@ -274,16 +274,16 @@ export class Auth {
         userId = data.userId;
 
         if (options.remember) {
-          await this.database.setMeta('auth', {
+          await this.storage.setMeta('auth', {
             token: data.token,
             userId: data.userId,
             username: data.username,
           });
         } else {
-          await this.database.deleteMeta('auth');
+          await this.storage.deleteMeta('auth');
         }
       } else if (!token) {
-        const stored = await this.database.getMeta<StoredAuthSession>('auth');
+        const stored = await this.storage.getMeta<StoredAuthSession>('auth');
         if (stored?.token) {
           token = stored.token;
           username = stored.username;
@@ -301,10 +301,10 @@ export class Auth {
 
       const dataMode = options.dataMode ?? DataMode.Merge;
       if (dataMode === DataMode.Clear) {
-        await this.database.clearTables();
+        await this.storage.clearTables();
       } else if (dataMode === DataMode.Remote) {
-        await this.database.clearTables(false);
-        await this.database.setMeta('lastSyncSeq', 0);
+        await this.storage.clearTables(false);
+        await this.storage.setMeta('lastSyncSeq', 0);
       }
 
       this.setStatus(AuthStatus.SignedIn);
@@ -324,15 +324,44 @@ export class Auth {
     this.currentUsername = undefined;
     this.currentToken = undefined;
 
-    await this.database.deleteMeta('auth');
+    await this.storage.deleteMeta('auth');
 
     const dataMode = options.dataMode ?? DataMode.Local;
     if (dataMode === DataMode.Clear) {
-      await this.database.clearTables();
+      await this.storage.clearTables();
     }
 
     this.setStatus(AuthStatus.SignedOut);
     return true;
+  }
+
+  /**
+   * Updates the in-memory and persisted session token when refreshed by the server.
+   *
+   * @param token - The new refreshed session token.
+   */
+  async handleTokenRefresh(token: string): Promise<void> {
+    this.currentToken = token;
+    const session = await this.storage.getMeta<StoredAuthSession>('auth');
+    if (session) {
+      await this.storage.setMeta('auth', {
+        ...session,
+        token,
+      });
+    }
+  }
+
+  /**
+   * Cleans up local session and transitions to SignedOut when authentication fails or expires.
+   *
+   * @param _message - Optional error message from the server.
+   */
+  async handleAuthError(_message?: string): Promise<void> {
+    this.currentUserId = undefined;
+    this.currentUsername = undefined;
+    this.currentToken = undefined;
+    await this.storage.deleteMeta('auth');
+    this.setStatus(AuthStatus.SignedOut);
   }
 
   // -- Private Helpers ------------------------------------------------------
