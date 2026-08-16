@@ -76,6 +76,12 @@ export class AppSqliteStorage implements AppStorage {
 
   async createTable(name: string): Promise<TableStorage> {
     const safeName = validateTableName(name);
+    const existing = this.handle.stmtCheckTable.get(safeName);
+    if (existing) {
+      throw new Error(
+        `Table "${safeName}" already exists in app "${this.id}".`,
+      );
+    }
     this.handle.stmtInsertTable.run(safeName, Date.now());
     return new TableSqliteStorage(safeName, this);
   }

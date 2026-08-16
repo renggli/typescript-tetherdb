@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket as NodeWebSocket } from 'ws';
 import { TetherDB } from '../../src/client/db.js';
 import { startServer, TetherServer } from '../../src/server/server.js';
+import { FileStorage } from '../../src/server/storage/file/index.js';
 import { MemoryStorage } from '../../src/server/storage/index.js';
 import { OperationType } from '../../src/shared/types.js';
 
@@ -24,16 +25,14 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
     await fs.mkdir(tmpDir, { recursive: true });
 
     server = new TetherServer({
-      baseDir: tmpDir,
-      apps: {
-        'todo-app': ['items'],
-        'notes-app': ['items'],
-        'chat-app': ['channels', 'messages'],
-        'docs-app': ['pages'],
-        'app-alpha': ['feed'],
-        'app-beta': ['feed'],
-      },
+      storage: new FileStorage({ baseDir: tmpDir }),
     });
+    await server.declareApp('todo-app', ['items']);
+    await server.declareApp('notes-app', ['items']);
+    await server.declareApp('chat-app', ['channels', 'messages']);
+    await server.declareApp('docs-app', ['pages']);
+    await server.declareApp('app-alpha', ['feed']);
+    await server.declareApp('app-beta', ['feed']);
 
     const httpServer = await server.listen(0, '127.0.0.1');
     const addr = httpServer.address();
@@ -102,7 +101,7 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
     // Wait for sync flush
     await new Promise((r) => setTimeout(r, 100));
 
-    // 3. Verify Todo app has only todo_1, Notes app has only note_1
+    // 3. Verify data isolation
     const todoRecords = await todoTable.getAll();
     expect(todoRecords).toHaveLength(1);
     expect(todoRecords[0]?.title).toBe('First Todo Item');
@@ -111,7 +110,7 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
     expect(noteRecords).toHaveLength(1);
     expect(noteRecords[0]?.title).toBe('First Note Item');
 
-    // 4. Verify server discovery APIs
+    // 4. Verify server storage isolation
     const apps = await server.storage.getApps();
     expect(apps.map((a) => a.id)).toContain('notes-app');
     expect(apps.map((a) => a.id)).toContain('todo-app');
@@ -130,49 +129,6 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
     expect(noteApp).toBeDefined();
     const noteTables = (await noteApp?.getTables()) ?? [];
     expect(noteTables.map((t) => t.name)).toEqual(['items']);
-  });
-
-  it('should support HTTP discovery endpoints GET /apps and GET /apps/:appId/tables', async () => {
-    // Register and create data in 'chat-app' and 'docs-app'
-    const db = new TetherDB({
-      name: `test_discovery_${Date.now()}`,
-      appId: 'chat-app',
-    });
-    activeClients.push(db);
-
-    const auth = await db.register({
-      serverUrl,
-      username: 'discovery_user',
-      password: 'password123',
-      WebSocketClass: NodeWebSocket,
-    });
-
-    await db.table('messages').put('m1', { text: 'Hello' });
-    await db.table('channels').put('c1', { name: 'general' });
-
-    await new Promise((r) => setTimeout(r, 100));
-
-    // Public list apps endpoint
-    const appsRes = await fetch(`${serverUrl}/apps`);
-    expect(appsRes.ok).toBe(true);
-    const appsData = (await appsRes.json()) as {
-      apps: Array<{ id: string; tables: string[] }>;
-    };
-    expect(appsData.apps.map((a) => a.id)).toContain('chat-app');
-
-    // Authenticated list tables endpoint
-    const tablesRes = await fetch(`${serverUrl}/apps/chat-app/tables`, {
-      headers: {
-        Authorization: `Bearer ${auth.token}`,
-      },
-    });
-    expect(tablesRes.ok).toBe(true);
-    const tablesData = (await tablesRes.json()) as {
-      appId: string;
-      tables: string[];
-    };
-    expect(tablesData.appId).toBe('chat-app');
-    expect(tablesData.tables).toEqual(['channels', 'messages']);
   });
 
   it('should isolate real-time broadcasts so mutations in appA do not trigger subscribers in appB', async () => {
@@ -289,7 +245,9 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
     const runner = await startServer({
       port: 0,
       host: '127.0.0.1',
-      baseDir: path.join(tmpDir, 'startServerTest'),
+      storage: new FileStorage({
+        baseDir: path.join(tmpDir, 'startServerTest'),
+      }),
     });
 
     expect(runner.port).toBeGreaterThan(0);

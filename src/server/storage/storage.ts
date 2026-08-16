@@ -26,9 +26,11 @@ export interface Storage {
 
   /**
    * Creates/registers a new application namespace.
+   * Throws an error if an application with the specified ID already exists.
    *
    * @param id - Unique application identifier.
    * @returns Created AppStorage handle.
+   * @throws Error if the application already exists.
    */
   createApp(id: string): Promise<AppStorage>;
 
@@ -49,10 +51,12 @@ export interface Storage {
 
   /**
    * Creates a new user account with credentials.
+   * Throws an error if a user with the same username already exists.
    *
    * @param username - Username for the account.
    * @param password - Account password.
    * @returns Created UserStorage handle.
+   * @throws Error if the username is already registered.
    */
   createUser(username: string, password: string): Promise<UserStorage>;
 

@@ -158,10 +158,13 @@ export class AppFileStorage implements AppStorage {
   async createTable(name: string): Promise<TableStorage> {
     const safeName = validateTableName(name);
     const tables = await this.readTablesFile();
-    if (!tables.includes(safeName)) {
-      tables.push(safeName);
-      await this.writeTablesFile(tables);
+    if (tables.includes(safeName)) {
+      throw new Error(
+        `Table "${safeName}" already exists in app "${this.id}".`,
+      );
     }
+    tables.push(safeName);
+    await this.writeTablesFile(tables);
     return new TableFileStorage(safeName, this, this.storage);
   }
 

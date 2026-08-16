@@ -13,10 +13,10 @@ import { type ITable, Table } from './table.js';
  * Options for configuring a TetherDB database instance.
  */
 export interface TetherClientOptions {
-  /** Name of the local IndexedDB database. */
-  name: string;
-  /** Optional application namespace identifier (defaults to 'default'). */
-  appId?: string;
+  /** Application namespace identifier. */
+  appId: string;
+  /** Optional name of the local IndexedDB database (defaults to appId). */
+  name?: string;
   /** Schema version number (defaults to 1). */
   version?: number;
   /** Pre-declared array of table names to create upon database opening. */
@@ -35,7 +35,7 @@ export interface AuthOptions {
   username: string;
   /** Account password. */
   password: string;
-  /** Optional application namespace identifier (defaults to 'default' or database appId). */
+  /** Optional application namespace identifier (defaults to database appId). */
   appId?: string;
   /** Optional custom WebSocket URL override. */
   wsUrl?: string;
@@ -53,7 +53,7 @@ export class TetherDB {
   private clientId: string;
   private syncClient: TetherSyncClient | null = null;
   private name: string;
-  private appId?: string;
+  private appId: string;
   private syncStatusListeners: Set<(status: SyncStatus) => void> = new Set();
   private syncStatusUnsubscribe: (() => void) | null = null;
 
@@ -63,8 +63,11 @@ export class TetherDB {
    * @param options - Configuration options for the local database and optional sync connection.
    */
   constructor(options: TetherClientOptions) {
-    this.name = options.name;
+    if (!options.appId) {
+      throw new Error('Missing required appId in TetherDB options.');
+    }
     this.appId = options.appId;
+    this.name = options.name ?? options.appId;
     this.clientId = generateClientId();
     const initialTables = options.tables ?? [];
     this.idb = new IDBManager(this.name, initialTables, options.version ?? 1);
@@ -82,9 +85,9 @@ export class TetherDB {
   }
 
   /**
-   * The application namespace identifier, if specified.
+   * The application namespace identifier.
    */
-  get applicationIdentifier(): string | undefined {
+  get applicationIdentifier(): string {
     return this.appId;
   }
 
@@ -143,9 +146,7 @@ export class TetherDB {
 
     const appId = options.appId ?? this.appId;
     if (!appId) {
-      throw new Error(
-        'Missing required appId for synchronization. Please specify an appId in TetherDB options or SyncOptions.',
-      );
+      throw new Error('Missing required appId for synchronization.');
     }
 
     const syncOptions: SyncOptions = {

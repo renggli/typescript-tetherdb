@@ -61,7 +61,9 @@ describe('Storage (src/server/storage/)', () => {
     runStorageTestSuite(() => storage);
 
     it('should write data in $basePath/<appId>/<userId>/<tableName>.json on filesystem', async () => {
-      const app = await storage.createApp('default');
+      const app = await storage.getApp('default');
+      expect(app).toBeDefined();
+      if (!app) return;
       const table = await app.createTable('settings');
       const user = await storage.createUser('user_42', 'pass');
 
@@ -98,7 +100,9 @@ describe('Storage (src/server/storage/)', () => {
         baseDir: tmpDir,
         maxChangelogEntries: 5,
       });
-      const app = await compactingStorage.createApp('default');
+      const app = await compactingStorage.getApp('default');
+      expect(app).toBeDefined();
+      if (!app) return;
       await app.createTable('events');
       const user = await compactingStorage.createUser(
         'user_compaction',
@@ -293,5 +297,34 @@ function runStorageTestSuite(createStorage: () => Storage) {
     expect(diff?.changes).toHaveLength(2);
     expect(diff?.changes.map((c) => c.id)).toEqual(['2', '3']);
     expect(diff?.currentSeq).toBe(3);
+  });
+
+  it('should throw an error when createApp is called with an existing appId', async () => {
+    await storage.createApp('unique_app');
+
+    await expect(storage.createApp('unique_app')).rejects.toThrow(
+      /already exists/i,
+    );
+  });
+
+  it('should throw an error when createTable is called with an existing table name', async () => {
+    const app = await storage.createApp('table_test_app');
+    await app.createTable('duplicate_table');
+
+    await expect(app.createTable('duplicate_table')).rejects.toThrow(
+      /already exists/i,
+    );
+  });
+
+  it('should throw an error when createUser is called with an existing username', async () => {
+    await storage.createUser('duplicate_user', 'pass_initial');
+
+    await expect(
+      storage.createUser('duplicate_user', 'pass_new'),
+    ).rejects.toThrow(/already registered/i);
+
+    await expect(
+      storage.createUser('  DUPLICATE_USER  ', 'pass_new'),
+    ).rejects.toThrow(/already registered/i);
   });
 }

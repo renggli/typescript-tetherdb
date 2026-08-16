@@ -40,7 +40,7 @@ export interface SyncOptions {
   url: string;
   /** Signed authentication session token. */
   token: string;
-  /** Optional application namespace identifier (defaults to 'default'). */
+  /** Optional application namespace identifier (defaults to database appId when used with TetherDB). */
   appId?: string;
   /** Whether to automatically connect on creation (defaults to `true`). */
   autoConnect?: boolean;
@@ -88,6 +88,9 @@ export class TetherSyncClient {
     getClientId: () => string,
     options: SyncOptions,
   ) {
+    if (!options.appId) {
+      throw new Error('Missing required appId in SyncOptions.');
+    }
     this.idb = idb;
     this.getTable = getTable;
     this.getClientId = getClientId;

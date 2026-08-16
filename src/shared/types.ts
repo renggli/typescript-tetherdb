@@ -32,7 +32,7 @@ export interface ChangeRecord<T = unknown> {
   seq?: number;
   /** Flag indicating whether this record represents a tombstone/deletion. */
   deleted?: boolean;
-  /** Optional application namespace identifier (defaults to 'default'). */
+  /** Application namespace identifier. */
   appId?: string;
 }
 
@@ -106,8 +106,8 @@ export type ClientMessage =
       clientId: string;
       /** Last synchronized sequence number known to the client. */
       lastSyncSeq?: number;
-      /** Optional application namespace identifier (defaults to 'default'). */
-      appId?: string;
+      /** Application namespace identifier. */
+      appId: string;
     }
   | {
       type: ClientMessageType.InitSync;

@@ -11,9 +11,11 @@ export interface AppStorage {
 
   /**
    * Creates/registers a new table within this application.
+   * Throws an error if a table with the specified name already exists.
    *
    * @param name - Name of the table.
-   * @returns TableStorage handle.
+   * @returns Created TableStorage handle.
+   * @throws Error if the table already exists.
    */
   createTable(name: string): Promise<TableStorage>;
 

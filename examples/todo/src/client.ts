@@ -53,7 +53,7 @@ let currentUser: AuthResult | null = (() => {
 })();
 
 // Database & UI State
-const db = new TetherDB({ name: 'tether_todo_app', appId: 'todo-example' });
+const db = new TetherDB({ appId: 'todo-example' });
 const todosTable: Table<TodoItem> = db.table<TodoItem>('todos');
 let currentFilter: FilterMode = FilterMode.All;
 let authMode: AuthMode = AuthMode.Login;

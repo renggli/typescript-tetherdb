@@ -129,15 +129,15 @@ export class FileStorage implements Storage {
 
   async createApp(id: string): Promise<AppStorage> {
     const safeId = validateAppId(id);
+    const existing = await this.getApp(safeId);
+    if (existing) {
+      throw new Error(`Application "${safeId}" already exists.`);
+    }
     const appDir = path.join(this.baseDir, safeId);
     await fs.mkdir(appDir, { recursive: true });
 
     const tablesFile = path.join(appDir, 'tables.json');
-    try {
-      await fs.access(tablesFile);
-    } catch {
-      await fs.writeFile(tablesFile, JSON.stringify([]), 'utf-8');
-    }
+    await fs.writeFile(tablesFile, JSON.stringify([]), 'utf-8');
 
     return new AppFileStorage(safeId, this);
   }

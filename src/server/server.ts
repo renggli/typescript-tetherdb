@@ -1,29 +1,18 @@
 import * as http from 'node:http';
 import { WebSocketServer } from 'ws';
-import { FileStorage } from './storage/file/index.js';
+import type { Storage, UserStorage } from './storage/index.js';
 import { MemoryStorage } from './storage/memory/index.js';
-import type { Storage, StorageOptions } from './storage/storage.js';
 import { SyncHub } from './sync-hub.js';
-import {
-  normalizePassword,
-  normalizeUsername,
-  validateAppId,
-} from './validate.js';
+import { normalizePassword, normalizeUsername } from './validate.js';
 
 /**
  * Configuration options for the TetherServer.
  */
 export interface TetherServerOptions {
-  /** Custom storage instance. */
+  /** Custom storage instance. Defaults to MemoryStorage if not defined. */
   storage?: Storage;
-  /** Filesystem root directory for storage & auth (e.g. '.data'). */
-  baseDir?: string;
-  /** Storage configuration options and resource limits. */
-  storageOptions?: StorageOptions;
   /** Path for WebSocket upgrade requests (defaults to '/sync'). */
   wsPath?: string;
-  /** Initial apps and tables to declare on startup. */
-  apps?: Record<string, string[]> | Map<string, string[]>;
 }
 
 /**
@@ -54,14 +43,13 @@ export interface RunningServer {
 
 /**
  * Unified HTTP and WebSocket server handling authentication endpoints (`/auth/register`, `/auth/login`),
- * application discovery (`/apps`, `/apps/:appId/tables`), and real-time streaming connections (`/sync`).
+ * health checks (`/health`), and real-time streaming connections (`/sync`).
  */
 export class TetherServer {
   private storageEngine: Storage;
   private syncHub: SyncHub;
   private wss: WebSocketServer | null = null;
   private wsPath: string;
-  private initialApps?: Record<string, string[]> | Map<string, string[]>;
 
   /**
    * Initializes a new TetherServer instance.
@@ -69,33 +57,46 @@ export class TetherServer {
    * @param options - Configuration options for storage and endpoints.
    */
   constructor(options: TetherServerOptions = {}) {
-    if (options.storage) {
-      this.storageEngine = options.storage;
-    } else if (options.baseDir) {
-      this.storageEngine = new FileStorage({
-        baseDir: options.baseDir,
-        ...options.storageOptions,
-      });
-    } else {
-      this.storageEngine = new MemoryStorage(options.storageOptions);
-    }
-
-    this.initialApps = options.apps;
+    this.storageEngine = options.storage ?? new MemoryStorage();
     this.syncHub = new SyncHub(this.storageEngine);
     this.wsPath = options.wsPath ?? '/sync';
   }
 
   /**
    * Declares an application and its tables.
+   * Registers the application and any declared tables if not already present.
    *
    * @param appId - Application identifier.
    * @param tables - Array of table names.
    */
   async declareApp(appId: string, tables: string[] = []): Promise<void> {
-    const app = await this.storageEngine.createApp(appId);
-    for (const t of tables) {
-      await app.createTable(t);
+    let app = await this.storageEngine.getApp(appId);
+    if (!app) {
+      app = await this.storageEngine.createApp(appId);
     }
+    for (const table of tables) {
+      const existing = await app.getTable(table);
+      if (!existing) {
+        await app.createTable(table);
+      }
+    }
+  }
+
+  /**
+   * Declares a user account with the specified username and password.
+   * Creates the user if not already registered, or updates the existing user's password.
+   *
+   * @param username - Username for the account.
+   * @param password - Plaintext password for the account.
+   * @returns UserStorage handle for the declared user.
+   */
+  async declareUser(username: string, password: string): Promise<UserStorage> {
+    const user = await this.storageEngine.getUserByUsername(username);
+    if (user) {
+      await user.changePassword(password);
+      return user;
+    }
+    return this.storageEngine.createUser(username, password);
   }
 
   /**
@@ -112,20 +113,6 @@ export class TetherServer {
     return this.syncHub;
   }
 
-  private async initializeApps(): Promise<void> {
-    if (this.initialApps) {
-      if (this.initialApps instanceof Map) {
-        for (const [appId, tables] of this.initialApps.entries()) {
-          await this.declareApp(appId, tables);
-        }
-      } else {
-        for (const [appId, tables] of Object.entries(this.initialApps)) {
-          await this.declareApp(appId, tables);
-        }
-      }
-    }
-  }
-
   /**
    * The underlying HTTP server instance, if listening.
    */
@@ -136,6 +123,34 @@ export class TetherServer {
   private _httpServer: http.Server | null = null;
 
   /**
+   * Attaches WebSocket synchronization handling to an existing HTTP server.
+   *
+   * @param server - The HTTP server instance to attach to.
+   */
+  attach(server: http.Server): void {
+    if (!this.wss) {
+      this.wss = new WebSocketServer({ noServer: true });
+      this.wss.on('connection', (ws) => {
+        this.syncHub.handleConnection(ws);
+      });
+    }
+
+    server.on('upgrade', (req, socket, head) => {
+      const url = new URL(
+        req.url ?? '',
+        `http://${req.headers.host ?? 'localhost'}`,
+      );
+      if (url.pathname === this.wsPath) {
+        this.wss?.handleUpgrade(req, socket, head, (ws) => {
+          this.wss?.emit('connection', ws, req);
+        });
+      } else {
+        socket.destroy();
+      }
+    });
+  }
+
+  /**
    * Starts the HTTP and WebSocket server listening on the specified port and host.
    *
    * @param port - Port number to bind. Defaults to 8080.
@@ -143,28 +158,15 @@ export class TetherServer {
    * @returns The active Node.js HTTP server instance.
    */
   async listen(port = 8080, host = '0.0.0.0'): Promise<http.Server> {
-    await this.initializeApps();
-
     return new Promise<http.Server>((resolve) => {
       this._httpServer = http.createServer(async (req, res) => {
-        await this.handleHttpRequest(req, res);
-      });
-
-      this.wss = new WebSocketServer({ noServer: true });
-      this.wss.on('connection', (ws) => {
-        this.syncHub.handleConnection(ws);
-      });
-
-      this._httpServer.on('upgrade', (req, socket, head) => {
-        const url = new URL(req.url ?? '', `http://${req.headers.host}`);
-        if (url.pathname === this.wsPath) {
-          this.wss?.handleUpgrade(req, socket, head, (ws) => {
-            this.wss?.emit('connection', ws, req);
-          });
-        } else {
-          socket.destroy();
+        const handled = await this.handleHttpRequest(req, res);
+        if (!handled) {
+          this.sendJson(res, 404, { error: 'Not found' });
         }
       });
+
+      this.attach(this._httpServer);
 
       this._httpServer.listen(port, host, () => {
         if (this._httpServer) {
@@ -229,11 +231,15 @@ export class TetherServer {
 
   /**
    * Handles incoming HTTP requests for authentication and discovery endpoints.
+   *
+   * @param req - Incoming HTTP request.
+   * @param res - Server HTTP response.
+   * @returns `true` if the request was handled by TetherDB; `false` if the path did not match.
    */
   async handleHttpRequest(
     req: http.IncomingMessage,
     res: http.ServerResponse,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const url = new URL(
       req.url ?? '/',
       `http://${req.headers.host ?? 'localhost'}`,
@@ -247,7 +253,7 @@ export class TetherServer {
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
       });
       res.end();
-      return;
+      return true;
     }
 
     try {
@@ -261,14 +267,16 @@ export class TetherServer {
         const normUsername = normalizeUsername(username ?? '');
         const normPassword = normalizePassword(password ?? '');
         if (!normUsername) {
-          return this.sendJson(res, 400, {
+          this.sendJson(res, 400, {
             error: 'Missing or invalid required field: username',
           });
+          return true;
         }
         if (!normPassword) {
-          return this.sendJson(res, 400, {
+          this.sendJson(res, 400, {
             error: 'Missing or invalid required field: password',
           });
+          return true;
         }
 
         try {
@@ -277,14 +285,16 @@ export class TetherServer {
             normPassword,
           );
           const token = await user.createToken();
-          return this.sendJson(res, 201, {
+          this.sendJson(res, 201, {
             userId: user.id,
             username: user.username,
             token,
           });
+          return true;
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'Registration error';
-          return this.sendJson(res, 409, { error: msg });
+          this.sendJson(res, 409, { error: msg });
+          return true;
         }
       }
 
@@ -298,76 +308,48 @@ export class TetherServer {
         const normUsername = normalizeUsername(username ?? '');
         const normPassword = normalizePassword(password ?? '');
         if (!normUsername || !normPassword) {
-          return this.sendJson(res, 400, {
+          this.sendJson(res, 400, {
             error: 'Missing required field: username and password',
           });
+          return true;
         }
 
         const user = await this.storageEngine.getUserByUsername(normUsername);
         if (!user) {
-          return this.sendJson(res, 401, {
+          this.sendJson(res, 401, {
             error: 'Invalid username or password',
           });
+          return true;
         }
 
         const valid = await user.verifyPassword(normPassword);
         if (!valid) {
-          return this.sendJson(res, 401, {
+          this.sendJson(res, 401, {
             error: 'Invalid username or password',
           });
+          return true;
         }
 
         const token = await user.createToken();
-        return this.sendJson(res, 200, {
+        this.sendJson(res, 200, {
           userId: user.id,
           username: user.username,
           token,
         });
-      }
-
-      // GET /apps
-      if (method === 'GET' && url.pathname === '/apps') {
-        const apps = await this.storageEngine.getApps();
-        const appSummaries = await Promise.all(
-          apps.map(async (app) => {
-            const tables = await app.getTables();
-            return {
-              id: app.id,
-              tables: tables.map((t) => t.name),
-            };
-          }),
-        );
-        return this.sendJson(res, 200, { apps: appSummaries });
-      }
-
-      // GET /apps/:appId/tables
-      const matchAppTables = url.pathname.match(/^\/apps\/([^/]+)\/tables$/);
-      if (method === 'GET' && matchAppTables) {
-        const appId = matchAppTables[1];
-        const safeAppId = validateAppId(appId);
-        const app = await this.storageEngine.getApp(safeAppId);
-        if (!app) {
-          return this.sendJson(res, 404, {
-            error: `Application "${safeAppId}" not found`,
-          });
-        }
-
-        const tables = await app.getTables();
-        return this.sendJson(res, 200, {
-          appId: app.id,
-          tables: tables.map((t) => t.name),
-        });
+        return true;
       }
 
       // Health check endpoint
       if (method === 'GET' && url.pathname === '/health') {
-        return this.sendJson(res, 200, { status: 'ok' });
+        this.sendJson(res, 200, { status: 'ok' });
+        return true;
       }
 
-      return this.sendJson(res, 404, { error: 'Not found' });
+      return false;
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Internal server error';
-      return this.sendJson(res, 500, { error: msg });
+      this.sendJson(res, 500, { error: msg });
+      return true;
     }
   }
 }

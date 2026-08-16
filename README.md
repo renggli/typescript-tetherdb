@@ -6,7 +6,7 @@
 
 - **Offline-First & Local-First**: Operations are applied to IndexedDB immediately, queued in an outbox, and transparently synced in the background.
 - **Multi-Application on Standard Domain**: Host multiple independent web apps on a single TetherDB server instance (e.g. `store.mysite.com`). Data and real-time broadcasts are isolated by `appId`.
-- **Application & Table Discovery**: Inspect registered apps and their active tables programmatically (`listApps()`, `listStores()`) or via HTTP endpoints (`GET /apps`, `GET /apps/:appId/tables`).
+- **Application & User Management**: Declare apps, active tables, and users programmatically (`declareApp()`, `declareUser()`) or via CLI commands (`apps`, `tables`, `users`).
 - **Zero-Config Server Starter & CLI**: Start in one line with `startServer()` or run directly via `npx tetherdb --port 8080 --dir ./data`.
 - **Seamless Local-to-Synced Onboarding**: Start offline with zero-config local storage, then attach cloud sync with a single `db.register()` or `db.login()` call.
 - **Batch-by-Default Architecture**: High-throughput atomic mutations (`putAll`, `deleteAll`, `getAll`) and coalesced WebSocket transmission.
@@ -106,14 +106,12 @@ db.onSyncStatusChange((status) => {
 
 ---
 
-## Server Discovery Endpoints
-
-The standard server provides discovery endpoints for inspecting active applications and their tables:
+## HTTP Endpoints
+ 
+The standard server provides authentication, health, and WebSocket sync endpoints:
 
 | Method | Endpoint | Description | Auth Required |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/apps` | Lists active application namespace identifiers | Optional (filters by user if `Bearer` token provided) |
-| `GET` | `/apps/:appId/tables` | Lists table names created in the app | Yes (`Authorization: Bearer <token>`) |
 | `GET` | `/health` | Server liveness check (`{ status: "ok" }`) | No |
 | `POST` | `/auth/register` | Register a new user account | No |
 | `POST` | `/auth/login` | Log in and receive signed session token | No |

@@ -30,11 +30,13 @@ export class AppMemoryStorage implements AppStorage {
 
   async createTable(name: string): Promise<TableStorage> {
     const safeName = validateTableName(name);
-    let table = this.tables.get(safeName);
-    if (!table) {
-      table = new TableMemoryStorage(safeName, this, this.storage);
-      this.tables.set(safeName, table);
+    if (this.tables.has(safeName)) {
+      throw new Error(
+        `Table "${safeName}" already exists in app "${this.id}".`,
+      );
     }
+    const table = new TableMemoryStorage(safeName, this, this.storage);
+    this.tables.set(safeName, table);
     return table;
   }
 

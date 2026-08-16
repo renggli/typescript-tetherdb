@@ -92,11 +92,11 @@ export class MemoryStorage implements Storage {
 
   async createApp(id: string): Promise<AppStorage> {
     const safeId = validateAppId(id);
-    let app = this.apps.get(safeId);
-    if (!app) {
-      app = new AppMemoryStorage(safeId, this);
-      this.apps.set(safeId, app);
+    if (this.apps.has(safeId)) {
+      throw new Error(`Application "${safeId}" already exists.`);
     }
+    const app = new AppMemoryStorage(safeId, this);
+    this.apps.set(safeId, app);
     return app;
   }
 

@@ -294,6 +294,10 @@ export class SqliteStorage implements Storage {
 
   async createApp(id: string): Promise<AppStorage> {
     const safeId = validateAppId(id);
+    const existing = await this.getApp(safeId);
+    if (existing) {
+      throw new Error(`Application "${safeId}" already exists.`);
+    }
     this.getAppDb(safeId);
     return new AppSqliteStorage(safeId, this);
   }

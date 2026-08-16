@@ -4,7 +4,9 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { TetherDB } from '../../src/client/db.js';
+import { SyncStatus } from '../../src/client/sync.js';
 import { TetherServer } from '../../src/server/server.js';
+import { FileStorage } from '../../src/server/storage/file/index.js';
 import { OperationType } from '../../src/shared/types.js';
 
 function delay(ms: number) {
@@ -26,11 +28,16 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
     await fs.mkdir(tmpDir, { recursive: true });
 
     server = new TetherServer({
-      baseDir: tmpDir,
-      apps: {
-        default: ['todos', 'notes', 'items', 'tasks', 'messages', 'docs'],
-      },
+      storage: new FileStorage({ baseDir: tmpDir }),
     });
+    await server.declareApp('default', [
+      'todos',
+      'notes',
+      'items',
+      'tasks',
+      'messages',
+      'docs',
+    ]);
 
     const httpServer = await server.listen(0, '127.0.0.1');
     const addr = httpServer.address();
@@ -50,11 +57,11 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
   it('should sync local changes from Client A to server', async () => {
     const clientA = new TetherDB({
       name: `client-a-${Math.random().toString(36).substring(2, 8)}`,
+      appId: 'default',
       tables: ['todos'],
       sync: {
         url: wsUrl,
         token: userToken,
-        appId: 'default',
         WebSocketClass: WebSocket,
       },
     });
@@ -84,11 +91,11 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
     // Client A creates data
     const clientA = new TetherDB({
       name: `client-a-${Math.random().toString(36).substring(2, 8)}`,
+      appId: 'default',
       tables: ['todos'],
       sync: {
         url: wsUrl,
         token: userToken,
-        appId: 'default',
         WebSocketClass: WebSocket,
       },
     });
@@ -103,11 +110,11 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
     // Client B connects from clean state
     const clientB = new TetherDB({
       name: `client-b-${Math.random().toString(36).substring(2, 8)}`,
+      appId: 'default',
       tables: ['todos'],
       sync: {
         url: wsUrl,
         token: userToken,
-        appId: 'default',
         WebSocketClass: WebSocket,
       },
     });
@@ -129,22 +136,22 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
   it('should broadcast real-time changes between concurrent clients', async () => {
     const clientA = new TetherDB({
       name: `client-a-${Math.random().toString(36).substring(2, 8)}`,
+      appId: 'default',
       tables: ['messages'],
       sync: {
         url: wsUrl,
         token: userToken,
-        appId: 'default',
         WebSocketClass: WebSocket,
       },
     });
 
     const clientB = new TetherDB({
       name: `client-b-${Math.random().toString(36).substring(2, 8)}`,
+      appId: 'default',
       tables: ['messages'],
       sync: {
         url: wsUrl,
         token: userToken,
-        appId: 'default',
         WebSocketClass: WebSocket,
       },
     });
@@ -182,11 +189,11 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
   it('should catch up with diff sync after being offline', async () => {
     const clientA = new TetherDB({
       name: `client-a-${Math.random().toString(36).substring(2, 8)}`,
+      appId: 'default',
       tables: ['items'],
       sync: {
         url: wsUrl,
         token: userToken,
-        appId: 'default',
         WebSocketClass: WebSocket,
       },
     });
@@ -199,11 +206,11 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
     const clientBName = `client-b-${Math.random().toString(36).substring(2, 8)}`;
     let clientB = new TetherDB({
       name: clientBName,
+      appId: 'default',
       tables: ['items'],
       sync: {
         url: wsUrl,
         token: userToken,
-        appId: 'default',
         WebSocketClass: WebSocket,
       },
     });
@@ -223,11 +230,11 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
     // Client B comes back online with the same IndexedDB database
     clientB = new TetherDB({
       name: clientBName,
+      appId: 'default',
       tables: ['items'],
       sync: {
         url: wsUrl,
         token: userToken,
-        appId: 'default',
         WebSocketClass: WebSocket,
       },
     });
@@ -249,22 +256,22 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
 
     const clientUser1 = new TetherDB({
       name: `client-u1-${Math.random().toString(36).substring(2, 8)}`,
+      appId: 'default',
       tables: ['docs'],
       sync: {
         url: wsUrl,
         token: userToken,
-        appId: 'default',
         WebSocketClass: WebSocket,
       },
     });
 
     const clientUser2 = new TetherDB({
       name: `client-u2-${Math.random().toString(36).substring(2, 8)}`,
+      appId: 'default',
       tables: ['docs'],
       sync: {
         url: wsUrl,
         token: user2Token,
-        appId: 'default',
         WebSocketClass: WebSocket,
       },
     });
@@ -308,11 +315,11 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
     // New client connects with lastSyncSeq: 1 (so 59 changes diff > 50 threshold)
     const client = new TetherDB({
       name: `client-bulk-${Math.random().toString(36).substring(2, 8)}`,
+      appId: 'default',
       tables: ['tasks'],
       sync: {
         url: wsUrl,
         token: userToken,
-        appId: 'default',
         WebSocketClass: WebSocket,
       },
     });
@@ -329,22 +336,22 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
   it('should batch rapid local mutations and beam them to remote clients cohesively', async () => {
     const clientA = new TetherDB({
       name: `client-a-bulk-${Math.random().toString(36).substring(2, 8)}`,
+      appId: 'default',
       tables: ['items'],
       sync: {
         url: wsUrl,
         token: userToken,
-        appId: 'default',
         WebSocketClass: WebSocket,
       },
     });
 
     const clientB = new TetherDB({
       name: `client-b-bulk-${Math.random().toString(36).substring(2, 8)}`,
+      appId: 'default',
       tables: ['items'],
       sync: {
         url: wsUrl,
         token: userToken,
-        appId: 'default',
         WebSocketClass: WebSocket,
       },
     });
@@ -373,5 +380,24 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
 
     await clientA.close();
     await clientB.close();
+  });
+
+  it('should handle keepalive ping and respond with pong without error', async () => {
+    const client = new TetherDB({
+      name: `client-ping-${Math.random().toString(36).substring(2, 8)}`,
+      appId: 'default',
+      tables: ['items'],
+      sync: {
+        url: wsUrl,
+        token: userToken,
+        pingIntervalMs: 50, // Rapid ping for test
+        WebSocketClass: WebSocket,
+      },
+    });
+
+    await delay(150);
+    expect(client.syncStatus).toBe(SyncStatus.Connected);
+
+    await client.close();
   });
 });

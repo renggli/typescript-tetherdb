@@ -8,6 +8,7 @@ describe('TetherDB local operations (src/client/)', () => {
   beforeEach(() => {
     db = new TetherDB({
       name: `test-db-${Math.random().toString(36).substring(2, 8)}`,
+      appId: 'test-app',
       tables: ['todos', 'notes'],
     });
   });
@@ -169,14 +170,14 @@ describe('TetherDB local operations (src/client/)', () => {
 
   it('should persist and reload local database across multiple TetherDB instances', async () => {
     const dbName = `persistent-db-${Date.now()}`;
-    const instance1 = new TetherDB({ name: dbName });
+    const instance1 = new TetherDB({ name: dbName, appId: 'test-app' });
     const table1 = instance1.table<{ title: string }>('bookmarks');
     await table1.put('b1', { title: 'GitHub' });
     await table1.put('b2', { title: 'MDN' });
     await instance1.close();
 
     // Reopen database with new instance
-    const instance2 = new TetherDB({ name: dbName });
+    const instance2 = new TetherDB({ name: dbName, appId: 'test-app' });
     const table2 = instance2.table<{ title: string }>('bookmarks');
     const items = await table2.getAll();
     expect(items).toHaveLength(2);
@@ -187,6 +188,7 @@ describe('TetherDB local operations (src/client/)', () => {
   it('should dynamically create undeclared stores on demand', async () => {
     const dynamicDb = new TetherDB({
       name: `dyn-db-${Date.now()}`,
+      appId: 'test-app',
     });
 
     const customTable = dynamicDb.table<{ val: number }>('custom_metrics');
@@ -195,6 +197,34 @@ describe('TetherDB local operations (src/client/)', () => {
     expect(record?.val).toBe(42);
 
     await dynamicDb.close();
+  });
+
+  it('should require appId on database initialization', () => {
+    expect(
+      () =>
+        new TetherDB({
+          name: 'missing-app-id',
+        } as unknown as { name: string; appId: string }),
+    ).toThrow('Missing required appId in TetherDB options.');
+  });
+
+  it('should default name to appId when name is not specified', async () => {
+    const autoNamedDb = new TetherDB({
+      appId: 'auto-named-app',
+    });
+    expect(autoNamedDb.dbName).toBe('auto-named-app');
+    expect(autoNamedDb.applicationIdentifier).toBe('auto-named-app');
+    await autoNamedDb.close();
+  });
+
+  it('should allow custom name override separate from appId', async () => {
+    const customNamedDb = new TetherDB({
+      appId: 'my-app',
+      name: 'custom_idb_name',
+    });
+    expect(customNamedDb.dbName).toBe('custom_idb_name');
+    expect(customNamedDb.applicationIdentifier).toBe('my-app');
+    await customNamedDb.close();
   });
 
   it('should clear table contents completely using table.clear()', async () => {

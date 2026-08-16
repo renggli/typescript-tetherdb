@@ -270,6 +270,13 @@ export class SyncHub {
         break;
       }
 
+      case ClientMessageType.Ping: {
+        this.send(ws, {
+          type: ServerMessageType.Pong,
+        });
+        break;
+      }
+
       default: {
         throw new Error(
           `Unsupported message type: "${(msg as { type: string }).type}"`,

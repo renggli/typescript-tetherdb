@@ -20,9 +20,8 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
     new Promise((resolve) => setTimeout(resolve, ms));
 
   beforeEach(async () => {
-    server = new TetherServer({
-      apps: { default: ['notes', 'todos', 'items'] },
-    });
+    server = new TetherServer();
+    await server.declareApp('default', ['notes', 'todos', 'items']);
     httpServer = await server.listen(0, '127.0.0.1');
     const addr = httpServer.address();
     if (addr && typeof addr === 'object') {
@@ -42,6 +41,7 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
   it('should initialize with options object and dynamic tables with zero store pre-declaration', async () => {
     const db = new TetherDB({
       name: `simple-db-${Math.random().toString(36).substring(2, 8)}`,
+      appId: 'dx-notes-app',
     });
     clientsToClose.push(db);
 
@@ -55,6 +55,7 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
   it('should provide ergonomic table clear helper', async () => {
     const db = new TetherDB({
       name: `dx-db-${Math.random().toString(36).substring(2, 8)}`,
+      appId: 'dx-tasks-app',
     });
     clientsToClose.push(db);
 
@@ -95,6 +96,7 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
     // 1. User starts locally offline with zero configuration
     const db = new TetherDB({
       name: `offline-onboard-${Math.random().toString(36).substring(2, 8)}`,
+      appId: 'default',
     });
     clientsToClose.push(db);
 
@@ -120,7 +122,6 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
       serverUrl,
       username: 'onboard_user',
       password: 'secretpassword',
-      appId: 'default',
       WebSocketClass: WebSocket,
     });
 
@@ -155,6 +156,7 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
 
     const db = new TetherDB({
       name: `dynamic-db-${Math.random().toString(36).substring(2, 8)}`,
+      appId: 'default',
     });
     clientsToClose.push(db);
 
@@ -162,7 +164,6 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
     db.enableSync({
       url: wsUrl,
       token: auth.token,
-      appId: 'default',
       WebSocketClass: WebSocket,
     });
 
@@ -182,7 +183,6 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
     db.enableSync({
       url: wsUrl,
       token: auth.token,
-      appId: 'default',
       WebSocketClass: WebSocket,
     });
 
@@ -196,6 +196,7 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
   it('should wipe local data on db.clear()', async () => {
     const db = new TetherDB({
       name: `clear-test-db-${Math.random().toString(36).substring(2, 8)}`,
+      appId: 'clear-app',
     });
     clientsToClose.push(db);
 
