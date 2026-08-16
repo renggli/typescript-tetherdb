@@ -1,4 +1,3 @@
-import type * as http from 'node:http';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import {
@@ -8,25 +7,24 @@ import {
   TetherClient,
 } from '../../src/client/index.js';
 import { Storage } from '../../src/client/storage.js';
-import { TetherServer } from '../../src/server/server.js';
+import { type RunningServer, startServer } from '../../src/server/index.js';
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
-  let server: TetherServer;
-  let httpServer: http.Server;
+  let server: RunningServer;
   let serverPort: number;
   const clientsToClose: TetherClient[] = [];
 
-  const delay = (ms: number) =>
-    new Promise((resolve) => setTimeout(resolve, ms));
-
   beforeEach(async () => {
-    server = new TetherServer();
-    await server.declareApp('test-app', ['todos', 'notes']);
-    httpServer = await server.listen(0, '127.0.0.1');
-    const addr = httpServer.address();
-    if (addr && typeof addr === 'object') {
-      serverPort = addr.port;
-    }
+    server = await startServer({
+      port: 0,
+      host: '127.0.0.1',
+    });
+    serverPort = (server.httpServer.address() as { port: number }).port;
+    await server.server.storage.createApp('test-app');
+    const app = await server.server.storage.getApp('test-app');
+    await app?.createTable('todos');
   });
 
   afterEach(async () => {
@@ -38,13 +36,15 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
   });
 
   it('should start with SignedOut authStatus and Disconnected syncStatus', () => {
-    const client = new TetherClient({
-      name: `db-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'test-app',
-      host: '127.0.0.1',
-      port: serverPort,
-      WebSocketClass: WebSocket,
-    });
+    const client = new TetherClient(
+      `db-${Math.random().toString(36).substring(2, 8)}`,
+      {
+        appId: 'test-app',
+        host: '127.0.0.1',
+        port: serverPort,
+        WebSocketClass: WebSocket,
+      },
+    );
     clientsToClose.push(client);
 
     expect(client.authStatus).toBe(AuthStatus.SignedOut);
@@ -53,13 +53,15 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
   });
 
   it('should register a new account and automatically connect sync', async () => {
-    const client = new TetherClient({
-      name: `db-reg-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'test-app',
-      host: '127.0.0.1',
-      port: serverPort,
-      WebSocketClass: WebSocket,
-    });
+    const client = new TetherClient(
+      `db-reg-${Math.random().toString(36).substring(2, 8)}`,
+      {
+        appId: 'test-app',
+        host: '127.0.0.1',
+        port: serverPort,
+        WebSocketClass: WebSocket,
+      },
+    );
     clientsToClose.push(client);
 
     const authStatuses: AuthStatus[] = [];
@@ -81,13 +83,15 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
   });
 
   it('should preserve local data by default on register (DataMode.Local)', async () => {
-    const client = new TetherClient({
-      name: `db-local-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'test-app',
-      host: '127.0.0.1',
-      port: serverPort,
-      WebSocketClass: WebSocket,
-    });
+    const client = new TetherClient(
+      `db-local-${Math.random().toString(36).substring(2, 8)}`,
+      {
+        appId: 'test-app',
+        host: '127.0.0.1',
+        port: serverPort,
+        WebSocketClass: WebSocket,
+      },
+    );
     clientsToClose.push(client);
 
     const todos = client.table<{ title: string }>('todos');
@@ -105,11 +109,11 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
 
     await delay(250);
     // Server should have received the synced item
-    const user = await server.storage.getUserByUsername('bobby');
+    const user = await server.server.storage.getUserByUsername('bobby');
     expect(user).toBeDefined();
     if (!user) return;
 
-    const app = await server.storage.getApp('test-app');
+    const app = await server.server.storage.getApp('test-app');
     const table = await app?.getTable('todos');
     const serverRecords = (await table?.getAllRecords(user)) ?? [];
     expect(serverRecords).toHaveLength(1);
@@ -117,13 +121,15 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
   });
 
   it('should clear local data on register when DataMode.Clear is specified', async () => {
-    const client = new TetherClient({
-      name: `db-clear-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'test-app',
-      host: '127.0.0.1',
-      port: serverPort,
-      WebSocketClass: WebSocket,
-    });
+    const client = new TetherClient(
+      `db-clear-${Math.random().toString(36).substring(2, 8)}`,
+      {
+        appId: 'test-app',
+        host: '127.0.0.1',
+        port: serverPort,
+        WebSocketClass: WebSocket,
+      },
+    );
     clientsToClose.push(client);
 
     const todos = client.table<{ title: string }>('todos');
@@ -142,13 +148,15 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
   });
 
   it('should transition to AuthStatus.Error when register fails', async () => {
-    const client = new TetherClient({
-      name: `db-err-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'test-app',
-      host: '127.0.0.1',
-      port: serverPort,
-      WebSocketClass: WebSocket,
-    });
+    const client = new TetherClient(
+      `db-err-${Math.random().toString(36).substring(2, 8)}`,
+      {
+        appId: 'test-app',
+        host: '127.0.0.1',
+        port: serverPort,
+        WebSocketClass: WebSocket,
+      },
+    );
     clientsToClose.push(client);
 
     // First register user
@@ -158,13 +166,15 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
     });
 
     // Attempt to register same username
-    const client2 = new TetherClient({
-      name: `db-err2-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'test-app',
-      host: '127.0.0.1',
-      port: serverPort,
-      WebSocketClass: WebSocket,
-    });
+    const client2 = new TetherClient(
+      `db-err2-${Math.random().toString(36).substring(2, 8)}`,
+      {
+        appId: 'test-app',
+        host: '127.0.0.1',
+        port: serverPort,
+        WebSocketClass: WebSocket,
+      },
+    );
     clientsToClose.push(client2);
 
     const success = await client2.register({
@@ -177,13 +187,15 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
 
   it('should support login and merge local/remote data with DataMode.Merge', async () => {
     // 1. Register User 1 on Client A and put remote items
-    const clientA = new TetherClient({
-      name: `db-a-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'test-app',
-      host: '127.0.0.1',
-      port: serverPort,
-      WebSocketClass: WebSocket,
-    });
+    const clientA = new TetherClient(
+      `db-a-${Math.random().toString(36).substring(2, 8)}`,
+      {
+        appId: 'test-app',
+        host: '127.0.0.1',
+        port: serverPort,
+        WebSocketClass: WebSocket,
+      },
+    );
     clientsToClose.push(clientA);
 
     await clientA.register({
@@ -195,13 +207,15 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
     await delay(200);
 
     // 2. Client B has local offline items
-    const clientB = new TetherClient({
-      name: `db-b-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'test-app',
-      host: '127.0.0.1',
-      port: serverPort,
-      WebSocketClass: WebSocket,
-    });
+    const clientB = new TetherClient(
+      `db-b-${Math.random().toString(36).substring(2, 8)}`,
+      {
+        appId: 'test-app',
+        host: '127.0.0.1',
+        port: serverPort,
+        WebSocketClass: WebSocket,
+      },
+    );
     clientsToClose.push(clientB);
 
     const todosB = clientB.table<{ title: string }>('todos');
@@ -230,13 +244,15 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
 
   it('should support login with DataMode.Remote discarding local data', async () => {
     // 1. Create remote item
-    const clientA = new TetherClient({
-      name: `db-ra-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'test-app',
-      host: '127.0.0.1',
-      port: serverPort,
-      WebSocketClass: WebSocket,
-    });
+    const clientA = new TetherClient(
+      `db-ra-${Math.random().toString(36).substring(2, 8)}`,
+      {
+        appId: 'test-app',
+        host: '127.0.0.1',
+        port: serverPort,
+        WebSocketClass: WebSocket,
+      },
+    );
     clientsToClose.push(clientA);
 
     await clientA.register({
@@ -248,13 +264,15 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
     await delay(200);
 
     // 2. Client B creates local item then logs in with DataMode.Remote
-    const clientB = new TetherClient({
-      name: `db-rb-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'test-app',
-      host: '127.0.0.1',
-      port: serverPort,
-      WebSocketClass: WebSocket,
-    });
+    const clientB = new TetherClient(
+      `db-rb-${Math.random().toString(36).substring(2, 8)}`,
+      {
+        appId: 'test-app',
+        host: '127.0.0.1',
+        port: serverPort,
+        WebSocketClass: WebSocket,
+      },
+    );
     clientsToClose.push(clientB);
 
     const todosB = clientB.table<{ title: string }>('todos');
@@ -279,8 +297,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
     const dbName = `db-rem-${Math.random().toString(36).substring(2, 8)}`;
 
     // Session 1: Register with remember: true
-    const client1 = new TetherClient({
-      name: dbName,
+    const client1 = new TetherClient(dbName, {
       appId: 'test-app',
       host: '127.0.0.1',
       port: serverPort,
@@ -302,8 +319,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
     await client1.close();
 
     // Session 2: Open same DB instance without credentials
-    const client2 = new TetherClient({
-      name: dbName,
+    const client2 = new TetherClient(dbName, {
       appId: 'test-app',
       host: '127.0.0.1',
       port: serverPort,
@@ -324,8 +340,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
 
   it('should handle logout with default DataMode.Clear wiping data and DataMode.Local preserving data', async () => {
     const dbName = `db-logout-${Math.random().toString(36).substring(2, 8)}`;
-    const client = new TetherClient({
-      name: dbName,
+    const client = new TetherClient(dbName, {
       appId: 'test-app',
       host: '127.0.0.1',
       port: serverPort,
@@ -341,6 +356,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
 
     const todos = client.table<{ title: string }>('todos');
     await todos.put('g1', { title: 'Grace todo' });
+    await delay(200);
 
     // 1. Logout with DataMode.Local preserves data
     await client.logout({ dataMode: DataMode.Local });
@@ -355,6 +371,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
       password: 'password123',
     });
     expect(client.authStatus).toBe(AuthStatus.SignedIn);
+    await delay(200);
 
     // 3. Logout with default (DataMode.Clear) wipes local data
     await client.logout();
@@ -363,13 +380,15 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
   });
 
   it('should clear previous user data when registering a new account while already signed in', async () => {
-    const client = new TetherClient({
-      name: `db-reg-switch-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'test-app',
-      host: '127.0.0.1',
-      port: serverPort,
-      WebSocketClass: WebSocket,
-    });
+    const client = new TetherClient(
+      `db-reg-switch-${Math.random().toString(36).substring(2, 8)}`,
+      {
+        appId: 'test-app',
+        host: '127.0.0.1',
+        port: serverPort,
+        WebSocketClass: WebSocket,
+      },
+    );
     clientsToClose.push(client);
 
     // Register User 1 while SignedOut (keeps local data)
@@ -402,8 +421,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
 
   it('should automatically refresh sliding session token on sync connection', async () => {
     const dbName = `db-sliding-${Math.random().toString(36).substring(2, 8)}`;
-    const client = new TetherClient({
-      name: dbName,
+    const client = new TetherClient(dbName, {
       appId: 'test-app',
       host: '127.0.0.1',
       port: serverPort,
@@ -443,8 +461,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
     });
     await rawStorage.close();
 
-    const client = new TetherClient({
-      name: dbName,
+    const client = new TetherClient(dbName, {
       appId: 'test-app',
       host: '127.0.0.1',
       port: serverPort,
@@ -467,13 +484,15 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
 
   it('should fetch remote data when switching between user accounts with default DataMode.Remote', async () => {
     // 1. Create client and register User A
-    const client = new TetherClient({
-      name: `db-switch-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'test-app',
-      host: '127.0.0.1',
-      port: serverPort,
-      WebSocketClass: WebSocket,
-    });
+    const client = new TetherClient(
+      `db-switch-${Math.random().toString(36).substring(2, 8)}`,
+      {
+        appId: 'test-app',
+        host: '127.0.0.1',
+        port: serverPort,
+        WebSocketClass: WebSocket,
+      },
+    );
     clientsToClose.push(client);
 
     await client.register({
@@ -489,8 +508,11 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
     expect((await todos.getAll()).map((t) => t.title)).toEqual(['User A Todo']);
 
     // 2. Pre-create User B with their own data directly on server
-    const userB = await server.storage.createUser('user_b', 'password123');
-    const app = await server.storage.getApp('test-app');
+    const userB = await server.server.storage.createUser(
+      'user_b',
+      'password123',
+    );
+    const app = await server.server.storage.getApp('test-app');
     await app?.applyChanges(userB, [
       {
         table: 'todos',

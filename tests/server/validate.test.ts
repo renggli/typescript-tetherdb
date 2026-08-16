@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  TetherServerError,
+  TetherServerErrorCode,
+} from '../../src/server/errors.js';
+import {
   calculateByteSize,
   getUserBucket,
   MAX_PASSWORD_LENGTH,
@@ -28,16 +32,25 @@ describe('src/server/validate.ts', () => {
     });
 
     it('should reject invalid or malicious user identifiers', () => {
+      expect(() => validateUserId('')).toThrow(TetherServerError);
       expect(() => validateUserId('')).toThrow('Invalid user ID');
-      expect(() => validateUserId('a'.repeat(65))).toThrow('Invalid user ID');
-      expect(() => validateUserId('../user')).toThrow('Invalid user ID');
-      expect(() => validateUserId('user/123')).toThrow('Invalid user ID');
-      expect(() => validateUserId('user.name')).toThrow('Invalid user ID');
-      expect(() => validateUserId('user@domain')).toThrow('Invalid user ID');
+      expect(() => validateUserId('a'.repeat(65))).toThrow(TetherServerError);
+      expect(() => validateUserId('../user')).toThrow(TetherServerError);
+      expect(() => validateUserId('user/123')).toThrow(TetherServerError);
+      expect(() => validateUserId('user.name')).toThrow(TetherServerError);
+      expect(() => validateUserId('user@domain')).toThrow(TetherServerError);
       // @ts-expect-error Testing non-string handling
-      expect(() => validateUserId(null)).toThrow('Invalid user ID');
+      expect(() => validateUserId(null)).toThrow(TetherServerError);
       // @ts-expect-error Testing non-string handling
-      expect(() => validateUserId(undefined)).toThrow('Invalid user ID');
+      expect(() => validateUserId(undefined)).toThrow(TetherServerError);
+
+      try {
+        validateUserId('');
+      } catch (err) {
+        expect((err as TetherServerError).code).toBe(
+          TetherServerErrorCode.InvalidInput,
+        );
+      }
     });
   });
 
@@ -50,19 +63,16 @@ describe('src/server/validate.ts', () => {
     });
 
     it('should reject invalid app IDs (dots, slashes, spaces, empty, traversal)', () => {
+      expect(() => validateAppId('../app')).toThrow(TetherServerError);
       expect(() => validateAppId('../app')).toThrow('Invalid application ID');
-      expect(() => validateAppId('app/123')).toThrow('Invalid application ID');
-      expect(() => validateAppId('my-app.v1')).toThrow(
-        'Invalid application ID',
-      );
-      expect(() => validateAppId('')).toThrow('Invalid application ID');
-      expect(() => validateAppId('a'.repeat(65))).toThrow(
-        'Invalid application ID',
-      );
+      expect(() => validateAppId('app/123')).toThrow(TetherServerError);
+      expect(() => validateAppId('my-app.v1')).toThrow(TetherServerError);
+      expect(() => validateAppId('')).toThrow(TetherServerError);
+      expect(() => validateAppId('a'.repeat(65))).toThrow(TetherServerError);
       // @ts-expect-error Testing non-string handling
-      expect(() => validateAppId(null)).toThrow('Invalid application ID');
+      expect(() => validateAppId(null)).toThrow(TetherServerError);
       // @ts-expect-error Testing non-string handling
-      expect(() => validateAppId(undefined)).toThrow('Invalid application ID');
+      expect(() => validateAppId(undefined)).toThrow(TetherServerError);
     });
   });
 
@@ -76,21 +86,18 @@ describe('src/server/validate.ts', () => {
     });
 
     it('should reject path traversal or invalid table names', () => {
+      expect(() => validateTableName('../etc')).toThrow(TetherServerError);
       expect(() => validateTableName('../etc')).toThrow('Invalid table name');
-      expect(() => validateTableName('table/name')).toThrow(
-        'Invalid table name',
-      );
-      expect(() => validateTableName('table.name')).toThrow(
-        'Invalid table name',
-      );
-      expect(() => validateTableName('')).toThrow('Invalid table name');
+      expect(() => validateTableName('table/name')).toThrow(TetherServerError);
+      expect(() => validateTableName('table.name')).toThrow(TetherServerError);
+      expect(() => validateTableName('')).toThrow(TetherServerError);
       expect(() => validateTableName('a'.repeat(65))).toThrow(
-        'Invalid table name',
+        TetherServerError,
       );
       // @ts-expect-error Testing non-string handling
-      expect(() => validateTableName(null)).toThrow('Invalid table name');
+      expect(() => validateTableName(null)).toThrow(TetherServerError);
       // @ts-expect-error Testing non-string handling
-      expect(() => validateTableName(undefined)).toThrow('Invalid table name');
+      expect(() => validateTableName(undefined)).toThrow(TetherServerError);
     });
   });
 
@@ -104,14 +111,15 @@ describe('src/server/validate.ts', () => {
     });
 
     it('should reject empty or overly long record IDs or non-string inputs', () => {
+      expect(() => validateRecordId('')).toThrow(TetherServerError);
       expect(() => validateRecordId('')).toThrow('Invalid record ID');
       expect(() => validateRecordId('x'.repeat(513))).toThrow(
-        'Invalid record ID',
+        TetherServerError,
       );
       // @ts-expect-error Testing non-string handling
-      expect(() => validateRecordId(null)).toThrow('Invalid record ID');
+      expect(() => validateRecordId(null)).toThrow(TetherServerError);
       // @ts-expect-error Testing non-string handling
-      expect(() => validateRecordId(undefined)).toThrow('Invalid record ID');
+      expect(() => validateRecordId(undefined)).toThrow(TetherServerError);
     });
   });
 
@@ -146,21 +154,22 @@ describe('src/server/validate.ts', () => {
     });
 
     it('should reject usernames outside the min/max length boundaries', () => {
+      expect(() => validateUsername('a')).toThrow(TetherServerError);
       expect(() => validateUsername('a')).toThrow('between 4 and 128');
-      expect(() => validateUsername('abc')).toThrow('between 4 and 128');
-      expect(() => validateUsername('')).toThrow('between 4 and 128');
+      expect(() => validateUsername('abc')).toThrow(TetherServerError);
+      expect(() => validateUsername('')).toThrow(TetherServerError);
       expect(() =>
         validateUsername('a'.repeat(MAX_USERNAME_LENGTH + 1)),
-      ).toThrow('between 4 and 128');
+      ).toThrow(TetherServerError);
     });
 
     it('should reject non-string username inputs', () => {
       // @ts-expect-error Testing runtime non-string validation
-      expect(() => validateUsername(null)).toThrow('must be a string');
+      expect(() => validateUsername(null)).toThrow(TetherServerError);
       // @ts-expect-error Testing runtime non-string validation
-      expect(() => validateUsername(undefined)).toThrow('must be a string');
+      expect(() => validateUsername(undefined)).toThrow(TetherServerError);
       // @ts-expect-error Testing runtime non-string validation
-      expect(() => validateUsername(12345)).toThrow('must be a string');
+      expect(() => validateUsername(12345)).toThrow(TetherServerError);
     });
   });
 
@@ -175,14 +184,15 @@ describe('src/server/validate.ts', () => {
 
     it('should reject empty or null or undefined passwords', () => {
       // @ts-expect-error Testing runtime non-string validation
-      expect(() => validatePassword(null)).toThrow('non-empty string');
+      expect(() => validatePassword(null)).toThrow(TetherServerError);
       // @ts-expect-error Testing runtime non-string validation
-      expect(() => validatePassword(undefined)).toThrow('non-empty string');
+      expect(() => validatePassword(undefined)).toThrow(TetherServerError);
+      expect(() => validatePassword('')).toThrow(TetherServerError);
       expect(() => validatePassword('')).toThrow('between 4 and 512');
-      expect(() => validatePassword('abc')).toThrow('between 4 and 512');
+      expect(() => validatePassword('abc')).toThrow(TetherServerError);
       expect(() =>
         validatePassword('a'.repeat(MAX_PASSWORD_LENGTH + 1)),
-      ).toThrow('between 4 and 512');
+      ).toThrow(TetherServerError);
     });
   });
 
@@ -193,10 +203,13 @@ describe('src/server/validate.ts', () => {
 
     it('should reject invalid identifiers', () => {
       expect(() => validateIdentifier('', 'batchId')).toThrow(
+        TetherServerError,
+      );
+      expect(() => validateIdentifier('', 'batchId')).toThrow(
         'Invalid batchId',
       );
       expect(() => validateIdentifier('b@tch!', 'batchId')).toThrow(
-        'Invalid batchId',
+        TetherServerError,
       );
     });
   });

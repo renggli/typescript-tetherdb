@@ -8,6 +8,7 @@ import {
   type ServerMessage,
   ServerMessageType,
 } from '../shared/types.js';
+import { TetherClientError, TetherClientErrorCode } from './errors.js';
 import type { Storage } from './storage.js';
 
 /**
@@ -63,15 +64,20 @@ export interface SyncOptions {
  * batched outbox queue flushing, acknowledgments, and auto-reconnect backoff.
  */
 export class Sync {
+  /** Remote WebSocket endpoint URL. */
   url?: string;
+  /** Application namespace identifier for partitioning synchronization channels. */
   readonly appId: string;
+  /** Client identifier used for conflict resolution tie-breaking. */
   readonly clientId: string;
+  /** Reactive event registry triggered whenever synchronization status transitions. */
+  readonly onStatusChange = new EventRegistry<SyncStatus>();
+
   private token?: string;
   private storage: Storage;
   private options: SyncOptions;
   private webSocket: WebSocket | null = null;
   private currentStatus: SyncStatus = SyncStatus.Disconnected;
-  readonly onStatusChange = new EventRegistry<SyncStatus>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
@@ -88,10 +94,16 @@ export class Sync {
    */
   constructor(storage: Storage, options: SyncOptions) {
     if (!options.appId) {
-      throw new Error('Missing required appId in SyncOptions.');
+      throw new TetherClientError(
+        TetherClientErrorCode.MissingConfiguration,
+        'Missing required appId in SyncOptions.',
+      );
     }
     if (!options.clientId) {
-      throw new Error('Missing required clientId in SyncOptions.');
+      throw new TetherClientError(
+        TetherClientErrorCode.MissingConfiguration,
+        'Missing required clientId in SyncOptions.',
+      );
     }
     this.url = options.url;
     this.token = options.token;

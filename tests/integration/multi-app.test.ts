@@ -59,8 +59,7 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
 
   it('should isolate data across different applications for the same user', async () => {
     // 1. Register user
-    const db1 = new TetherClient({
-      name: `test_todo_app_${Date.now()}`,
+    const db1 = new TetherClient(`test_todo_app_${Date.now()}`, {
       appId: 'todo-app',
       host: '127.0.0.1',
       port,
@@ -81,8 +80,7 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
     await new Promise((r) => setTimeout(r, 100));
 
     // 2. Open a separate application database for the same user
-    const db2 = new TetherClient({
-      name: `test_notes_app_${Date.now()}`,
+    const db2 = new TetherClient(`test_notes_app_${Date.now()}`, {
       appId: 'notes-app',
       host: '127.0.0.1',
       port,
@@ -134,8 +132,7 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
 
   it('should isolate real-time broadcasts so mutations in appA do not trigger subscribers in appB', async () => {
     // App A client 1
-    const clientA1 = new TetherClient({
-      name: `appA_c1_${Date.now()}`,
+    const clientA1 = new TetherClient(`appA_c1_${Date.now()}`, {
       appId: 'app-alpha',
       host: '127.0.0.1',
       port,
@@ -149,8 +146,7 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
     });
 
     // App A client 2 (same app, same user)
-    const clientA2 = new TetherClient({
-      name: `appA_c2_${Date.now()}`,
+    const clientA2 = new TetherClient(`appA_c2_${Date.now()}`, {
       appId: 'app-alpha',
       host: '127.0.0.1',
       port,
@@ -163,8 +159,7 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
     });
 
     // App B client 1 (different app, same user)
-    const clientB1 = new TetherClient({
-      name: `appB_c1_${Date.now()}`,
+    const clientB1 = new TetherClient(`appB_c1_${Date.now()}`, {
       appId: 'app-beta',
       host: '127.0.0.1',
       port,

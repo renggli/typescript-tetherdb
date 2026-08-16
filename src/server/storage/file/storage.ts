@@ -2,6 +2,7 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { hashPassword, verifySessionToken } from '../../crypto.js';
+import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
 import {
   getUserBucket,
   normalizeUsername,
@@ -141,7 +142,12 @@ export class FileStorage implements Storage {
   ): Promise<void> {
     const users = await this.readUsersFile();
     const existing = users.get(id);
-    if (!existing) throw new Error(`User "${id}" not found.`);
+    if (!existing) {
+      throw new TetherServerError(
+        TetherServerErrorCode.NotFound,
+        'User not found.',
+      );
+    }
     users.set(id, { ...existing, ...update });
     await this.writeUsersFile(users);
   }
@@ -150,7 +156,10 @@ export class FileStorage implements Storage {
     const safeId = validateAppId(id);
     const apps = await this.readAppsFile();
     if (apps.has(safeId)) {
-      throw new Error(`Application "${safeId}" already exists.`);
+      throw new TetherServerError(
+        TetherServerErrorCode.AlreadyExists,
+        'Application already exists.',
+      );
     }
 
     const appDir = path.join(this.baseDir, safeId);
@@ -211,7 +220,10 @@ export class FileStorage implements Storage {
 
     for (const u of users.values()) {
       if (u.username.toLowerCase() === safeUsername.toLowerCase()) {
-        throw new Error(`Username "${safeUsername}" is already registered.`);
+        throw new TetherServerError(
+          TetherServerErrorCode.AlreadyExists,
+          'Username is already registered.',
+        );
       }
     }
 

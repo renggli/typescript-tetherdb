@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { TetherServerError, TetherServerErrorCode } from './errors.js';
 import { type RunningServer, startServer } from './server.js';
 import { FileStorage } from './storage/file/index.js';
 import { MemoryStorage } from './storage/memory/index.js';
@@ -34,7 +35,8 @@ export function createBackend(
     case 'file':
       return new FileStorage({ baseDir: resolvedDir, ...options });
     default:
-      throw new Error(
+      throw new TetherServerError(
+        TetherServerErrorCode.ConfigurationError,
         `Unknown backend type: "${backend}". Expected 'memory', 'file', or 'sqlite'.`,
       );
   }
@@ -114,7 +116,10 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
       backend = 'sqlite';
       if (arg.startsWith('--sqlite=')) dir = arg.slice(9);
     } else if (arg.startsWith('-')) {
-      throw new Error(`Unknown or invalid option: "${arg}".`);
+      throw new TetherServerError(
+        TetherServerErrorCode.ConfigurationError,
+        `Unknown or invalid option: "${arg}".`,
+      );
     } else {
       positionalArgs.push(arg);
     }
@@ -195,20 +200,33 @@ export async function handleAppsCommand(
       console.log(`  • ${app.id} (tables: ${tableList})`);
     }
   } else if (action === 'add') {
-    if (!appId) throw new Error('Missing application ID.');
+    if (!appId) {
+      throw new TetherServerError(
+        TetherServerErrorCode.ConfigurationError,
+        'Missing application ID.',
+      );
+    }
     if (await storage.getApp(appId)) {
       return console.log(`Application already exists: ${appId}`);
     }
     await storage.createApp(appId);
     console.log(`Created application: ${appId}`);
   } else if (action === 'rm') {
-    if (!appId) throw new Error('Missing application ID.');
+    if (!appId) {
+      throw new TetherServerError(
+        TetherServerErrorCode.ConfigurationError,
+        'Missing application ID.',
+      );
+    }
     const app = await storage.getApp(appId);
     if (!app) return console.log(`Application not found: ${appId}`);
     await app.delete();
     console.log(`Deleted application: ${appId}`);
   } else {
-    throw new Error(`Unknown apps action: "${action}".`);
+    throw new TetherServerError(
+      TetherServerErrorCode.ConfigurationError,
+      `Unknown apps action: "${action}".`,
+    );
   }
 }
 
@@ -222,11 +240,26 @@ export async function handleTablesCommand(
   const action = args[1] ?? 'list';
   if (action === 'add' || action === 'rm') {
     const appId = args[2];
-    if (!appId) throw new Error('Missing application ID.');
+    if (!appId) {
+      throw new TetherServerError(
+        TetherServerErrorCode.ConfigurationError,
+        'Missing application ID.',
+      );
+    }
     const tableNames = args.slice(3);
-    if (!tableNames.length) throw new Error('Missing table name.');
+    if (!tableNames.length) {
+      throw new TetherServerError(
+        TetherServerErrorCode.ConfigurationError,
+        'Missing table name.',
+      );
+    }
     const app = await storage.getApp(appId);
-    if (!app) throw new Error(`Application "${appId}" not found.`);
+    if (!app) {
+      throw new TetherServerError(
+        TetherServerErrorCode.NotFound,
+        `Application "${appId}" not found.`,
+      );
+    }
     for (const tableName of tableNames) {
       if (action === 'add') {
         if (await app.getTable(tableName)) {
@@ -253,9 +286,19 @@ export async function handleTablesCommand(
     }
   } else {
     const appId = action === 'list' ? args[2] : action;
-    if (!appId) throw new Error('Missing application ID.');
+    if (!appId) {
+      throw new TetherServerError(
+        TetherServerErrorCode.ConfigurationError,
+        'Missing application ID.',
+      );
+    }
     const app = await storage.getApp(appId);
-    if (!app) throw new Error(`Application "${appId}" not found.`);
+    if (!app) {
+      throw new TetherServerError(
+        TetherServerErrorCode.NotFound,
+        `Application "${appId}" not found.`,
+      );
+    }
     const tables = await app.getTables();
     if (!tables.length) {
       console.log(`No tables found for application "${appId}".`);
@@ -283,18 +326,36 @@ export async function handleUsersCommand(
       );
     }
   } else if (action === 'add') {
-    if (!arg1) throw new Error('Missing username.');
-    if (!arg2) throw new Error('Missing password.');
+    if (!arg1) {
+      throw new TetherServerError(
+        TetherServerErrorCode.ConfigurationError,
+        'Missing username.',
+      );
+    }
+    if (!arg2) {
+      throw new TetherServerError(
+        TetherServerErrorCode.ConfigurationError,
+        'Missing password.',
+      );
+    }
     const user = await storage.createUser(arg1, arg2);
     console.log(`Created user: [${user.id}] ${user.username}`);
   } else if (action === 'rm') {
-    if (!arg1) throw new Error('Missing user ID.');
+    if (!arg1) {
+      throw new TetherServerError(
+        TetherServerErrorCode.ConfigurationError,
+        'Missing user ID.',
+      );
+    }
     const user = await storage.getUser(arg1);
     if (!user) return console.log(`User not found: ${arg1}`);
     await user.delete();
     console.log(`Deleted user: ${arg1}`);
   } else {
-    throw new Error(`Unknown users action: "${action}".`);
+    throw new TetherServerError(
+      TetherServerErrorCode.ConfigurationError,
+      `Unknown users action: "${action}".`,
+    );
   }
 }
 
@@ -327,7 +388,10 @@ export async function runCli(
         await handleUsersCommand(storage, positionalArgs);
         break;
       default:
-        throw new Error(`Unknown command: "${command}".`);
+        throw new TetherServerError(
+          TetherServerErrorCode.ConfigurationError,
+          `Unknown command: "${command}".`,
+        );
     }
     await storage.close?.();
   } catch (err) {

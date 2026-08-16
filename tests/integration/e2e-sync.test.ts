@@ -58,14 +58,16 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
     name: string,
     overrides: Partial<TetherClientOptions> = {},
   ) {
-    return new TetherClient({
-      name: `${name}-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'default',
-      host: '127.0.0.1',
-      port,
-      WebSocketClass: WebSocket,
-      ...overrides,
-    });
+    return new TetherClient(
+      `${name}-${Math.random().toString(36).substring(2, 8)}`,
+      {
+        appId: 'default',
+        host: '127.0.0.1',
+        port,
+        WebSocketClass: WebSocket,
+        ...overrides,
+      },
+    );
   }
 
   it('should sync local changes from Client A to server', async () => {
@@ -170,8 +172,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
 
     // Client B connects and gets initial sync
     const clientBName = `client-b-${Math.random().toString(36).substring(2, 8)}`;
-    let clientB = new TetherClient({
-      name: clientBName,
+    let clientB = new TetherClient(clientBName, {
       appId: 'default',
       host: '127.0.0.1',
       port,
@@ -192,8 +193,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
     await delay(200);
 
     // Client B comes back online with the same IndexedDB database
-    clientB = new TetherClient({
-      name: clientBName,
+    clientB = new TetherClient(clientBName, {
       appId: 'default',
       host: '127.0.0.1',
       port,

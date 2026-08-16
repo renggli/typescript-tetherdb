@@ -5,6 +5,10 @@ import {
   DataMode,
   type StoredAuthSession,
 } from '../../src/client/auth.js';
+import {
+  TetherClientError,
+  TetherClientErrorCode,
+} from '../../src/client/errors.js';
 import { Storage } from '../../src/client/storage.js';
 
 describe('Auth (src/client/auth.ts)', () => {
@@ -48,7 +52,17 @@ describe('Auth (src/client/auth.ts)', () => {
             baseUrl: 'http://localhost',
             storage,
           }),
-      ).toThrow('No fetch implementation available');
+      ).toThrow(TetherClientError);
+      try {
+        new Auth({
+          baseUrl: 'http://localhost',
+          storage,
+        });
+      } catch (err) {
+        expect((err as TetherClientError).code).toBe(
+          TetherClientErrorCode.FetchUnavailable,
+        );
+      }
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -116,13 +130,11 @@ describe('Auth (src/client/auth.ts)', () => {
       });
 
       // @ts-expect-error - testing invalid args
-      await expect(auth.register({})).rejects.toThrow(
-        'Registration requires username and password.',
-      );
+      await expect(auth.register({})).rejects.toThrow(TetherClientError);
       // @ts-expect-error - testing invalid args
-      await expect(auth.register({ username: 'a' })).rejects.toThrow(
-        'Registration requires username and password.',
-      );
+      await expect(auth.register({})).rejects.toMatchObject({
+        code: TetherClientErrorCode.MissingCredentials,
+      });
     });
 
     it('should successfully register a user and update auth state', async () => {

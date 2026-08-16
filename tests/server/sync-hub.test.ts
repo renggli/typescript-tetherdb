@@ -73,7 +73,7 @@ describe('SyncHub (src/server/sync-hub.ts)', () => {
       expect(messages).toHaveLength(1);
       expect(messages[0]).toEqual({
         type: ServerMessageType.AuthError,
-        message: 'Missing or invalid authentication token',
+        message: 'Missing or invalid authentication token.',
       });
       expect(ws.isClosed).toBe(true);
     });
@@ -94,7 +94,7 @@ describe('SyncHub (src/server/sync-hub.ts)', () => {
       expect(messages).toHaveLength(1);
       expect(messages[0]).toEqual({
         type: ServerMessageType.AuthError,
-        message: 'Invalid or expired authentication token',
+        message: 'Invalid or expired authentication token.',
       });
       expect(ws.isClosed).toBe(true);
     });
@@ -115,7 +115,7 @@ describe('SyncHub (src/server/sync-hub.ts)', () => {
       expect(messages).toHaveLength(1);
       expect(messages[0]).toEqual({
         type: ServerMessageType.AuthError,
-        message: 'Missing required field: appId',
+        message: 'Missing required field: appId.',
       });
       expect(ws.isClosed).toBe(true);
     });
@@ -136,7 +136,7 @@ describe('SyncHub (src/server/sync-hub.ts)', () => {
       expect(messages).toHaveLength(1);
       expect(messages[0]).toEqual({
         type: ServerMessageType.AuthError,
-        message: 'Application "non-existent-app" does not exist.',
+        message: 'Application not found.',
       });
       expect(ws.isClosed).toBe(true);
     });
@@ -345,7 +345,7 @@ describe('SyncHub (src/server/sync-hub.ts)', () => {
       expect(messages).toHaveLength(1);
       expect(messages[0]).toEqual({
         type: ServerMessageType.AuthError,
-        message: 'Not authenticated',
+        message: 'Not authenticated.',
       });
     });
   });
@@ -367,7 +367,7 @@ describe('SyncHub (src/server/sync-hub.ts)', () => {
       expect(messages).toHaveLength(1);
       expect(messages[0]).toEqual({
         type: ServerMessageType.AuthError,
-        message: 'Not authenticated',
+        message: 'Not authenticated.',
       });
     });
 

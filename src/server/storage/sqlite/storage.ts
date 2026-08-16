@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import * as path from 'node:path';
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
 import { hashPassword, verifySessionToken } from '../../crypto.js';
+import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
 import {
   getUserBucket,
   normalizeUsername,
@@ -361,7 +362,10 @@ export class SqliteStorage implements Storage {
     const appsDb = this.getAppsDb();
     const existing = appsDb.stmtFindApp.get(safeId);
     if (existing) {
-      throw new Error(`Application "${safeId}" already exists.`);
+      throw new TetherServerError(
+        TetherServerErrorCode.AlreadyExists,
+        'Application already exists.',
+      );
     }
 
     appsDb.stmtInsertApp.run(safeId, Date.now());
@@ -401,7 +405,10 @@ export class SqliteStorage implements Storage {
 
     const existing = usersDb.stmtFindByUsername.get(safeUsername);
     if (existing) {
-      throw new Error(`Username "${safeUsername}" is already registered.`);
+      throw new TetherServerError(
+        TetherServerErrorCode.AlreadyExists,
+        'Username is already registered.',
+      );
     }
 
     const userId = crypto.randomUUID();

@@ -16,6 +16,10 @@ export {
   type TetherClientOptions,
 } from './client.js';
 export {
+  TetherClientError,
+  TetherClientErrorCode,
+} from './errors.js';
+export {
   SyncStatus,
   type WebSocketConstructor,
 } from './sync.js';

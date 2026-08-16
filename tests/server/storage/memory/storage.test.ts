@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import {
+  TetherServerError,
+  TetherServerErrorCode,
+} from '../../../../src/server/errors.js';
 import { MemoryStorage } from '../../../../src/server/storage/memory/index.js';
 import {
   type ChangeRecord,
@@ -42,8 +46,11 @@ describe('src/server/storage/memory/ (MemoryStorage)', () => {
     await app.applyChanges(user, [c1, c2]);
 
     await expect(app.applyChanges(user, [c3])).rejects.toThrow(
-      'maximum capacity of 2 records',
+      TetherServerError,
     );
+    await expect(app.applyChanges(user, [c3])).rejects.toMatchObject({
+      code: TetherServerErrorCode.LimitExceeded,
+    });
   });
 
   it('should enforce maxRecordSizeBytes limit in memory', async () => {
@@ -66,7 +73,9 @@ describe('src/server/storage/memory/ (MemoryStorage)', () => {
           clientId: 'c1',
         },
       ]),
-    ).rejects.toThrow('exceeds maximum allowed size');
+    ).rejects.toMatchObject({
+      code: TetherServerErrorCode.LimitExceeded,
+    });
   });
 
   it('should delete tables and cascade state cleanup in memory', async () => {
@@ -86,9 +95,8 @@ describe('src/server/storage/memory/ (MemoryStorage)', () => {
       },
     ]);
 
-    expect(await table.getRecord(user, '1')).toBeDefined();
-    await table.delete();
-
+    expect(await table.getAllRecords(user)).toHaveLength(1);
+    app.deleteTable('temp_table');
     expect(await app.getTable('temp_table')).toBeUndefined();
   });
 });

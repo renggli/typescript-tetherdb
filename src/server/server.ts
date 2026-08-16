@@ -1,6 +1,7 @@
 import * as http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { normalizeBasePath } from '../shared/index.js';
+import { TetherServerError, TetherServerErrorCode } from './errors.js';
 import type { Storage, UserStorage } from './storage/index.js';
 import { MemoryStorage } from './storage/memory/index.js';
 import { SyncHub } from './sync-hub.js';
@@ -50,11 +51,17 @@ export interface RunningServer {
  */
 
 export class TetherServer {
+  /** Underlying storage engine for users, apps, and tables. */
   readonly storage: Storage;
+  /** Real-time synchronization connection and broadcast hub. */
   readonly hub: SyncHub;
+  /** Base path for HTTP REST endpoints. */
   readonly basePath: string;
+  /** Path for WebSocket upgrade requests. */
   readonly webSocketPath: string;
+  /** Active Node.js HTTP server instance, or `null` if not listening. */
   httpServer: http.Server | null = null;
+  /** Active WebSocketServer instance, or `null` if not listening. */
   webSocketServer: WebSocketServer | null = null;
 
   /**
@@ -216,8 +223,9 @@ export class TetherServer {
 
       return false;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Internal server error';
-      this.sendJson(res, 500, { error: msg });
+      const status = getHttpStatusForError(err);
+      const msg = err instanceof Error ? err.message : 'Internal server error.';
+      this.sendJson(res, status, { error: msg });
       return true;
     }
   }
@@ -242,14 +250,24 @@ export class TetherServer {
       req.on('data', (chunk) => {
         body += chunk;
         if (body.length > 1024 * 1024) {
-          reject(new Error('Payload too large'));
+          reject(
+            new TetherServerError(
+              TetherServerErrorCode.LimitExceeded,
+              'Payload exceeds maximum allowed size.',
+            ),
+          );
         }
       });
       req.on('end', () => {
         try {
           resolve(body ? JSON.parse(body) : {});
         } catch {
-          reject(new Error('Invalid JSON'));
+          reject(
+            new TetherServerError(
+              TetherServerErrorCode.InvalidInput,
+              'Invalid JSON payload.',
+            ),
+          );
         }
       });
       req.on('error', reject);
@@ -292,8 +310,9 @@ export class TetherServer {
         token,
       });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Registration error';
-      this.sendJson(res, 409, { error: msg });
+      const status = getHttpStatusForError(err);
+      const msg = err instanceof Error ? err.message : 'Registration error.';
+      this.sendJson(res, status, { error: msg });
     }
   }
 
@@ -338,6 +357,28 @@ export class TetherServer {
       token,
     });
   }
+}
+
+function getHttpStatusForError(err: unknown): number {
+  if (err instanceof TetherServerError) {
+    switch (err.code) {
+      case TetherServerErrorCode.InvalidInput:
+      case TetherServerErrorCode.ConfigurationError:
+        return 400;
+      case TetherServerErrorCode.Unauthorized:
+      case TetherServerErrorCode.AuthenticationFailed:
+        return 401;
+      case TetherServerErrorCode.NotFound:
+        return 404;
+      case TetherServerErrorCode.AlreadyExists:
+        return 409;
+      case TetherServerErrorCode.LimitExceeded:
+        return 413;
+      case TetherServerErrorCode.InternalError:
+        return 500;
+    }
+  }
+  return 500;
 }
 
 /**

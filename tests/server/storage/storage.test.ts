@@ -3,6 +3,10 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  TetherServerError,
+  TetherServerErrorCode,
+} from '../../../src/server/errors.js';
+import {
   FileStorage,
   MemoryStorage,
   SqliteStorage,
@@ -173,7 +177,9 @@ describe('Storage (src/server/storage/)', () => {
             clientId: 'client-1',
           },
         ]),
-      ).rejects.toThrow('does not exist in app');
+      ).rejects.toMatchObject({
+        code: TetherServerErrorCode.NotFound,
+      });
 
       // Nonexistent app
       expect(await strictStorage.getApp('nonexistent_app')).toBeUndefined();
@@ -325,8 +331,11 @@ function runStorageTestSuite(createStorage: () => Storage) {
     await storage.createApp('unique_app');
 
     await expect(storage.createApp('unique_app')).rejects.toThrow(
-      /already exists/i,
+      TetherServerError,
     );
+    await expect(storage.createApp('unique_app')).rejects.toMatchObject({
+      code: TetherServerErrorCode.AlreadyExists,
+    });
   });
 
   it('should throw an error when createTable is called with an existing table name', async () => {
@@ -334,8 +343,11 @@ function runStorageTestSuite(createStorage: () => Storage) {
     await app.createTable('duplicate_table');
 
     await expect(app.createTable('duplicate_table')).rejects.toThrow(
-      /already exists/i,
+      TetherServerError,
     );
+    await expect(app.createTable('duplicate_table')).rejects.toMatchObject({
+      code: TetherServerErrorCode.AlreadyExists,
+    });
   });
 
   it('should throw an error when createUser is called with an existing username', async () => {
@@ -343,11 +355,21 @@ function runStorageTestSuite(createStorage: () => Storage) {
 
     await expect(
       storage.createUser('duplicate_user', 'pass_new'),
-    ).rejects.toThrow(/already registered/i);
+    ).rejects.toThrow(TetherServerError);
+    await expect(
+      storage.createUser('duplicate_user', 'pass_new'),
+    ).rejects.toMatchObject({
+      code: TetherServerErrorCode.AlreadyExists,
+    });
 
     await expect(
       storage.createUser('  DUPLICATE_USER  ', 'pass_new'),
-    ).rejects.toThrow(/already registered/i);
+    ).rejects.toThrow(TetherServerError);
+    await expect(
+      storage.createUser('  DUPLICATE_USER  ', 'pass_new'),
+    ).rejects.toMatchObject({
+      code: TetherServerErrorCode.AlreadyExists,
+    });
   });
 
   it('should delete a user and cascade their records across multiple apps', async () => {

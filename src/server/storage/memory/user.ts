@@ -4,6 +4,7 @@ import {
   verifyPasswordHash,
   verifySessionToken,
 } from '../../crypto.js';
+import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
 import { normalizePassword, validatePassword } from '../../validate.js';
 import type { UserStorage } from '../user.js';
 import type { MemoryStorage } from './storage.js';
@@ -33,7 +34,12 @@ export class UserMemoryStorage implements UserStorage {
 
   private getUserData(): MemoryUserData {
     const data = this.storage.rawUsers.get(this.id);
-    if (!data) throw new Error(`User "${this.id}" not found.`);
+    if (!data) {
+      throw new TetherServerError(
+        TetherServerErrorCode.NotFound,
+        'User not found.',
+      );
+    }
     return data;
   }
 

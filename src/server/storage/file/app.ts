@@ -6,6 +6,7 @@ import {
   OperationType,
   type StoredRecord,
 } from '../../../shared/types.js';
+import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
 import {
   calculateByteSize,
   getUserBucket,
@@ -192,8 +193,9 @@ export class AppFileStorage implements AppStorage {
     const safeName = validateTableName(name);
     const manifest = await this.readManifest();
     if (manifest.tables.includes(safeName)) {
-      throw new Error(
-        `Table "${safeName}" already exists in app "${this.id}".`,
+      throw new TetherServerError(
+        TetherServerErrorCode.AlreadyExists,
+        'Table already exists in this application.',
       );
     }
     manifest.tables.push(safeName);
@@ -242,8 +244,9 @@ export class AppFileStorage implements AppStorage {
         const recordId = validateRecordId(change.id);
 
         if (!registeredTables.has(tableName)) {
-          throw new Error(
-            `Table "${tableName}" does not exist in app "${this.id}".`,
+          throw new TetherServerError(
+            TetherServerErrorCode.NotFound,
+            'Table not found.',
           );
         }
 
@@ -258,15 +261,17 @@ export class AppFileStorage implements AppStorage {
           !tableRecords.has(recordId) &&
           tableRecords.size >= maxRecords
         ) {
-          throw new Error(
-            `Table "${tableName}" has reached the maximum capacity of ${maxRecords} records for user "${safeUserId}".`,
+          throw new TetherServerError(
+            TetherServerErrorCode.LimitExceeded,
+            'Table record limit reached.',
           );
         }
 
         const payloadBytes = calculateByteSize(change.data);
         if (payloadBytes > maxRecordSize) {
-          throw new Error(
-            `Record payload size (${payloadBytes} bytes) exceeds maximum allowed size of ${maxRecordSize} bytes for record "${recordId}" in table "${tableName}".`,
+          throw new TetherServerError(
+            TetherServerErrorCode.LimitExceeded,
+            'Record payload exceeds maximum allowed size.',
           );
         }
 

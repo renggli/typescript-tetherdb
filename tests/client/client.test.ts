@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AuthStatus, DataMode, TetherClient } from '../../src/client/client.js';
 import {
+  AuthStatus,
+  DataMode,
   SyncStatus,
-  type WebSocketConstructor,
-} from '../../src/client/sync.js';
+  TetherClient,
+} from '../../src/client/index.js';
+import type { WebSocketConstructor } from '../../src/client/sync.js';
 
 class MockWebSocket {
   static instances: MockWebSocket[] = [];
@@ -38,21 +40,11 @@ describe('TetherClient Facade (src/client/client.ts)', () => {
     MockWebSocket.instances.length = 0;
   });
 
-  describe('Constructor & Validation', () => {
-    it('should throw when name is missing or empty', () => {
-      expect(
-        () =>
-          new TetherClient({
-            // @ts-expect-error - testing missing name
-            name: '',
-          }),
-      ).toThrow('Missing required name in TetherClient options.');
-    });
-
+  describe('Constructor & State', () => {
     it('should initialize with default statuses and expose getters', () => {
-      const client = new TetherClient({
-        name: `test-db-${Math.random().toString(36).substring(2, 8)}`,
-      });
+      const client = new TetherClient(
+        `test-db-${Math.random().toString(36).substring(2, 8)}`,
+      );
       clientsToClose.push(client);
 
       expect(client.authStatus).toBe(AuthStatus.SignedOut);
@@ -71,14 +63,16 @@ describe('TetherClient Facade (src/client/client.ts)', () => {
 
   describe('URL & Host Resolution', () => {
     it('should resolve Node.js host, port, basePath, and webSocketPath correctly', () => {
-      const client = new TetherClient({
-        name: `url-test-${Math.random().toString(36).substring(2, 8)}`,
-        host: 'api.example.com',
-        port: 8443,
-        isSecure: true,
-        basePath: '/api/v1/',
-        webSocketPath: '/custom/sync',
-      });
+      const client = new TetherClient(
+        `url-test-${Math.random().toString(36).substring(2, 8)}`,
+        {
+          host: 'api.example.com',
+          port: 8443,
+          isSecure: true,
+          basePath: '/api/v1/',
+          webSocketPath: '/custom/sync',
+        },
+      );
       clientsToClose.push(client);
 
       // @ts-expect-error - inspecting internal auth
@@ -88,11 +82,13 @@ describe('TetherClient Facade (src/client/client.ts)', () => {
     });
 
     it('should handle host already containing port without duplicating port', () => {
-      const client = new TetherClient({
-        name: `port-test-${Math.random().toString(36).substring(2, 8)}`,
-        host: '127.0.0.1:9090',
-        port: 9090,
-      });
+      const client = new TetherClient(
+        `port-test-${Math.random().toString(36).substring(2, 8)}`,
+        {
+          host: '127.0.0.1:9090',
+          port: 9090,
+        },
+      );
       clientsToClose.push(client);
 
       // @ts-expect-error - inspecting internal auth
@@ -100,9 +96,9 @@ describe('TetherClient Facade (src/client/client.ts)', () => {
     });
 
     it('should handle default local-only client when host is omitted', () => {
-      const client = new TetherClient({
-        name: `local-only-${Math.random().toString(36).substring(2, 8)}`,
-      });
+      const client = new TetherClient(
+        `local-only-${Math.random().toString(36).substring(2, 8)}`,
+      );
       clientsToClose.push(client);
 
       // @ts-expect-error - inspecting internal auth
@@ -123,9 +119,9 @@ describe('TetherClient Facade (src/client/client.ts)', () => {
       };
 
       try {
-        const client = new TetherClient({
-          name: `browser-inferred-${Math.random().toString(36).substring(2, 8)}`,
-        });
+        const client = new TetherClient(
+          `browser-inferred-${Math.random().toString(36).substring(2, 8)}`,
+        );
         clientsToClose.push(client);
 
         // @ts-expect-error - inspecting internal auth
@@ -140,9 +136,9 @@ describe('TetherClient Facade (src/client/client.ts)', () => {
 
   describe('Storage & Table Proxying', () => {
     it('should provide typed Table instances', async () => {
-      const client = new TetherClient({
-        name: `table-test-${Math.random().toString(36).substring(2, 8)}`,
-      });
+      const client = new TetherClient(
+        `table-test-${Math.random().toString(36).substring(2, 8)}`,
+      );
       clientsToClose.push(client);
 
       const table = client.table<{ title: string }>('todos');
@@ -154,9 +150,9 @@ describe('TetherClient Facade (src/client/client.ts)', () => {
     });
 
     it('should clear all data across tables and metadata on clear()', async () => {
-      const client = new TetherClient({
-        name: `clear-test-${Math.random().toString(36).substring(2, 8)}`,
-      });
+      const client = new TetherClient(
+        `clear-test-${Math.random().toString(36).substring(2, 8)}`,
+      );
       clientsToClose.push(client);
 
       const table = client.table<{ text: string }>('notes');
@@ -170,9 +166,9 @@ describe('TetherClient Facade (src/client/client.ts)', () => {
 
   describe('Auth & Sync Event Coordination', () => {
     it('should trigger sync.schedulePush when local mutations occur', async () => {
-      const client = new TetherClient({
-        name: `sync-push-test-${Math.random().toString(36).substring(2, 8)}`,
-      });
+      const client = new TetherClient(
+        `sync-push-test-${Math.random().toString(36).substring(2, 8)}`,
+      );
       clientsToClose.push(client);
 
       // @ts-expect-error - inspecting internal sync
@@ -194,13 +190,15 @@ describe('TetherClient Facade (src/client/client.ts)', () => {
         }),
       });
 
-      const client = new TetherClient({
-        name: `auth-sync-test-${Math.random().toString(36).substring(2, 8)}`,
-        host: '127.0.0.1',
-        port: 8080,
-        fetch: mockFetch as unknown as typeof fetch,
-        WebSocketClass: MockWebSocket as unknown as WebSocketConstructor,
-      });
+      const client = new TetherClient(
+        `auth-sync-test-${Math.random().toString(36).substring(2, 8)}`,
+        {
+          host: '127.0.0.1',
+          port: 8080,
+          fetch: mockFetch as unknown as typeof fetch,
+          WebSocketClass: MockWebSocket as unknown as WebSocketConstructor,
+        },
+      );
       clientsToClose.push(client);
 
       // @ts-expect-error - inspecting internal sync
@@ -229,9 +227,9 @@ describe('TetherClient Facade (src/client/client.ts)', () => {
     });
 
     it('should forward sync status change events to onSyncStatusChange', () => {
-      const client = new TetherClient({
-        name: `sync-status-test-${Math.random().toString(36).substring(2, 8)}`,
-      });
+      const client = new TetherClient(
+        `sync-status-test-${Math.random().toString(36).substring(2, 8)}`,
+      );
       clientsToClose.push(client);
 
       const syncStatuses: SyncStatus[] = [];
@@ -249,9 +247,9 @@ describe('TetherClient Facade (src/client/client.ts)', () => {
     });
 
     it('should delegate login, register, and logout to Auth', async () => {
-      const client = new TetherClient({
-        name: `auth-delegate-${Math.random().toString(36).substring(2, 8)}`,
-      });
+      const client = new TetherClient(
+        `auth-delegate-${Math.random().toString(36).substring(2, 8)}`,
+      );
       clientsToClose.push(client);
 
       // @ts-expect-error - inspecting internal auth
@@ -279,9 +277,9 @@ describe('TetherClient Facade (src/client/client.ts)', () => {
 
   describe('close()', () => {
     it('should tear down sync and close storage connection', async () => {
-      const client = new TetherClient({
-        name: `close-test-${Math.random().toString(36).substring(2, 8)}`,
-      });
+      const client = new TetherClient(
+        `close-test-${Math.random().toString(36).substring(2, 8)}`,
+      );
 
       // @ts-expect-error - inspecting internal sync
       const destroySpy = vi.spyOn(client.sync, 'destroy');

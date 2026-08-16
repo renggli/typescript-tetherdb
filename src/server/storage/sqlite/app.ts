@@ -1,5 +1,6 @@
 import { shouldOverwrite } from '../../../shared/clock.js';
 import { type ChangeRecord, OperationType } from '../../../shared/types.js';
+import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
 import {
   calculateByteSize,
   validateRecordId,
@@ -75,8 +76,9 @@ export class AppSqliteStorage implements AppStorage {
     const appsDb = this.storage.getAppsDb();
     const existing = appsDb.stmtFindTable.get(this.id, safeName);
     if (existing) {
-      throw new Error(
-        `Table "${safeName}" already exists in app "${this.id}".`,
+      throw new TetherServerError(
+        TetherServerErrorCode.AlreadyExists,
+        'Table already exists in this application.',
       );
     }
     appsDb.stmtInsertTable.run(this.id, safeName, Date.now());
@@ -124,8 +126,9 @@ export class AppSqliteStorage implements AppStorage {
 
         const tableExists = appsDb.stmtFindTable.get(this.id, tableName);
         if (!tableExists) {
-          throw new Error(
-            `Table "${tableName}" does not exist in app "${this.id}".`,
+          throw new TetherServerError(
+            TetherServerErrorCode.NotFound,
+            'Table not found.',
           );
         }
 
@@ -140,16 +143,18 @@ export class AppSqliteStorage implements AppStorage {
             | undefined;
           const tableCount = countRow?.count ?? 0;
           if (tableCount >= maxRecords) {
-            throw new Error(
-              `Table "${tableName}" has reached the maximum capacity of ${maxRecords} records for user "${safeUserId}".`,
+            throw new TetherServerError(
+              TetherServerErrorCode.LimitExceeded,
+              'Table record limit reached.',
             );
           }
         }
 
         const payloadBytes = calculateByteSize(change.data);
         if (payloadBytes > maxRecordSize) {
-          throw new Error(
-            `Record payload size (${payloadBytes} bytes) exceeds maximum allowed size of ${maxRecordSize} bytes for record "${recordId}" in table "${tableName}".`,
+          throw new TetherServerError(
+            TetherServerErrorCode.LimitExceeded,
+            'Record payload exceeds maximum allowed size.',
           );
         }
 

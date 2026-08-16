@@ -6,6 +6,7 @@ import {
   type ServerMessage,
   ServerMessageType,
 } from '../shared/types.js';
+import { TetherServerError, TetherServerErrorCode } from './errors.js';
 import type { Storage } from './storage/storage.js';
 import type { UserStorage } from './storage/user.js';
 import {
@@ -61,14 +62,14 @@ export class SyncHub {
             await this.handleMessage(webSocket, msg);
           } catch (err) {
             const errorMsg =
-              err instanceof Error ? err.message : 'Invalid message format';
+              err instanceof Error ? err.message : 'Invalid message format.';
             console.error(
               `[TetherServer] WebSocket message error${userContext}:`,
               errorMsg,
             );
             this.send(webSocket, {
               type: ServerMessageType.Error,
-              message: `${errorMsg}${userContext}`,
+              message: errorMsg,
             });
           }
         })
@@ -118,8 +119,9 @@ export class SyncHub {
     msg: ClientMessage,
   ): Promise<void> {
     if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string') {
-      throw new Error(
-        'Invalid message format: Message must be an object with a type string.',
+      throw new TetherServerError(
+        TetherServerErrorCode.InvalidInput,
+        'Invalid message format.',
       );
     }
 
@@ -128,7 +130,7 @@ export class SyncHub {
         if (typeof msg.token !== 'string' || !msg.token) {
           this.send(webSocket, {
             type: ServerMessageType.AuthError,
-            message: 'Missing or invalid authentication token',
+            message: 'Missing or invalid authentication token.',
           });
           webSocket.close();
           return;
@@ -138,7 +140,7 @@ export class SyncHub {
         if (!user) {
           this.send(webSocket, {
             type: ServerMessageType.AuthError,
-            message: 'Invalid or expired authentication token',
+            message: 'Invalid or expired authentication token.',
           });
           webSocket.close();
           return;
@@ -147,7 +149,7 @@ export class SyncHub {
         if (typeof msg.appId !== 'string' || !msg.appId) {
           this.send(webSocket, {
             type: ServerMessageType.AuthError,
-            message: 'Missing required field: appId',
+            message: 'Missing required field: appId.',
           });
           webSocket.close();
           return;
@@ -158,7 +160,7 @@ export class SyncHub {
         if (!app) {
           this.send(webSocket, {
             type: ServerMessageType.AuthError,
-            message: `Application "${appId}" does not exist.`,
+            message: 'Application not found.',
           });
           webSocket.close();
           return;
@@ -203,7 +205,7 @@ export class SyncHub {
         if (!client) {
           this.send(webSocket, {
             type: ServerMessageType.AuthError,
-            message: 'Not authenticated',
+            message: 'Not authenticated.',
           });
           return;
         }
@@ -216,14 +218,15 @@ export class SyncHub {
         if (!client) {
           this.send(webSocket, {
             type: ServerMessageType.AuthError,
-            message: 'Not authenticated',
+            message: 'Not authenticated.',
           });
           return;
         }
 
         if (!Array.isArray(msg.changes)) {
-          throw new Error(
-            `Invalid change batch: changes must be an array for user "${client.user.id}" in app "${client.appId}".`,
+          throw new TetherServerError(
+            TetherServerErrorCode.InvalidInput,
+            'Invalid change batch: changes must be an array.',
           );
         }
 
@@ -231,8 +234,9 @@ export class SyncHub {
           this.storage.options?.maxBatchSizeBytes ?? 5 * 1024 * 1024;
         const batchBytes = calculateByteSize(msg.changes);
         if (batchBytes > maxBatchSize) {
-          throw new Error(
-            `Change batch size (${batchBytes} bytes) exceeds maximum allowed size of ${maxBatchSize} bytes for user "${client.user.id}".`,
+          throw new TetherServerError(
+            TetherServerErrorCode.LimitExceeded,
+            'Change batch exceeds maximum allowed size.',
           );
         }
 
@@ -240,7 +244,10 @@ export class SyncHub {
 
         const app = await this.storage.getApp(client.appId);
         if (!app) {
-          throw new Error(`Application "${client.appId}" does not exist.`);
+          throw new TetherServerError(
+            TetherServerErrorCode.NotFound,
+            'Application not found.',
+          );
         }
 
         const { applied, newSeq } = await app.applyChanges(
@@ -280,8 +287,9 @@ export class SyncHub {
       }
 
       default: {
-        throw new Error(
-          `Unsupported message type: "${(msg as { type: string }).type}"`,
+        throw new TetherServerError(
+          TetherServerErrorCode.InvalidInput,
+          'Unsupported message type.',
         );
       }
     }
@@ -293,7 +301,10 @@ export class SyncHub {
   ): Promise<void> {
     const app = await this.storage.getApp(client.appId);
     if (!app) {
-      throw new Error(`Application "${client.appId}" not found.`);
+      throw new TetherServerError(
+        TetherServerErrorCode.NotFound,
+        'Application not found.',
+      );
     }
 
     const seq = lastSyncSeq ?? 0;

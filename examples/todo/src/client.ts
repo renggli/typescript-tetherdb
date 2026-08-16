@@ -41,7 +41,7 @@ enum AuthMode {
 }
 
 // Database & UI State
-const db = new TetherClient({ name: 'todo-example' });
+const db = new TetherClient('todo-example');
 const todosTable: Table<TodoItem> = db.table<TodoItem>('todos');
 
 let currentFilter: FilterMode = FilterMode.All;

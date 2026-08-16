@@ -23,9 +23,7 @@ export {
  * Options for configuring a TetherClient database instance.
  */
 export interface TetherClientOptions {
-  /** Name of the local IndexedDB database. */
-  name: string;
-  /** Application namespace identifier (defaults to `name`). */
+  /** Application namespace identifier (defaults to database name). */
   appId?: string;
   /** Remote server host or hostname (e.g. 'localhost' or 'api.example.com'). Defaults to current browser hostname. */
   host?: string;
@@ -54,7 +52,9 @@ export interface TetherClientOptions {
  * local-first storage, automatic auth lifecycle, and background synchronization.
  */
 export class TetherClient {
+  /** Reactive event registry triggered whenever the authentication status changes. */
   readonly onAuthStatusChange = new EventRegistry<AuthStatus>();
+  /** Reactive event registry triggered whenever the synchronization status changes. */
   readonly onSyncStatusChange = new EventRegistry<SyncStatus>();
   private readonly storage: Storage;
   private readonly auth: Auth;
@@ -63,15 +63,13 @@ export class TetherClient {
   /**
    * Initializes a new TetherClient instance and wires reactive auth & sync coordination.
    *
-   * @param options - Configuration options for the local database and server connection.
+   * @param name - Name of the local IndexedDB database.
+   * @param options - Configuration options for the server connection and sync behavior.
    */
-  constructor(options: TetherClientOptions) {
-    if (!options.name) {
-      throw new Error('Missing required name in TetherClient options.');
-    }
-    this.storage = this.createStorage(options);
+  constructor(name: string, options: TetherClientOptions = {}) {
+    this.storage = this.createStorage(name);
     this.auth = this.createAuth(options, this.storage);
-    this.sync = this.createSync(options, this.storage);
+    this.sync = this.createSync(name, options, this.storage);
 
     // Push local changes reactively.
     this.storage.onLocalChange.register(() => {
@@ -179,8 +177,8 @@ export class TetherClient {
 
   // -- Private Helpers ------------------------------------------------------
 
-  private createStorage(options: TetherClientOptions): Storage {
-    return new Storage(options.name);
+  private createStorage(name: string): Storage {
+    return new Storage(name);
   }
 
   private createAuth(options: TetherClientOptions, storage: Storage): Auth {
@@ -191,10 +189,14 @@ export class TetherClient {
     });
   }
 
-  private createSync(options: TetherClientOptions, storage: Storage): Sync {
+  private createSync(
+    name: string,
+    options: TetherClientOptions,
+    storage: Storage,
+  ): Sync {
     return new Sync(storage, {
       url: this.resolveWebSocketUrl(options),
-      appId: options.appId ?? options.name,
+      appId: options.appId ?? name,
       clientId: storage.clientId,
       WebSocketClass: options.WebSocketClass,
       reconnectIntervalMs: options.reconnectIntervalMs,

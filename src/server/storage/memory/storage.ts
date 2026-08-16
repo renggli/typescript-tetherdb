@@ -1,5 +1,6 @@
 import * as crypto from 'node:crypto';
 import { hashPassword, verifySessionToken } from '../../crypto.js';
+import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
 import {
   normalizeUsername,
   validateAppId,
@@ -93,7 +94,10 @@ export class MemoryStorage implements Storage {
   async createApp(id: string): Promise<AppStorage> {
     const safeId = validateAppId(id);
     if (this.apps.has(safeId)) {
-      throw new Error(`Application "${safeId}" already exists.`);
+      throw new TetherServerError(
+        TetherServerErrorCode.AlreadyExists,
+        'Application already exists.',
+      );
     }
     const app = new AppMemoryStorage(safeId, this);
     this.apps.set(safeId, app);
@@ -113,7 +117,10 @@ export class MemoryStorage implements Storage {
     const safeUsername = validateUsername(username);
     const validPassword = validatePassword(password);
     if (this.usersByUsername.has(safeUsername)) {
-      throw new Error(`Username "${safeUsername}" is already registered.`);
+      throw new TetherServerError(
+        TetherServerErrorCode.AlreadyExists,
+        'Username is already registered.',
+      );
     }
 
     const userId = crypto.randomUUID();

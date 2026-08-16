@@ -46,8 +46,11 @@ export interface LocalMutationItem<T = unknown> {
  * Coordinates user table stores, pending outbox changelogs, and sync metadata.
  */
 export class Storage {
+  /** Name of the local IndexedDB database. */
   readonly name: string;
+  /** Unique client instance identifier used for monotonic logical clock tie-breaking. */
   readonly clientId: string;
+  /** Reactive event registry triggered when mutations are committed to the local database. */
   readonly onLocalChange = new EventRegistry<void>();
   private databasePromise: Promise<IDBDatabase> | null = null;
   private tables: Map<string, ITable> = new Map();

@@ -4,6 +4,7 @@ import {
   OperationType,
   type StoredRecord,
 } from '../../../shared/types.js';
+import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
 import {
   calculateByteSize,
   validateRecordId,
@@ -31,8 +32,9 @@ export class AppMemoryStorage implements AppStorage {
   async createTable(name: string): Promise<TableStorage> {
     const safeName = validateTableName(name);
     if (this.tables.has(safeName)) {
-      throw new Error(
-        `Table "${safeName}" already exists in app "${this.id}".`,
+      throw new TetherServerError(
+        TetherServerErrorCode.AlreadyExists,
+        'Table already exists in this application.',
       );
     }
     const table = new TableMemoryStorage(safeName, this, this.storage);
@@ -65,8 +67,9 @@ export class AppMemoryStorage implements AppStorage {
       const recordId = validateRecordId(change.id);
 
       if (!this.tables.has(tableName)) {
-        throw new Error(
-          `Table "${tableName}" does not exist in app "${this.id}".`,
+        throw new TetherServerError(
+          TetherServerErrorCode.NotFound,
+          'Table not found.',
         );
       }
 
@@ -81,15 +84,17 @@ export class AppMemoryStorage implements AppStorage {
         !tableMap.has(recordId) &&
         tableMap.size >= maxRecords
       ) {
-        throw new Error(
-          `Table "${tableName}" has reached the maximum capacity of ${maxRecords} records for user "${user.id}".`,
+        throw new TetherServerError(
+          TetherServerErrorCode.LimitExceeded,
+          'Table record limit reached.',
         );
       }
 
       const payloadBytes = calculateByteSize(change.data);
       if (payloadBytes > maxRecordSize) {
-        throw new Error(
-          `Record payload size (${payloadBytes} bytes) exceeds maximum allowed size of ${maxRecordSize} bytes for record "${recordId}" in table "${tableName}".`,
+        throw new TetherServerError(
+          TetherServerErrorCode.LimitExceeded,
+          'Record payload exceeds maximum allowed size.',
         );
       }
 

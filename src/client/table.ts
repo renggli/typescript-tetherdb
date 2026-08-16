@@ -67,9 +67,10 @@ export interface ITable {
  * @typeParam T - The data type of records stored in this table.
  */
 export class Table<T = unknown> implements ITable {
+  /** Reactive event registry triggered when records in this table are created, updated, or deleted. */
+  readonly onChange = new EventRegistry<TableChangeEvent<T>[]>();
   private tableName: string;
   private storage: Storage;
-  readonly onChange = new EventRegistry<TableChangeEvent<T>[]>();
 
   /**
    * Creates a new Table instance.

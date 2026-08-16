@@ -1,4 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  TetherClientError,
+  TetherClientErrorCode,
+} from '../../src/client/errors.js';
 import { Storage } from '../../src/client/storage.js';
 import {
   Sync,
@@ -97,7 +101,18 @@ describe('Sync (src/client/sync.ts)', () => {
             appId: '',
             clientId: 'client-1',
           }),
-      ).toThrow('Missing required appId in SyncOptions.');
+      ).toThrow(TetherClientError);
+      try {
+        new Sync(storage, {
+          // @ts-expect-error - testing missing appId
+          appId: '',
+          clientId: 'client-1',
+        });
+      } catch (err) {
+        expect((err as TetherClientError).code).toBe(
+          TetherClientErrorCode.MissingConfiguration,
+        );
+      }
     });
 
     it('should throw error when clientId is missing', () => {
@@ -108,7 +123,18 @@ describe('Sync (src/client/sync.ts)', () => {
             // @ts-expect-error - testing missing clientId
             clientId: '',
           }),
-      ).toThrow('Missing required clientId in SyncOptions.');
+      ).toThrow(TetherClientError);
+      try {
+        new Sync(storage, {
+          appId: 'app-1',
+          // @ts-expect-error - testing missing clientId
+          clientId: '',
+        });
+      } catch (err) {
+        expect((err as TetherClientError).code).toBe(
+          TetherClientErrorCode.MissingConfiguration,
+        );
+      }
     });
 
     it('should initialize with Disconnected status and configured properties', () => {

@@ -39,10 +39,10 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
   });
 
   it('should allow simple CRUD operations with Table instance', async () => {
-    const db = new TetherClient({
-      name: `simple-crud-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'default',
-    });
+    const db = new TetherClient(
+      `simple-crud-${Math.random().toString(36).substring(2, 8)}`,
+      { appId: 'default' },
+    );
     clientsToClose.push(db);
 
     const tasks = db.table<{ title: string; done?: boolean }>('tasks');
@@ -113,8 +113,7 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
   it('should seamlessly transition from local-only offline storage to live sync upon registration', async () => {
     // 1. User starts locally offline with zero configuration
     const dbName = `offline-onboard-${Math.random().toString(36).substring(2, 8)}`;
-    const db = new TetherClient({
-      name: dbName,
+    const db = new TetherClient(dbName, {
       appId: 'default',
       host: '127.0.0.1',
       port: serverPort,
@@ -172,13 +171,15 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
 
   it('should infer host, port, and basePath when configured at TetherClient construction', async () => {
     // Construct client with host, port, and WebSocketClass
-    const db = new TetherClient({
-      name: `inferred-config-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'default',
-      host: '127.0.0.1',
-      port: serverPort,
-      WebSocketClass: WebSocket,
-    });
+    const db = new TetherClient(
+      `inferred-config-${Math.random().toString(36).substring(2, 8)}`,
+      {
+        appId: 'default',
+        host: '127.0.0.1',
+        port: serverPort,
+        WebSocketClass: WebSocket,
+      },
+    );
     clientsToClose.push(db);
 
     // Calling register with username and password should just work by default!
@@ -197,8 +198,7 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
     await server.storage.createUser('dynamic_user', 'password123');
 
     const dbName = `dynamic-db-${Math.random().toString(36).substring(2, 8)}`;
-    const db = new TetherClient({
-      name: dbName,
+    const db = new TetherClient(dbName, {
       appId: 'default',
       host: '127.0.0.1',
       port: serverPort,
@@ -234,10 +234,10 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
   });
 
   it('should wipe local data on db.clear()', async () => {
-    const db = new TetherClient({
-      name: `clear-test-db-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'clear-app',
-    });
+    const db = new TetherClient(
+      `clear-test-db-${Math.random().toString(36).substring(2, 8)}`,
+      { appId: 'clear-app' },
+    );
     clientsToClose.push(db);
 
     const notes = db.table<{ text: string }>('notes');

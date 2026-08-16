@@ -62,8 +62,7 @@ interface Todo {
 }
 
 // 1. Initialize local client scoped to your application
-const client = new TetherClient({
-  name: 'my-todos',
+const client = new TetherClient('my-todos', {
   appId: 'todo-app', // Partition data & sync channels per application
   host: 'localhost',
   port: 8080,

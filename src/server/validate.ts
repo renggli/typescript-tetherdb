@@ -5,28 +5,26 @@
  * @module tetherdb/server/validate
  */
 
-/**
- * Validates that an identifier is safe for filesystem use (1-64 alphanumeric, hyphens, or underscores).
- *
- * @param id - The identifier string to validate.
- * @param name - The human-readable name of the identifier type.
- * @returns The validated identifier.
- */
-function validateFilesystemSafe(id: string, name: string): string {
-  if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(id)) {
-    throw new Error(
-      `Invalid ${name}: "${id}". ${name}s must be 1-64 alphanumeric characters, hyphens, or underscores.`,
-    );
-  }
-  return id;
-}
+import { TetherServerError, TetherServerErrorCode } from './errors.js';
+
+/** Minimum allowed username character length. */
+export const MIN_USERNAME_LENGTH = 4;
+
+/** Maximum allowed username character length. */
+export const MAX_USERNAME_LENGTH = 128;
+
+/** Minimum allowed password character length. */
+export const MIN_PASSWORD_LENGTH = 4;
+
+/** Maximum allowed password character length. */
+export const MAX_PASSWORD_LENGTH = 512;
 
 /**
  * Validates a user ID string ensuring it is safe for filesystem use.
  *
  * @param userId - The user ID to validate.
  * @returns The validated user ID.
- * @throws Error if the user ID is invalid or contains unsafe characters.
+ * @throws TetherServerError if the user ID is invalid or contains unsafe characters.
  */
 export function validateUserId(userId: string): string {
   return validateFilesystemSafe(userId, 'user ID');
@@ -37,7 +35,7 @@ export function validateUserId(userId: string): string {
  *
  * @param appId - The application ID to validate.
  * @returns The validated application ID.
- * @throws Error if the application ID is invalid.
+ * @throws TetherServerError if the application ID is invalid.
  */
 export function validateAppId(appId: string): string {
   return validateFilesystemSafe(appId, 'application ID');
@@ -48,7 +46,7 @@ export function validateAppId(appId: string): string {
  *
  * @param tableName - The table name to validate.
  * @returns The validated table name.
- * @throws Error if the table name is invalid.
+ * @throws TetherServerError if the table name is invalid.
  */
 export function validateTableName(tableName: string): string {
   return validateFilesystemSafe(tableName, 'table name');
@@ -59,22 +57,17 @@ export function validateTableName(tableName: string): string {
  *
  * @param id - The record identifier to validate.
  * @returns The validated record ID.
- * @throws Error if the record ID is invalid or exceeds max length.
+ * @throws TetherServerError if the record ID is invalid or exceeds max length.
  */
 export function validateRecordId(id: string): string {
   if (typeof id !== 'string' || id.length === 0 || id.length > 512) {
-    throw new Error(
-      'Invalid record ID: Record IDs must be non-empty strings up to 512 characters.',
+    throw new TetherServerError(
+      TetherServerErrorCode.InvalidInput,
+      'Invalid record ID.',
     );
   }
   return id;
 }
-
-/** Minimum allowed username character length. */
-export const MIN_USERNAME_LENGTH = 4;
-
-/** Maximum allowed username character length. */
-export const MAX_USERNAME_LENGTH = 128;
 
 /**
  * Normalizes a username by trimming whitespace and converting to lowercase.
@@ -92,12 +85,13 @@ export function normalizeUsername(username: string): string {
  *
  * @param username - The username to validate.
  * @returns The validated and normalized username (trimmed and lowercase).
- * @throws Error if the username is invalid or out of length bounds.
+ * @throws TetherServerError if the username is invalid or out of length bounds.
  */
 export function validateUsername(username: string): string {
   if (typeof username !== 'string') {
-    throw new Error(
-      `Username must be a string between ${MIN_USERNAME_LENGTH} and ${MAX_USERNAME_LENGTH} characters long.`,
+    throw new TetherServerError(
+      TetherServerErrorCode.InvalidInput,
+      `Username must be between ${MIN_USERNAME_LENGTH} and ${MAX_USERNAME_LENGTH} characters.`,
     );
   }
   const normalized = normalizeUsername(username);
@@ -105,18 +99,13 @@ export function validateUsername(username: string): string {
     normalized.length < MIN_USERNAME_LENGTH ||
     normalized.length > MAX_USERNAME_LENGTH
   ) {
-    throw new Error(
-      `Username must be between ${MIN_USERNAME_LENGTH} and ${MAX_USERNAME_LENGTH} characters long.`,
+    throw new TetherServerError(
+      TetherServerErrorCode.InvalidInput,
+      `Username must be between ${MIN_USERNAME_LENGTH} and ${MAX_USERNAME_LENGTH} characters.`,
     );
   }
   return normalized;
 }
-
-/** Minimum allowed password character length. */
-export const MIN_PASSWORD_LENGTH = 4;
-
-/** Maximum allowed password character length. */
-export const MAX_PASSWORD_LENGTH = 512;
 
 /**
  * Normalizes a password by trimming surrounding whitespace.
@@ -133,19 +122,23 @@ export function normalizePassword(password: string): string {
  *
  * @param password - The password string to validate.
  * @returns The validated password.
- * @throws Error if the password is not a string, is empty, or exceeds length bounds.
+ * @throws TetherServerError if the password is not a string, is empty, or exceeds length bounds.
  */
 export function validatePassword(password: string): string {
   if (typeof password !== 'string') {
-    throw new Error('Password must be a valid non-empty string.');
+    throw new TetherServerError(
+      TetherServerErrorCode.InvalidInput,
+      'Password must be a valid non-empty string.',
+    );
   }
   const normalized = normalizePassword(password);
   if (
     normalized.length < MIN_PASSWORD_LENGTH ||
     normalized.length > MAX_PASSWORD_LENGTH
   ) {
-    throw new Error(
-      `Password must be between ${MIN_PASSWORD_LENGTH} and ${MAX_PASSWORD_LENGTH} characters long.`,
+    throw new TetherServerError(
+      TetherServerErrorCode.InvalidInput,
+      `Password must be between ${MIN_PASSWORD_LENGTH} and ${MAX_PASSWORD_LENGTH} characters.`,
     );
   }
   return normalized;
@@ -157,11 +150,13 @@ export function validatePassword(password: string): string {
  * @param id - The batch or client identifier.
  * @param name - Identifier type description (e.g. 'batchId', 'clientId').
  * @returns The validated ID.
+ * @throws TetherServerError if the identifier format is invalid.
  */
-export function validateIdentifier(id: string, name = 'Identifier'): string {
+export function validateIdentifier(id: string, name = 'identifier'): string {
   if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{2,128}$/.test(id)) {
-    throw new Error(
-      `Invalid ${name}: "${id}". Must be 2-128 alphanumeric characters, hyphens, or underscores.`,
+    throw new TetherServerError(
+      TetherServerErrorCode.InvalidInput,
+      `Invalid ${name}.`,
     );
   }
   return id;
@@ -195,4 +190,16 @@ export function getUserBucket(userId: string): string {
   const safeId = validateUserId(userId);
   const clean = safeId.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
   return clean.length >= 2 ? clean.slice(0, 2) : clean.padStart(2, '0');
+}
+
+// -- Private Helpers --------------------------------------------------------
+
+function validateFilesystemSafe(id: string, name: string): string {
+  if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(id)) {
+    throw new TetherServerError(
+      TetherServerErrorCode.InvalidInput,
+      `Invalid ${name}.`,
+    );
+  }
+  return id;
 }

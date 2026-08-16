@@ -1,4 +1,5 @@
 import { EventRegistry } from '../shared/event.js';
+import { TetherClientError, TetherClientErrorCode } from './errors.js';
 import type { Storage } from './storage.js';
 
 /**
@@ -100,15 +101,17 @@ export interface AuthDependencies {
  * metadata persistence, and reconciliation state transitions.
  */
 export class Auth {
+  /** Base URL for remote authentication REST API endpoints. */
   readonly baseUrl: string;
+  /** Reactive event registry triggered whenever the authentication status changes. */
+  readonly onStatusChange = new EventRegistry<AuthStatus>();
+
   private storage: Storage;
   private fetchFn: typeof fetch;
-
   private currentAuthStatus: AuthStatus = AuthStatus.SignedOut;
   private currentUsername?: string;
   private currentUserId?: string;
   private currentToken?: string;
-  readonly onStatusChange = new EventRegistry<AuthStatus>();
   private autoRestorePromise: Promise<void>;
 
   constructor(dependencies: AuthDependencies) {
@@ -124,7 +127,10 @@ export class Auth {
           : undefined);
 
     if (!rawFetch) {
-      throw new Error('No fetch implementation available');
+      throw new TetherClientError(
+        TetherClientErrorCode.FetchUnavailable,
+        'No fetch implementation available.',
+      );
     }
     this.fetchFn = rawFetch.bind(globalThis);
     this.autoRestorePromise = this.restoreSession();
@@ -180,7 +186,10 @@ export class Auth {
    */
   async register(options: RegisterOptions): Promise<boolean> {
     if (!options?.username || !options?.password) {
-      throw new Error('Registration requires username and password.');
+      throw new TetherClientError(
+        TetherClientErrorCode.MissingCredentials,
+        'Registration requires username and password.',
+      );
     }
 
     const previousStatus = this.currentAuthStatus;
@@ -209,7 +218,10 @@ export class Auth {
 
       const data = (await res.json()) as AuthResult & { error?: string };
       if (!res.ok) {
-        throw new Error(data.error ?? 'Registration failed');
+        throw new TetherClientError(
+          TetherClientErrorCode.RegistrationFailed,
+          data.error ?? 'Registration failed.',
+        );
       }
 
       this.currentUserId = data.userId;
@@ -260,7 +272,10 @@ export class Auth {
 
         const data = (await res.json()) as AuthResult & { error?: string };
         if (!res.ok) {
-          throw new Error(data.error ?? 'Authentication failed');
+          throw new TetherClientError(
+            TetherClientErrorCode.AuthenticationFailed,
+            data.error ?? 'Authentication failed.',
+          );
         }
 
         token = data.token;
@@ -286,7 +301,10 @@ export class Auth {
       }
 
       if (!token) {
-        throw new Error('No login credentials or saved session available.');
+        throw new TetherClientError(
+          TetherClientErrorCode.MissingCredentials,
+          'No login credentials or saved session available.',
+        );
       }
 
       this.currentToken = token;

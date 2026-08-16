@@ -9,6 +9,10 @@ import {
   runCli,
 } from '../../src/server/cli.js';
 import {
+  TetherServerError,
+  TetherServerErrorCode,
+} from '../../src/server/errors.js';
+import {
   FileStorage,
   MemoryStorage,
   SqliteStorage,
@@ -62,7 +66,14 @@ describe('src/server/cli.ts (CLI commands and backends)', () => {
     it('should throw an error for unsupported backend types', () => {
       expect(() =>
         createBackend('unknown_backend' as unknown as BackendType),
-      ).toThrow('Unknown backend type');
+      ).toThrow(TetherServerError);
+      try {
+        createBackend('unknown_backend' as unknown as BackendType);
+      } catch (err) {
+        expect((err as TetherServerError).code).toBe(
+          TetherServerErrorCode.ConfigurationError,
+        );
+      }
     });
   });
 
