@@ -123,7 +123,7 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
     clientsToClose.push(db);
 
     const statuses: SyncStatus[] = [];
-    db.onSyncStatusChange((s) => statuses.push(s));
+    db.onSyncStatusChange.register((s) => statuses.push(s));
 
     const todos = db.table<{ title: string }>('todos');
 

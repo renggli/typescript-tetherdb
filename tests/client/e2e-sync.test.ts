@@ -139,7 +139,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
       data?: { text: string };
       isRemote?: boolean;
     }> = [];
-    messagesB.subscribe((events) => {
+    messagesB.onChange.register((events) => {
       receivedEvents.push(...events);
     });
 
@@ -281,7 +281,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
 
     const itemsB = clientB.table<{ title: string }>('items');
     const receivedBatches: Array<Array<{ op: OperationType; id: string }>> = [];
-    itemsB.subscribe((events) => {
+    itemsB.onChange.register((events) => {
       receivedBatches.push(events.map((e) => ({ op: e.op, id: e.id })));
     });
 

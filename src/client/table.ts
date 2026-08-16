@@ -1,3 +1,4 @@
+import { EventRegistry } from '../shared/event.js';
 import {
   type ChangeRecord,
   OperationType,
@@ -68,7 +69,7 @@ export interface ITable {
 export class Table<T = unknown> implements ITable {
   private tableName: string;
   private storage: Storage;
-  private listeners: Set<TableChangeListener<T>> = new Set();
+  readonly onChange = new EventRegistry<TableChangeEvent<T>[]>();
 
   /**
    * Creates a new Table instance.
@@ -222,7 +223,7 @@ export class Table<T = unknown> implements ITable {
     }
 
     await this.storage.applyLocalChanges(this.tableName, mutations);
-    this.notifyListeners(events);
+    this.onChange.publish(events);
     return savedData;
   }
 
@@ -284,24 +285,10 @@ export class Table<T = unknown> implements ITable {
 
     if (mutations.length > 0) {
       await this.storage.applyLocalChanges(this.tableName, mutations);
-      this.notifyListeners(events);
+      this.onChange.publish(events);
     }
 
     return mutations.length;
-  }
-
-  /**
-   * Subscribes to mutation events occurring on this table (both local and remote sync changes).
-   * The listener always receives a list of `TableChangeEvent` objects.
-   *
-   * @param listener - The change listener function to invoke on mutations.
-   * @returns An unsubscribe function to remove the listener.
-   */
-  subscribe(listener: TableChangeListener<T>): () => void {
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
   }
 
   /**
@@ -330,7 +317,7 @@ export class Table<T = unknown> implements ITable {
     };
 
     fetchAndNotify();
-    const unsubscribe = this.subscribe(() => {
+    const unsubscribe = this.onChange.register(() => {
       fetchAndNotify();
     });
 
@@ -346,20 +333,7 @@ export class Table<T = unknown> implements ITable {
    * @param events - The list of remote change events.
    */
   notifyRemoteChanges(events: TableChangeEvent<unknown>[]): void {
-    this.notifyListeners(events as TableChangeEvent<T>[]);
-  }
-
-  private notifyListeners(events: TableChangeEvent<T>[]): void {
     if (events.length === 0) return;
-    for (const listener of this.listeners) {
-      try {
-        listener(events);
-      } catch (err) {
-        console.error(
-          `[TetherClient] Error in listener for ${this.tableName}:`,
-          err,
-        );
-      }
-    }
+    this.onChange.publish(events as TableChangeEvent<T>[]);
   }
 }

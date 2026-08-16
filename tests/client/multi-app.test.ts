@@ -177,14 +177,14 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
     });
 
     const receivedA2: string[] = [];
-    clientA2.table<{ text: string }>('feed').subscribe((events) => {
+    clientA2.table<{ text: string }>('feed').onChange.register((events) => {
       for (const e of events) {
         if (e.data?.text) receivedA2.push(e.data.text);
       }
     });
 
     const receivedB1: string[] = [];
-    clientB1.table<{ text: string }>('feed').subscribe((events) => {
+    clientB1.table<{ text: string }>('feed').onChange.register((events) => {
       for (const e of events) {
         if (e.data?.text) receivedB1.push(e.data.text);
       }

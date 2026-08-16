@@ -337,7 +337,7 @@ authForm.addEventListener('submit', async (e: SubmitEvent) => {
  */
 async function init(): Promise<void> {
   // 1. Subscribe to reactive Table changes
-  todosTable.subscribe((events: TableChangeEvent<TodoItem>[]) => {
+  todosTable.onChange.register((events: TableChangeEvent<TodoItem>[]) => {
     for (const { op, id, isRemote, data } of events) {
       const origin = isRemote ? 'Remote Sync' : 'Local IDB';
       const category = isRemote ? LogCategory.Remote : LogCategory.Local;
@@ -348,13 +348,13 @@ async function init(): Promise<void> {
   });
 
   // 2. React to Auth status changes
-  db.onAuthStatusChange((status) => {
+  db.onAuthStatusChange.register((status) => {
     updateUserUI();
     logEvent(LogCategory.Sync, 'Auth', `AuthStatus: ${AuthStatus[status]}`);
   });
 
   // 3. React to Sync status changes
-  db.onSyncStatusChange((status) => {
+  db.onSyncStatusChange.register((status) => {
     updateSyncStatusUI(status);
     logEvent(
       LogCategory.Sync,

@@ -63,7 +63,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
     clientsToClose.push(client);
 
     const authStatuses: AuthStatus[] = [];
-    client.onAuthStatusChange((status) => authStatuses.push(status));
+    client.onAuthStatusChange.register((status) => authStatuses.push(status));
 
     const success = await client.register({
       username: 'alice',

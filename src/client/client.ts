@@ -1,3 +1,4 @@
+import { EventRegistry } from '../shared/event.js';
 import { normalizeBasePath } from '../shared/path.js';
 import {
   Auth,
@@ -53,6 +54,8 @@ export interface TetherClientOptions {
  * local-first storage, automatic auth lifecycle, and background synchronization.
  */
 export class TetherClient {
+  readonly onAuthStatusChange = new EventRegistry<AuthStatus>();
+  readonly onSyncStatusChange = new EventRegistry<SyncStatus>();
   private readonly storage: Storage;
   private readonly auth: Auth;
   private readonly sync: Sync;
@@ -71,17 +74,22 @@ export class TetherClient {
     this.sync = this.createSync(options, this.storage);
 
     // Push local changes reactively.
-    this.storage.onLocalChange(() => {
+    this.storage.onLocalChange.register(() => {
       this.sync.schedulePush();
     });
 
     // Coordinate auth and sync lifecycle reactively.
-    this.auth.onStatusChange((status) => {
+    this.auth.onStatusChange.register((status) => {
+      this.onAuthStatusChange.publish(status);
       if (status === AuthStatus.SignedIn && this.auth.token) {
         this.sync.connect(this.auth.token);
       } else {
         this.sync.disconnect();
       }
+    });
+
+    this.sync.onStatusChange.register((status) => {
+      this.onSyncStatusChange.publish(status);
     });
   }
 
@@ -131,16 +139,6 @@ export class TetherClient {
   }
 
   /**
-   * Subscribes to authentication status changes.
-   *
-   * @param listener - Callback receiving the updated `AuthStatus`.
-   * @returns An unsubscribe function.
-   */
-  onAuthStatusChange(listener: (status: AuthStatus) => void): () => void {
-    return this.auth.onStatusChange(listener);
-  }
-
-  /**
    * Registers a new user account, applies local data mode, and connects synchronization.
    *
    * @param options - Registration credentials and data reconciliation settings.
@@ -177,16 +175,6 @@ export class TetherClient {
    */
   get syncStatus(): SyncStatus {
     return this.sync.status;
-  }
-
-  /**
-   * Subscribes to synchronization status changes across the database lifecycle.
-   *
-   * @param listener - Callback receiving the updated `SyncStatus`.
-   * @returns An unsubscribe function.
-   */
-  onSyncStatusChange(listener: (status: SyncStatus) => void): () => void {
-    return this.sync.onStatusChange(listener);
   }
 
   // -- Private Helpers ------------------------------------------------------

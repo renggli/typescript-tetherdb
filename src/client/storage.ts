@@ -1,4 +1,5 @@
 import { generateClientId } from '../shared/clock.js';
+import { EventRegistry } from '../shared/event.js';
 import {
   type ChangeRecord,
   OperationType,
@@ -47,9 +48,9 @@ export interface LocalMutationItem<T = unknown> {
 export class Storage {
   readonly name: string;
   readonly clientId: string;
+  readonly onLocalChange = new EventRegistry<void>();
   private databasePromise: Promise<IDBDatabase> | null = null;
   private tables: Map<string, ITable> = new Map();
-  private localChangeListeners: Set<() => void> = new Set();
 
   /**
    * Creates a new Storage instance.
@@ -59,19 +60,6 @@ export class Storage {
   constructor(name: string) {
     this.name = name;
     this.clientId = generateClientId();
-  }
-
-  /**
-   * Registers a listener callback invoked whenever local mutations are committed.
-   *
-   * @param listener - Callback function.
-   * @returns Unsubscribe function to remove the listener.
-   */
-  onLocalChange(listener: () => void): () => void {
-    this.localChangeListeners.add(listener);
-    return () => {
-      this.localChangeListeners.delete(listener);
-    };
   }
 
   /**
@@ -304,7 +292,7 @@ export class Storage {
       }
 
       tx.oncomplete = () => {
-        this.notifyLocalChange();
+        this.onLocalChange.publish();
         resolve(records);
       };
       tx.onerror = () => reject(tx.error);
@@ -518,16 +506,6 @@ export class Storage {
   }
 
   // -- Private Helpers ------------------------------------------------------
-
-  private notifyLocalChange(): void {
-    for (const listener of this.localChangeListeners) {
-      try {
-        listener();
-      } catch (err) {
-        console.error('[Storage] Local change listener error:', err);
-      }
-    }
-  }
 
   private async openDatabase(): Promise<IDBDatabase> {
     return new Promise<IDBDatabase>((resolve, reject) => {

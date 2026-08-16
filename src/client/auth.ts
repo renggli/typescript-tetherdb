@@ -1,3 +1,4 @@
+import { EventRegistry } from '../shared/event.js';
 import type { Storage } from './storage.js';
 
 /**
@@ -107,7 +108,7 @@ export class Auth {
   private currentUsername?: string;
   private currentUserId?: string;
   private currentToken?: string;
-  private statusListeners: Set<(status: AuthStatus) => void> = new Set();
+  readonly onStatusChange = new EventRegistry<AuthStatus>();
   private autoRestorePromise: Promise<void>;
 
   constructor(dependencies: AuthDependencies) {
@@ -155,20 +156,6 @@ export class Auth {
    */
   get token(): string | undefined {
     return this.currentToken;
-  }
-
-  /**
-   * Subscribes to authentication status changes.
-   *
-   * @param listener - Callback receiving updated AuthStatus.
-   * @returns An unsubscribe function.
-   */
-  onStatusChange(listener: (status: AuthStatus) => void): () => void {
-    this.statusListeners.add(listener);
-    listener(this.currentAuthStatus);
-    return () => {
-      this.statusListeners.delete(listener);
-    };
   }
 
   /**
@@ -369,12 +356,6 @@ export class Auth {
   private setStatus(status: AuthStatus): void {
     if (this.currentAuthStatus === status) return;
     this.currentAuthStatus = status;
-    for (const listener of this.statusListeners) {
-      try {
-        listener(status);
-      } catch (err) {
-        console.error('[Auth] Status listener error:', err);
-      }
-    }
+    this.onStatusChange.publish(status);
   }
 }

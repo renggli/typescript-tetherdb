@@ -71,7 +71,7 @@ const client = new TetherClient({
 const todos = client.table<Todo>('todos');
 
 // Reactive subscription to local & remote changes
-const unsubscribe = todos.subscribe((events) => {
+const unsubscribe = todos.onChange.register((events) => {
   for (const { op, id, data, isRemote } of events) {
     console.log(`Change (${op}) on ${id}, isRemote: ${isRemote}:`, data);
   }
@@ -101,7 +101,7 @@ await client.register({
 });
 
 // Monitor live synchronization status
-client.onSyncStatusChange((status) => {
+client.onSyncStatusChange.register((status) => {
   console.log('Sync status:', status);
 });
 ```

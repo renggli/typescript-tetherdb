@@ -1,3 +1,4 @@
+import { EventRegistry } from '../shared/event.js';
 import {
   type ChangeRecord,
   type ClientMessage,
@@ -70,7 +71,7 @@ export class Sync {
   private options: SyncOptions;
   private webSocket: WebSocket | null = null;
   private currentStatus: SyncStatus = SyncStatus.Disconnected;
-  private statusListeners: Set<(status: SyncStatus) => void> = new Set();
+  readonly onStatusChange = new EventRegistry<SyncStatus>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
@@ -126,18 +127,6 @@ export class Sync {
   }
 
   /**
-   * Registers a listener callback invoked whenever the synchronization status changes.
-   *
-   * @param listener - Callback receiving the new `SyncStatus`.
-   * @returns Unsubscribe function to remove the listener.
-   */
-  onStatusChange(listener: (status: SyncStatus) => void): () => void {
-    this.statusListeners.add(listener);
-    listener(this.currentStatus);
-    return () => this.statusListeners.delete(listener);
-  }
-
-  /**
    * Initiates a WebSocket connection to the sync endpoint and sends authentication.
    *
    * @param token - Optional session token to connect with.
@@ -147,73 +136,84 @@ export class Sync {
     if (token) this.token = token;
     if (url) this.url = url;
 
-    if (!this.token || !this.url) return;
-    if (this.isDestroyed || this.webSocket) return;
+    if (!this.url) {
+      return;
+    }
+
+    if (this.webSocket) {
+      this.disconnect();
+    }
 
     this.setStatus(SyncStatus.Connecting);
 
-    const WS =
+    const wsUrl = this.url;
+    const WebSocketImpl =
       this.options.WebSocketClass ??
       (typeof WebSocket !== 'undefined' ? WebSocket : null);
-    if (!WS) {
-      console.warn('[Sync] No WebSocket implementation found.');
+
+    if (!WebSocketImpl) {
       this.setStatus(SyncStatus.Error);
+      console.error(
+        '[Sync] No WebSocket implementation available in this environment.',
+      );
       return;
     }
 
     try {
-      this.webSocket = new WS(this.url) as WebSocket;
-    } catch (_err) {
+      this.webSocket = new WebSocketImpl(wsUrl);
+    } catch (err) {
       this.setStatus(SyncStatus.Error);
+      console.error('[Sync] Failed to construct WebSocket:', err);
       this.scheduleReconnect();
       return;
     }
 
-    this.webSocket.onopen = async () => {
-      if (this.isDestroyed) {
-        this.disconnect();
-        return;
-      }
-      await this.sendAuth();
+    this.webSocket.onopen = () => {
+      this.reconnectAttempts = 0;
+      this.startPing();
+      this.sendAuth();
     };
 
-    this.webSocket.onmessage = async (event) => {
+    this.webSocket.onmessage = (event) => {
       try {
         const raw =
-          typeof event.data === 'string' ? event.data : event.data.toString();
+          typeof event.data === 'string'
+            ? event.data
+            : event.data.toString('utf8');
         const msg: ServerMessage = JSON.parse(raw);
-        await this.handleServerMessage(msg);
+        this.handleServerMessage(msg);
       } catch (err) {
-        console.error('[Sync] Failed to process message from server:', err);
-      }
-    };
-
-    this.webSocket.onclose = () => {
-      this.webSocket = null;
-      if (!this.isDestroyed) {
-        this.setStatus(SyncStatus.Disconnected);
-        this.scheduleReconnect();
+        console.error(
+          '[Sync] Failed to parse incoming WebSocket message:',
+          err,
+        );
       }
     };
 
     this.webSocket.onerror = (err) => {
       console.error('[Sync] WebSocket error:', err);
-      this.webSocket?.close();
+    };
+
+    this.webSocket.onclose = (event) => {
+      this.stopPing();
+      this.webSocket = null;
+      if (!this.isDestroyed) {
+        this.setStatus(SyncStatus.Disconnected);
+        if (event.code !== 1000 && event.code !== 1005) {
+          this.scheduleReconnect();
+        }
+      }
     };
   }
 
   /**
-   * Disconnects the active WebSocket connection without marking the client as destroyed.
+   * Disconnects the active WebSocket connection.
    */
   disconnect(): void {
     this.stopPing();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
-    }
-    if (this.pushTimer) {
-      clearTimeout(this.pushTimer);
-      this.pushTimer = null;
     }
     if (this.webSocket) {
       const ws = this.webSocket;
@@ -237,7 +237,6 @@ export class Sync {
   destroy(): void {
     this.isDestroyed = true;
     this.disconnect();
-    this.statusListeners.clear();
   }
 
   /**
@@ -302,13 +301,7 @@ export class Sync {
   private setStatus(newStatus: SyncStatus) {
     if (this.currentStatus === newStatus) return;
     this.currentStatus = newStatus;
-    for (const listener of this.statusListeners) {
-      try {
-        listener(newStatus);
-      } catch (err) {
-        console.error('[Sync] Status listener error:', err);
-      }
-    }
+    this.onStatusChange.publish(newStatus);
   }
 
   private startPing() {

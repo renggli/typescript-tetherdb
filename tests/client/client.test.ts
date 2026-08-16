@@ -109,7 +109,7 @@ describe('TetherClient local operations (src/client/)', () => {
       title?: string;
     }> = [];
 
-    const unsubscribe = todos.subscribe((events) => {
+    const unsubscribe = todos.onChange.register((events) => {
       for (const e of events) {
         receivedEvents.push({
           op: e.op,
