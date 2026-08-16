@@ -15,7 +15,7 @@ import {
 } from './validate.js';
 
 interface ActiveClient {
-  ws: WebSocket;
+  webSocket: WebSocket;
   clientId: string;
   user: UserStorage;
   appId: string;
@@ -28,7 +28,7 @@ interface ActiveClient {
 export class SyncHub {
   private storage: Storage;
   private userClients: Map<string, Set<ActiveClient>> = new Map(); // key = `${appId}:${userId}`
-  private wsToClient: Map<WebSocket, ActiveClient> = new Map();
+  private webSocketToClient: Map<WebSocket, ActiveClient> = new Map();
 
   /**
    * Initializes a new SyncHub instance.
@@ -42,15 +42,15 @@ export class SyncHub {
   /**
    * Handles an incoming WebSocket connection, binding message, error, and disconnection events.
    *
-   * @param ws - Active WebSocket connection.
+   * @param webSocket - Active WebSocket connection.
    */
-  handleConnection(ws: WebSocket): void {
+  handleConnection(webSocket: WebSocket): void {
     let messageQueue: Promise<void> = Promise.resolve();
 
-    ws.on('message', (data) => {
+    webSocket.on('message', (data) => {
       messageQueue = messageQueue
         .then(async () => {
-          const client = this.wsToClient.get(ws);
+          const client = this.webSocketToClient.get(webSocket);
           const userContext = client
             ? ` (app: "${client.appId}", user: "${client.user.id}", client: "${client.clientId}")`
             : '';
@@ -58,7 +58,7 @@ export class SyncHub {
           try {
             const raw = typeof data === 'string' ? data : data.toString();
             const msg: ClientMessage = JSON.parse(raw);
-            await this.handleMessage(ws, msg);
+            await this.handleMessage(webSocket, msg);
           } catch (err) {
             const errorMsg =
               err instanceof Error ? err.message : 'Invalid message format';
@@ -66,7 +66,7 @@ export class SyncHub {
               `[TetherServer] WebSocket message error${userContext}:`,
               errorMsg,
             );
-            this.send(ws, {
+            this.send(webSocket, {
               type: ServerMessageType.Error,
               message: `${errorMsg}${userContext}`,
             });
@@ -75,12 +75,12 @@ export class SyncHub {
         .catch(() => {});
     });
 
-    ws.on('close', () => {
-      this.handleDisconnect(ws);
+    webSocket.on('close', () => {
+      this.handleDisconnect(webSocket);
     });
 
-    ws.on('error', (err) => {
-      const client = this.wsToClient.get(ws);
+    webSocket.on('error', (err) => {
+      const client = this.webSocketToClient.get(webSocket);
       const userContext = client
         ? ` (app: "${client.appId}", user: "${client.user.id}", client: "${client.clientId}")`
         : '';
@@ -88,15 +88,15 @@ export class SyncHub {
         `[TetherServer] WebSocket client error${userContext}:`,
         err,
       );
-      this.handleDisconnect(ws);
+      this.handleDisconnect(webSocket);
     });
   }
 
-  private handleDisconnect(ws: WebSocket): void {
-    const client = this.wsToClient.get(ws);
+  private handleDisconnect(webSocket: WebSocket): void {
+    const client = this.webSocketToClient.get(webSocket);
     if (!client) return;
 
-    this.wsToClient.delete(ws);
+    this.webSocketToClient.delete(webSocket);
     const channelKey = `${client.appId}:${client.user.id}`;
     const set = this.userClients.get(channelKey);
     if (set) {
@@ -107,14 +107,14 @@ export class SyncHub {
     }
   }
 
-  private send(ws: WebSocket, msg: ServerMessage): void {
-    if (ws.readyState === 1 /* OPEN */) {
-      ws.send(JSON.stringify(msg));
+  private send(webSocket: WebSocket, msg: ServerMessage): void {
+    if (webSocket.readyState === 1 /* OPEN */) {
+      webSocket.send(JSON.stringify(msg));
     }
   }
 
   private async handleMessage(
-    ws: WebSocket,
+    webSocket: WebSocket,
     msg: ClientMessage,
   ): Promise<void> {
     if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string') {
@@ -126,41 +126,41 @@ export class SyncHub {
     switch (msg.type) {
       case ClientMessageType.Auth: {
         if (typeof msg.token !== 'string' || !msg.token) {
-          this.send(ws, {
+          this.send(webSocket, {
             type: ServerMessageType.AuthError,
             message: 'Missing or invalid authentication token',
           });
-          ws.close();
+          webSocket.close();
           return;
         }
 
         const user = await this.storage.getUserByToken(msg.token);
         if (!user) {
-          this.send(ws, {
+          this.send(webSocket, {
             type: ServerMessageType.AuthError,
             message: 'Invalid or expired authentication token',
           });
-          ws.close();
+          webSocket.close();
           return;
         }
 
         if (typeof msg.appId !== 'string' || !msg.appId) {
-          this.send(ws, {
+          this.send(webSocket, {
             type: ServerMessageType.AuthError,
             message: 'Missing required field: appId',
           });
-          ws.close();
+          webSocket.close();
           return;
         }
 
         const appId = validateAppId(msg.appId);
         const app = await this.storage.getApp(appId);
         if (!app) {
-          this.send(ws, {
+          this.send(webSocket, {
             type: ServerMessageType.AuthError,
             message: `Application "${appId}" does not exist.`,
           });
-          ws.close();
+          webSocket.close();
           return;
         }
 
@@ -169,13 +169,13 @@ export class SyncHub {
           'clientId',
         );
         const client: ActiveClient = {
-          ws,
+          webSocket,
           clientId,
           user,
           appId,
         };
 
-        this.wsToClient.set(ws, client);
+        this.webSocketToClient.set(webSocket, client);
         const channelKey = `${appId}:${user.id}`;
         let set = this.userClients.get(channelKey);
         if (!set) {
@@ -185,7 +185,7 @@ export class SyncHub {
         set.add(client);
 
         const currentSeq = await app.getCurrentSeq(user);
-        this.send(ws, {
+        this.send(webSocket, {
           type: ServerMessageType.AuthSuccess,
           userId: user.id,
           currentSeq,
@@ -197,9 +197,9 @@ export class SyncHub {
       }
 
       case ClientMessageType.InitSync: {
-        const client = this.wsToClient.get(ws);
+        const client = this.webSocketToClient.get(webSocket);
         if (!client) {
-          this.send(ws, {
+          this.send(webSocket, {
             type: ServerMessageType.AuthError,
             message: 'Not authenticated',
           });
@@ -210,9 +210,9 @@ export class SyncHub {
       }
 
       case ClientMessageType.ChangeBatch: {
-        const client = this.wsToClient.get(ws);
+        const client = this.webSocketToClient.get(webSocket);
         if (!client) {
-          this.send(ws, {
+          this.send(webSocket, {
             type: ServerMessageType.AuthError,
             message: 'Not authenticated',
           });
@@ -247,7 +247,7 @@ export class SyncHub {
         );
 
         // Acknowledge to sender
-        this.send(ws, {
+        this.send(webSocket, {
           type: ServerMessageType.ChangeAck,
           batchId,
           appliedSeq: newSeq,
@@ -271,7 +271,7 @@ export class SyncHub {
       }
 
       case ClientMessageType.Ping: {
-        this.send(ws, {
+        this.send(webSocket, {
           type: ServerMessageType.Pong,
         });
         break;
@@ -304,7 +304,7 @@ export class SyncHub {
         snapshot.push(...records);
       }
       const currentSeq = await app.getCurrentSeq(client.user);
-      this.send(client.ws, {
+      this.send(client.webSocket, {
         type: ServerMessageType.SyncSnapshot,
         seq: currentSeq,
         snapshot,
@@ -322,13 +322,13 @@ export class SyncHub {
           const records = await table.getAllRecords(client.user);
           snapshot.push(...records);
         }
-        this.send(client.ws, {
+        this.send(client.webSocket, {
           type: ServerMessageType.SyncSnapshot,
           seq: currentSeq,
           snapshot,
         });
       } else {
-        this.send(client.ws, {
+        this.send(client.webSocket, {
           type: ServerMessageType.SyncDiff,
           fromSeq: seq,
           toSeq: currentSeq,
@@ -350,7 +350,7 @@ export class SyncHub {
 
     for (const client of clients) {
       if (client.clientId !== excludeClientId) {
-        this.send(client.ws, msg);
+        this.send(client.webSocket, msg);
       }
     }
   }

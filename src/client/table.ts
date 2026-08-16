@@ -3,7 +3,7 @@ import {
   OperationType,
   type StoredRecord,
 } from '../shared/types.js';
-import type { IDBManager, LocalMutationItem } from './idb.js';
+import type { Database, LocalMutationItem } from './database.js';
 
 /**
  * Event describing a mutation (insert, update, delete) on a table record.
@@ -67,8 +67,8 @@ export interface ITable {
  */
 export class Table<T = unknown> implements ITable {
   private tableName: string;
-  private idb: IDBManager;
-  private getClientId: () => string;
+  private idb: Database;
+  private clientId: string;
   private onLocalChange?: () => void;
   private listeners: Set<TableChangeListener<T>> = new Set();
 
@@ -77,18 +77,18 @@ export class Table<T = unknown> implements ITable {
    *
    * @param tableName - Name of the table.
    * @param idb - IndexedDB transaction coordinator.
-   * @param getClientId - Function providing the current client identifier.
+   * @param clientId - The unique client identifier.
    * @param onLocalChange - Optional callback invoked after local mutations are committed.
    */
   constructor(
     tableName: string,
-    idb: IDBManager,
-    getClientId: () => string,
+    idb: Database,
+    clientId: string,
     onLocalChange?: () => void,
   ) {
     this.tableName = tableName;
     this.idb = idb;
-    this.getClientId = getClientId;
+    this.clientId = clientId;
     this.onLocalChange = onLocalChange;
   }
 
@@ -188,7 +188,7 @@ export class Table<T = unknown> implements ITable {
     const ids = entries.map((e) => e.id);
     const existingMap = await this.idb.getRecords<T>(this.tableName, ids);
     const now = Date.now();
-    const clientId = this.getClientId();
+    const clientId = this.clientId;
 
     const mutations: LocalMutationItem<T>[] = [];
     const events: TableChangeEvent<T>[] = [];
@@ -254,7 +254,7 @@ export class Table<T = unknown> implements ITable {
 
     const existingMap = await this.idb.getRecords<T>(this.tableName, ids);
     const now = Date.now();
-    const clientId = this.getClientId();
+    const clientId = this.clientId;
 
     const mutations: LocalMutationItem<T>[] = [];
     const events: TableChangeEvent<T>[] = [];
@@ -326,7 +326,7 @@ export class Table<T = unknown> implements ITable {
         listener(events);
       } catch (err) {
         console.error(
-          `[TetherDB] Error in listener for ${this.tableName}:`,
+          `[TetherClient] Error in listener for ${this.tableName}:`,
           err,
         );
       }

@@ -7,7 +7,7 @@ import {
   type ServerMessage,
   ServerMessageType,
 } from '../shared/types.js';
-import type { IDBManager } from './idb.js';
+import type { Database } from './database.js';
 import type { ITable } from './table.js';
 
 /**
@@ -15,13 +15,13 @@ import type { ITable } from './table.js';
  */
 export enum SyncStatus {
   /** Disconnected from the remote synchronization server. */
-  Disconnected = 'disconnected',
+  Disconnected,
   /** Currently establishing a WebSocket connection. */
-  Connecting = 'connecting',
+  Connecting,
   /** Authenticated and actively synchronizing in real time. */
-  Connected = 'connected',
+  Connected,
   /** Synchronization halted due to an unrecoverable error (e.g. invalid auth token). */
-  Error = 'error',
+  Error,
 }
 
 /**
@@ -33,17 +33,17 @@ export type WebSocketConstructor = new (
 ) => WebSocket;
 
 /**
- * Configuration options for TetherSyncClient.
+ * Configuration options for Sync.
  */
 export interface SyncOptions {
   /** WebSocket URL of the sync endpoint (e.g. 'ws://localhost:8080/sync'). */
-  url: string;
+  url?: string;
   /** Signed authentication session token. */
-  token: string;
-  /** Optional application namespace identifier (defaults to database appId when used with TetherDB). */
-  appId?: string;
-  /** Whether to automatically connect on creation (defaults to `true`). */
-  autoConnect?: boolean;
+  token?: string;
+  /** Application namespace identifier. */
+  appId: string;
+  /** Unique client instance identifier. */
+  clientId: string;
   /** Initial reconnection backoff delay in milliseconds (defaults to 1000). */
   reconnectIntervalMs?: number;
   /** Maximum reconnection backoff delay in milliseconds (defaults to 30000). */
@@ -58,13 +58,15 @@ export interface SyncOptions {
  * Two-way WebSocket sync coordinator managing initial snapshot / diff downloads,
  * batched outbox queue flushing, acknowledgments, and auto-reconnect backoff.
  */
-export class TetherSyncClient {
-  private idb: IDBManager;
+export class Sync {
+  url?: string;
+  private token?: string;
+  private idb: Database;
   private getTable: (name: string) => ITable;
-  private getClientId: () => string;
+  private clientId: string;
   private options: SyncOptions;
-  private ws: WebSocket | null = null;
-  private status: SyncStatus = SyncStatus.Disconnected;
+  private webSocket: WebSocket | null = null;
+  private currentStatus: SyncStatus = SyncStatus.Disconnected;
   private statusListeners: Set<(status: SyncStatus) => void> = new Set();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
@@ -75,36 +77,45 @@ export class TetherSyncClient {
   private pendingBatches: Map<string, number[]> = new Map(); // batchId -> localIds
 
   /**
-   * Creates a new TetherSyncClient instance.
+   * Creates a new Sync instance.
    *
    * @param idb - IndexedDB transaction manager.
    * @param getTable - Function to resolve a table by name.
-   * @param getClientId - Function providing the unique client identifier.
    * @param options - Configuration options for sync and connection.
    */
   constructor(
-    idb: IDBManager,
+    idb: Database,
     getTable: (name: string) => ITable,
-    getClientId: () => string,
     options: SyncOptions,
   ) {
     if (!options.appId) {
       throw new Error('Missing required appId in SyncOptions.');
     }
+    if (!options.clientId) {
+      throw new Error('Missing required clientId in SyncOptions.');
+    }
+    this.url = options.url;
+    this.token = options.token;
     this.idb = idb;
     this.getTable = getTable;
-    this.getClientId = getClientId;
+    this.clientId = options.clientId;
     this.options = {
-      autoConnect: true,
       reconnectIntervalMs: 1000,
       maxReconnectIntervalMs: 30000,
       pingIntervalMs: 30000,
       ...options,
     };
 
-    if (this.options.autoConnect) {
+    if (this.token && this.url) {
       this.connect();
     }
+  }
+
+  /**
+   * Current operational status of the sync coordinator.
+   */
+  get status(): SyncStatus {
+    return this.currentStatus;
   }
 
   /**
@@ -113,7 +124,7 @@ export class TetherSyncClient {
    * @returns Current `SyncStatus` value.
    */
   getStatus(): SyncStatus {
-    return this.status;
+    return this.currentStatus;
   }
 
   /**
@@ -124,47 +135,55 @@ export class TetherSyncClient {
    */
   onStatusChange(listener: (status: SyncStatus) => void): () => void {
     this.statusListeners.add(listener);
-    listener(this.status);
+    listener(this.currentStatus);
     return () => this.statusListeners.delete(listener);
   }
 
   private setStatus(newStatus: SyncStatus) {
-    if (this.status === newStatus) return;
-    this.status = newStatus;
+    if (this.currentStatus === newStatus) return;
+    this.currentStatus = newStatus;
     for (const listener of this.statusListeners) {
       try {
         listener(newStatus);
       } catch (err) {
-        console.error('[TetherDB] Sync status listener error:', err);
+        console.error('[Sync] Status listener error:', err);
       }
     }
   }
 
   /**
    * Initiates a WebSocket connection to the sync endpoint and sends authentication.
+   *
+   * @param token - Optional session token to connect with.
+   * @param url - Optional WebSocket URL override.
    */
-  connect(): void {
-    if (this.isDestroyed || this.ws) return;
+  connect(token?: string, url?: string): void {
+    if (token) this.token = token;
+    if (url) this.url = url;
+
+    if (!this.token || !this.url) return;
+    if (this.isDestroyed || this.webSocket) return;
+
     this.setStatus(SyncStatus.Connecting);
 
     const WS =
       this.options.WebSocketClass ??
       (typeof WebSocket !== 'undefined' ? WebSocket : null);
     if (!WS) {
-      console.warn('[TetherDB] No WebSocket implementation found.');
+      console.warn('[Sync] No WebSocket implementation found.');
       this.setStatus(SyncStatus.Error);
       return;
     }
 
     try {
-      this.ws = new WS(this.options.url) as WebSocket;
+      this.webSocket = new WS(this.url) as WebSocket;
     } catch (_err) {
       this.setStatus(SyncStatus.Error);
       this.scheduleReconnect();
       return;
     }
 
-    this.ws.onopen = async () => {
+    this.webSocket.onopen = async () => {
       if (this.isDestroyed) {
         this.disconnect();
         return;
@@ -172,28 +191,28 @@ export class TetherSyncClient {
       await this.sendAuth();
     };
 
-    this.ws.onmessage = async (event) => {
+    this.webSocket.onmessage = async (event) => {
       try {
         const raw =
           typeof event.data === 'string' ? event.data : event.data.toString();
         const msg: ServerMessage = JSON.parse(raw);
         await this.handleServerMessage(msg);
       } catch (err) {
-        console.error('[TetherDB] Failed to process message from server:', err);
+        console.error('[Sync] Failed to process message from server:', err);
       }
     };
 
-    this.ws.onclose = () => {
-      this.ws = null;
+    this.webSocket.onclose = () => {
+      this.webSocket = null;
       if (!this.isDestroyed) {
         this.setStatus(SyncStatus.Disconnected);
         this.scheduleReconnect();
       }
     };
 
-    this.ws.onerror = (err) => {
-      console.error('[TetherDB] WebSocket error:', err);
-      this.ws?.close();
+    this.webSocket.onerror = (err) => {
+      console.error('[Sync] WebSocket error:', err);
+      this.webSocket?.close();
     };
   }
 
@@ -210,9 +229,18 @@ export class TetherSyncClient {
       clearTimeout(this.pushTimer);
       this.pushTimer = null;
     }
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
+    if (this.webSocket) {
+      const ws = this.webSocket;
+      this.webSocket = null;
+      ws.onopen = null;
+      ws.onmessage = null;
+      ws.onerror = () => {};
+      ws.onclose = null;
+      try {
+        ws.close();
+      } catch {
+        // Ignored during intentional disconnect
+      }
     }
     this.setStatus(SyncStatus.Disconnected);
   }
@@ -226,141 +254,119 @@ export class TetherSyncClient {
     this.statusListeners.clear();
   }
 
-  private scheduleReconnect(): void {
-    if (this.isDestroyed || this.reconnectTimer) return;
-    this.reconnectAttempts += 1;
-    const baseInterval = this.options.reconnectIntervalMs ?? 1000;
-    const maxInterval = this.options.maxReconnectIntervalMs ?? 30000;
-    const delay = Math.min(
-      baseInterval * 1.5 ** Math.min(this.reconnectAttempts - 1, 8),
-      maxInterval,
-    );
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      this.connect();
-    }, delay);
-  }
-
-  private startPing(): void {
+  private startPing() {
     this.stopPing();
     const interval = this.options.pingIntervalMs ?? 30000;
     if (interval <= 0) return;
+
     this.pingTimer = setInterval(() => {
-      if (this.ws && this.ws.readyState === 1 /* OPEN */) {
-        this.send({ type: ClientMessageType.Ping });
-      }
+      this.send({ type: ClientMessageType.Ping });
     }, interval);
   }
 
-  private stopPing(): void {
+  private stopPing() {
     if (this.pingTimer) {
       clearInterval(this.pingTimer);
       this.pingTimer = null;
     }
   }
 
-  private send(msg: ClientMessage): void {
-    if (this.ws && this.ws.readyState === 1 /* OPEN */) {
-      this.ws.send(JSON.stringify(msg));
+  private scheduleReconnect() {
+    if (this.reconnectTimer || this.isDestroyed) return;
+    const base = this.options.reconnectIntervalMs ?? 1000;
+    const max = this.options.maxReconnectIntervalMs ?? 30000;
+    const delay = Math.min(base * 2 ** this.reconnectAttempts, max);
+    this.reconnectAttempts++;
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, delay);
+  }
+
+  private send(msg: ClientMessage) {
+    if (
+      this.webSocket &&
+      this.webSocket.readyState === (this.webSocket.OPEN ?? 1)
+    ) {
+      this.webSocket.send(JSON.stringify(msg));
     }
   }
 
-  private async sendAuth(): Promise<void> {
-    if (!this.options.appId) {
-      throw new Error('Missing required appId for sync authentication.');
-    }
+  private async sendAuth() {
     const lastSyncSeq = (await this.idb.getMeta<number>('lastSyncSeq')) ?? 0;
-    const msg: ClientMessage = {
+    this.send({
       type: ClientMessageType.Auth,
-      token: this.options.token,
-      clientId: this.getClientId(),
-      lastSyncSeq,
+      token: this.token ?? '',
       appId: this.options.appId,
-    };
-    this.send(msg);
+      clientId: this.clientId,
+      lastSyncSeq,
+    });
   }
 
-  private async handleServerMessage(msg: ServerMessage): Promise<void> {
+  private async handleServerMessage(msg: ServerMessage) {
     switch (msg.type) {
       case ServerMessageType.AuthSuccess: {
         this.reconnectAttempts = 0;
-        this.startPing();
         this.setStatus(SyncStatus.Connected);
-        this.schedulePush(0);
+        this.startPing();
+        await this.pushOutbox();
         break;
       }
-
       case ServerMessageType.AuthError: {
-        console.error('[TetherDB] Auth error from server:', msg.message);
+        console.error('[Sync] Authentication failed:', msg.message);
         this.setStatus(SyncStatus.Error);
         this.disconnect();
         break;
       }
-
       case ServerMessageType.SyncSnapshot: {
-        await this.applySnapshot(msg.snapshot, msg.seq);
-        this.schedulePush(0);
+        await this.handleSnapshot(msg.snapshot, msg.seq);
+        await this.pushOutbox();
         break;
       }
-
       case ServerMessageType.SyncDiff: {
-        await this.applyChanges(msg.changes, msg.toSeq);
-        this.schedulePush(0);
+        await this.handleDiff(msg.changes, msg.toSeq);
+        await this.pushOutbox();
         break;
       }
-
       case ServerMessageType.BroadcastChanges: {
-        await this.applyChanges(msg.changes, msg.seq);
+        await this.handleDiff(msg.changes, msg.seq);
         break;
       }
-
       case ServerMessageType.ChangeAck: {
         const localIds = this.pendingBatches.get(msg.batchId);
         if (localIds) {
-          await this.idb.removeOutboxEntries(localIds);
           this.pendingBatches.delete(msg.batchId);
+          await this.idb.removeOutboxEntries(localIds);
         }
-        if (msg.appliedSeq) {
+        if (msg.appliedSeq !== undefined) {
           await this.idb.setMeta('lastSyncSeq', msg.appliedSeq);
         }
-        // Drain any pending entries that arrived while the previous batch was in-flight
-        this.schedulePush(0);
+        await this.pushOutbox();
         break;
       }
-
       case ServerMessageType.Pong:
         break;
-
-      case ServerMessageType.Error: {
-        console.error('[TetherDB] Server error:', msg.message);
+      case ServerMessageType.Error:
+        console.error('[Sync] Server error:', msg.message);
         break;
-      }
     }
   }
 
-  private async applySnapshot(
-    snapshot: RecordSnapshotItem[],
+  private async handleSnapshot(
+    records: RecordSnapshotItem[],
     seq: number,
   ): Promise<void> {
-    await this.idb.applySnapshotBatch(snapshot, seq);
-
-    const eventsByTable = new Map<
+    const tableEvents = new Map<
       string,
-      Array<{
-        op: OperationType;
-        id: string;
-        data?: unknown;
-        isRemote?: boolean;
-      }>
+      Array<{ op: OperationType; id: string; data?: unknown; isRemote: true }>
     >();
 
-    for (const item of snapshot) {
-      let list = eventsByTable.get(item.table);
-      if (!list) {
-        list = [];
-        eventsByTable.set(item.table, list);
+    for (const item of records) {
+      if (!tableEvents.has(item.table)) {
+        tableEvents.set(item.table, []);
       }
-      list.push({
+      tableEvents.get(item.table)?.push({
         op: item.deleted ? OperationType.Delete : OperationType.Put,
         id: item.id,
         data: item.deleted ? undefined : item.data,
@@ -368,37 +374,30 @@ export class TetherSyncClient {
       });
     }
 
-    for (const [tableName, events] of eventsByTable.entries()) {
+    await this.idb.applySnapshotBatch(records, seq);
+
+    for (const [tableName, events] of tableEvents.entries()) {
       const table = this.getTable(tableName);
       table.notifyRemoteChanges(events);
     }
   }
 
-  private async applyChanges(
+  private async handleDiff(
     changes: ChangeRecord[],
     seq: number,
   ): Promise<void> {
-    await this.idb.applyRemoteChangesBatch(changes, seq);
-
-    const eventsByTable = new Map<
+    const tableEvents = new Map<
       string,
-      Array<{
-        op: OperationType;
-        id: string;
-        data?: unknown;
-        isRemote?: boolean;
-      }>
+      Array<{ op: OperationType; id: string; data?: unknown; isRemote: true }>
     >();
 
     for (const change of changes) {
-      let list = eventsByTable.get(change.table);
-      if (!list) {
-        list = [];
-        eventsByTable.set(change.table, list);
+      if (!tableEvents.has(change.table)) {
+        tableEvents.set(change.table, []);
       }
       const isDelete =
         change.op === OperationType.Delete || Boolean(change.deleted);
-      list.push({
+      tableEvents.get(change.table)?.push({
         op: isDelete ? OperationType.Delete : OperationType.Put,
         id: change.id,
         data: isDelete ? undefined : change.data,
@@ -406,21 +405,21 @@ export class TetherSyncClient {
       });
     }
 
-    for (const [tableName, events] of eventsByTable.entries()) {
+    await this.idb.applyRemoteChangesBatch(changes, seq);
+
+    for (const [tableName, events] of tableEvents.entries()) {
       const table = this.getTable(tableName);
       table.notifyRemoteChanges(events);
     }
   }
 
   /**
-   * Schedules an outbox push, debouncing rapid mutations into a single cohesive batch.
+   * Schedules a debounced push of pending outbox mutations.
    *
-   * @param delayMs - Debounce delay in milliseconds (defaults to 10ms).
+   * @param delayMs - Debounce delay in milliseconds (defaults to 10).
    */
   schedulePush(delayMs = 10): void {
-    if (this.isDestroyed || !this.ws || this.ws.readyState !== 1) return;
-    if (this.pushTimer !== null) return;
-
+    if (this.pushTimer) clearTimeout(this.pushTimer);
     this.pushTimer = setTimeout(() => {
       this.pushTimer = null;
       this.pushOutbox();
@@ -428,16 +427,19 @@ export class TetherSyncClient {
   }
 
   /**
-   * Pushes un-synced outbox changes to the server in a correlated batch.
+   * Immediately extracts queued outbox changes and transmits them to the server.
    */
   async pushOutbox(): Promise<void> {
-    if (this.pushTimer !== null) {
-      clearTimeout(this.pushTimer);
-      this.pushTimer = null;
+    if (
+      this.isPushing ||
+      this.currentStatus !== SyncStatus.Connected ||
+      !this.webSocket ||
+      this.webSocket.readyState !== (this.webSocket.OPEN ?? 1)
+    ) {
+      return;
     }
-    if (this.isPushing || !this.ws || this.ws.readyState !== 1) return;
-    this.isPushing = true;
 
+    this.isPushing = true;
     try {
       const pending = await this.idb.getPendingOutbox(500);
       if (pending.length === 0) return;
@@ -455,14 +457,14 @@ export class TetherSyncClient {
 
       this.pendingBatches.set(batchId, localIds);
 
-      const msg: ClientMessage = {
+      this.send({
         type: ClientMessageType.ChangeBatch,
-        clientId: this.getClientId(),
+        clientId: this.clientId,
         batchId,
         changes,
-      };
-
-      this.send(msg);
+      });
+    } catch (err) {
+      console.error('[Sync] Failed to push outbox batch:', err);
     } finally {
       this.isPushing = false;
     }

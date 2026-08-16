@@ -1,5 +1,6 @@
 import * as http from 'node:http';
 import { WebSocketServer } from 'ws';
+import { normalizeBasePath } from '../shared/index.js';
 import type { Storage, UserStorage } from './storage/index.js';
 import { MemoryStorage } from './storage/memory/index.js';
 import { SyncHub } from './sync-hub.js';
@@ -373,11 +374,4 @@ export async function startServer(
       await server.close();
     },
   };
-}
-
-function normalizeBasePath(path: string): string {
-  if (path === '' || path === '/') return '';
-  if (path.endsWith('/')) path = path.slice(0, path.length - 1);
-  if (!path.startsWith('/')) path = `/${path}`;
-  return path === '/' ? '' : path;
 }

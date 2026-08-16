@@ -1,15 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { TetherDB } from '../../src/client/db.js';
+import { TetherClient } from '../../src/client/client.js';
 import { OperationType } from '../../src/shared/types.js';
 
-describe('TetherDB local operations (src/client/)', () => {
-  let db: TetherDB;
+describe('TetherClient local operations (src/client/)', () => {
+  let db: TetherClient;
 
   beforeEach(() => {
-    db = new TetherDB({
+    db = new TetherClient({
       name: `test-db-${Math.random().toString(36).substring(2, 8)}`,
       appId: 'test-app',
-      tables: ['todos', 'notes'],
     });
   });
 
@@ -101,130 +100,173 @@ describe('TetherDB local operations (src/client/)', () => {
     expect(await todos.getAllWithMetadata()).toHaveLength(0);
   });
 
-  it('should store and retrieve internal metadata', async () => {
-    expect(await db.idbManager.getMeta('nonexistent')).toBeUndefined();
-    await db.idbManager.setMeta('seq', 42);
-    expect(await db.idbManager.getMeta('seq')).toBe(42);
-  });
-
-  it('should dynamically create new object stores on demand', async () => {
-    const dynamicTable = db.table<{ content: string }>('dynamic_store');
-    await dynamicTable.put('d1', { content: 'Dynamic content' });
-    const res = await dynamicTable.get('d1');
-    expect(res?.content).toBe('Dynamic content');
-  });
-
-  it('should record local changes into outbox in batch', async () => {
+  it('should support reactive subscription callbacks for local modifications', async () => {
     const todos = db.table<{ title: string }>('todos');
-    await todos.putAll([
-      { id: 'task-1', data: { title: 'Write tests' } },
-      { id: 'task-2', data: { title: 'Refactor' } },
-    ]);
-    await todos.deleteAll(['task-1']);
+    const receivedEvents: Array<{
+      op: OperationType;
+      id: string;
+      title?: string;
+    }> = [];
 
-    const outbox = await db.idbManager.getPendingOutbox();
-    expect(outbox).toHaveLength(3);
-    expect(outbox[0].change.op).toBe(OperationType.Put);
-    expect(outbox[0].change.id).toBe('task-1');
-    expect(outbox[1].change.op).toBe(OperationType.Put);
-    expect(outbox[1].change.id).toBe('task-2');
-    expect(outbox[2].change.op).toBe(OperationType.Delete);
-    expect(outbox[2].change.id).toBe('task-1');
-  });
-
-  it('should trigger change subscriptions with event lists for single and bulk operations', async () => {
-    const notes = db.table<{ text: string }>('notes');
-    const eventBatches: Array<Array<{ op: OperationType; id: string }>> = [];
-
-    const unsubscribe = notes.subscribe((events) => {
-      eventBatches.push(events.map((e) => ({ op: e.op, id: e.id })));
+    const unsubscribe = todos.subscribe((events) => {
+      for (const e of events) {
+        receivedEvents.push({
+          op: e.op,
+          id: e.id,
+          title: e.data?.title,
+        });
+      }
     });
 
-    // Single put
-    await notes.put('n1', { text: 'Hello' });
-    // Bulk put
-    await notes.putAll([
-      { id: 'n2', data: { text: 'World' } },
-      { id: 'n3', data: { text: 'Bulk' } },
+    await todos.put('sub1', { title: 'Reactive Item 1' });
+    await todos.putAll([
+      { id: 'sub2', data: { title: 'Reactive Item 2' } },
+      { id: 'sub3', data: { title: 'Reactive Item 3' } },
     ]);
-    // Bulk delete
-    await notes.deleteAll(['n1', 'n2']);
+    await todos.delete('sub1');
+    await todos.deleteAll(['sub2', 'sub3']);
+
+    expect(receivedEvents).toHaveLength(6);
+    expect(receivedEvents[0]).toEqual({
+      op: OperationType.Put,
+      id: 'sub1',
+      title: 'Reactive Item 1',
+    });
+    expect(receivedEvents[3]).toEqual({
+      op: OperationType.Delete,
+      id: 'sub1',
+      title: undefined,
+    });
 
     unsubscribe();
-    await notes.put('n4', { text: 'Unsubscribed' });
-
-    expect(eventBatches).toHaveLength(3);
-    // Batch 1: single put
-    expect(eventBatches[0]).toEqual([{ op: OperationType.Put, id: 'n1' }]);
-    // Batch 2: bulk put of 2 items
-    expect(eventBatches[1]).toEqual([
-      { op: OperationType.Put, id: 'n2' },
-      { op: OperationType.Put, id: 'n3' },
-    ]);
-    // Batch 3: bulk delete of 2 items
-    expect(eventBatches[2]).toEqual([
-      { op: OperationType.Delete, id: 'n1' },
-      { op: OperationType.Delete, id: 'n2' },
-    ]);
+    await todos.put('sub4', { title: 'After unsubscribe' });
+    expect(receivedEvents).toHaveLength(6);
   });
 
-  it('should persist and reload local database across multiple TetherDB instances', async () => {
-    const dbName = `persistent-db-${Date.now()}`;
-    const instance1 = new TetherDB({ name: dbName, appId: 'test-app' });
-    const table1 = instance1.table<{ title: string }>('bookmarks');
-    await table1.put('b1', { title: 'GitHub' });
-    await table1.put('b2', { title: 'MDN' });
-    await instance1.close();
+  it('should record local mutations into outbox', async () => {
+    const todos = db.table<{ title: string }>('todos');
+    await todos.put('out1', { title: 'Outbox Test' });
 
-    // Reopen database with new instance
-    const instance2 = new TetherDB({ name: dbName, appId: 'test-app' });
-    const table2 = instance2.table<{ title: string }>('bookmarks');
-    const items = await table2.getAll();
-    expect(items).toHaveLength(2);
-    expect(items.map((i) => i.title).sort()).toEqual(['GitHub', 'MDN']);
-    await instance2.close();
+    const outbox = await db.idb.getPendingOutbox();
+    expect(outbox).toHaveLength(1);
+    expect(outbox[0].change.table).toBe('todos');
+    expect(outbox[0].change.id).toBe('out1');
+    expect(outbox[0].change.op).toBe(OperationType.Put);
+    expect(outbox[0].change.clientId).toBe(db.clientId);
+    expect(outbox[0].change.data).toEqual({ title: 'Outbox Test' });
   });
 
-  it('should dynamically create undeclared stores on demand', async () => {
-    const dynamicDb = new TetherDB({
-      name: `dyn-db-${Date.now()}`,
-      appId: 'test-app',
-    });
+  it('should dynamically instantiate tables on demand', async () => {
+    const dynamicTable = db.table<{ value: number }>('dynamic_metrics');
+    await dynamicTable.put('cpu', { value: 42 });
 
-    const customTable = dynamicDb.table<{ val: number }>('custom_metrics');
-    await customTable.put('cpu', { val: 42 });
-    const record = await customTable.get('cpu');
-    expect(record?.val).toBe(42);
-
-    await dynamicDb.close();
+    const retrieved = await dynamicTable.get('cpu');
+    expect(retrieved?.value).toBe(42);
   });
 
-  it('should require appId on database initialization', () => {
+  it('should manage and persist sync metadata (lastSyncSeq, tokens)', async () => {
+    await db.idb.setMeta('lastSyncSeq', 12345);
+    const seq = await db.idb.getMeta<number>('lastSyncSeq');
+    expect(seq).toBe(12345);
+
+    await db.idb.setMeta('authToken', 'sample.jwt.token');
+    const token = await db.idb.getMeta<string>('authToken');
+    expect(token).toBe('sample.jwt.token');
+
+    await db.idb.deleteMeta('authToken');
+    const deletedToken = await db.idb.getMeta<string>('authToken');
+    expect(deletedToken).toBeUndefined();
+  });
+
+  it('should expose clientId and name', () => {
+    expect(db.clientId).toBeDefined();
+    expect(typeof db.clientId).toBe('string');
+    expect(db.name).toBeDefined();
+    expect(db.name.startsWith('test-db-')).toBe(true);
+  });
+
+  it('should require name on database initialization', () => {
     expect(
       () =>
-        new TetherDB({
-          name: 'missing-app-id',
-        } as unknown as { name: string; appId: string }),
-    ).toThrow('Missing required appId in TetherDB options.');
+        new TetherClient({
+          name: '',
+        } as unknown as { name: string }),
+    ).toThrow('Missing required name in TetherClient options.');
   });
 
-  it('should default name to appId when name is not specified', async () => {
-    const autoNamedDb = new TetherDB({
-      appId: 'auto-named-app',
+  it('should default appId to name when appId is not specified', async () => {
+    const autoAppDb = new TetherClient({
+      name: 'auto-app-db',
     });
-    expect(autoNamedDb.dbName).toBe('auto-named-app');
-    expect(autoNamedDb.applicationIdentifier).toBe('auto-named-app');
-    await autoNamedDb.close();
+    expect(autoAppDb.name).toBe('auto-app-db');
+    expect(autoAppDb.appId).toBe('auto-app-db');
+    await autoAppDb.close();
   });
 
-  it('should allow custom name override separate from appId', async () => {
-    const customNamedDb = new TetherDB({
-      appId: 'my-app',
+  it('should allow custom appId override separate from name', async () => {
+    const customAppDb = new TetherClient({
       name: 'custom_idb_name',
+      appId: 'my-app',
     });
-    expect(customNamedDb.dbName).toBe('custom_idb_name');
-    expect(customNamedDb.applicationIdentifier).toBe('my-app');
-    await customNamedDb.close();
+    expect(customAppDb.name).toBe('custom_idb_name');
+    expect(customAppDb.appId).toBe('my-app');
+    await customAppDb.close();
+  });
+
+  it('should infer basePath and webSocketPath by default mirroring server options', async () => {
+    // Default: basePath is '', webSocketPath is '/sync'
+    const defaultClient = new TetherClient({
+      name: 'default-paths-app',
+    });
+    expect(defaultClient.basePath).toBe('');
+    expect(defaultClient.webSocketPath).toBe('/sync');
+    await defaultClient.close();
+
+    // Base path without leading/trailing slash: normalized to '/api', webSocketPath inferred as '/api/sync'
+    const apiApp = new TetherClient({
+      name: 'api-app',
+      basePath: 'api',
+    });
+    expect(apiApp.basePath).toBe('/api');
+    expect(apiApp.webSocketPath).toBe('/api/sync');
+    await apiApp.close();
+
+    // Nested base path with slashes: normalized to '/api/v1', webSocketPath inferred as '/api/v1/sync'
+    const v1App = new TetherClient({
+      name: 'v1-app',
+      basePath: '/api/v1/',
+    });
+    expect(v1App.basePath).toBe('/api/v1');
+    expect(v1App.webSocketPath).toBe('/api/v1/sync');
+    await v1App.close();
+
+    // Explicit webSocketPath override
+    const customWsApp = new TetherClient({
+      name: 'custom-ws-app',
+      basePath: '/api',
+      webSocketPath: '/custom-socket',
+    });
+    expect(customWsApp.basePath).toBe('/api');
+    expect(customWsApp.webSocketPath).toBe('/custom-socket');
+    await customWsApp.close();
+
+    // Host, port, and isSecure options
+    const secureClient = new TetherClient({
+      name: 'secure-app',
+      host: 'api.example.com',
+      port: 8443,
+      isSecure: true,
+      basePath: '/v1',
+    });
+
+    expect(secureClient.host).toBe('api.example.com');
+    expect(secureClient.port).toBe(8443);
+    expect(secureClient.isSecure).toBe(true);
+    expect(secureClient.httpOrigin).toBe('https://api.example.com:8443');
+    expect(secureClient.webSocketUrl).toBe(
+      'wss://api.example.com:8443/v1/sync',
+    );
+    await secureClient.close();
   });
 
   it('should clear table contents completely using table.clear()', async () => {

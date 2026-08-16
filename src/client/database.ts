@@ -25,7 +25,7 @@ export interface OutboxEntry {
 }
 
 /**
- * Mutation item payload passed to `IDBManager.applyLocalChanges`.
+ * Mutation item payload passed to `Database.applyLocalChanges`.
  */
 export interface LocalMutationItem<T = unknown> {
   /** Target record identifier. */
@@ -43,13 +43,13 @@ export interface LocalMutationItem<T = unknown> {
  * internal outbox changelogs and sync metadata stores.
  * All mutations and ingestion workflows are batched by default.
  */
-export class IDBManager {
+export class Database {
   private dbPromise: Promise<IDBDatabase> | null = null;
   private dbName: string;
   private tableNames: Set<string>;
 
   /**
-   * Creates a new IDBManager instance.
+   * Creates a new Database instance.
    *
    * @param dbName - Name of the IndexedDB database.
    * @param initialTables - Array of application table names to initialize.
@@ -220,11 +220,26 @@ export class IDBManager {
   }
 
   /**
+   * Deletes a metadata entry from the internal metadata store.
+   *
+   * @param key - The metadata key identifier.
+   */
+  async deleteMeta(key: string): Promise<void> {
+    const db = await this.getDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(META_STORE, 'readwrite');
+      const store = tx.objectStore(META_STORE);
+      const req = store.delete(key);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  /**
    * Retrieves a single stored record by table and identifier.
    *
    * @typeParam T - Expected payload type.
    * @param tableName - Table name.
-   * @param id - Record identifier.
    * @returns Stored record or `undefined` if not found.
    */
   async getRecord<T = unknown>(
@@ -504,8 +519,33 @@ export class IDBManager {
   }
 
   /**
+   * Clears only user table stores, leaving internal metadata and outbox intact if desired.
+   *
+   * @param clearOutbox - Whether to clear the pending outbox queue as well (defaults to `true`).
+   */
+  async clearTables(clearOutbox = true): Promise<void> {
+    const db = await this.getDB();
+    const storeNames = Array.from(db.objectStoreNames).filter((name) => {
+      if (name === META_STORE) return false;
+      if (name === OUTBOX_STORE && !clearOutbox) return false;
+      return true;
+    });
+    if (storeNames.length === 0) return;
+
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(storeNames, 'readwrite');
+      for (const name of storeNames) {
+        tx.objectStore(name).clear();
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  /**
    * Clears all local table stores, outbox changelog entries, and metadata.
    */
+
   async clearAllData(): Promise<void> {
     const db = await this.getDB();
     const storeNames = Array.from(db.objectStoreNames);

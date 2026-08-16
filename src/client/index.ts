@@ -4,8 +4,8 @@
  * @module tetherdb/client
  */
 
-export * from './auth-client.js';
-export * from './db.js';
-export * from './idb.js';
+export * from './auth.js';
+export * from './client.js';
+export * from './database.js';
 export * from './sync.js';
 export * from './table.js';

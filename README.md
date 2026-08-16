@@ -54,19 +54,21 @@ console.log(`TetherDB running at http://${running.host}:${running.port}`);
 ### 2. Client Usage: Multi-App Offline-First to Real-Time Sync
 
 ```typescript
-import { TetherDB } from 'tetherdb/client';
+import { TetherClient } from 'tetherdb/client';
 
 interface Todo {
   title: string;
   completed: boolean;
 }
 
-// 1. Initialize local database scoped to your application
-const db = new TetherDB({
+// 1. Initialize local client scoped to your application
+const client = new TetherClient({
   name: 'my-todos',
   appId: 'todo-app', // Partition data & sync channels per application
+  host: 'localhost',
+  port: 8080,
 });
-const todos = db.table<Todo>('todos');
+const todos = client.table<Todo>('todos');
 
 // Reactive subscription to local & remote changes
 const unsubscribe = todos.subscribe((events) => {
@@ -92,15 +94,15 @@ const task = await todos.get('task-1');
 const allTasks = await todos.getAll();
 
 // 2. Connect sync seamlessly when user registers or logs in
-await db.register({
-  serverUrl: 'http://localhost:8080',
+await client.register({
   username: 'alice',
   password: 'mypassword',
+  remember: true, // Automatically restores session on next page reload
 });
 
 // Monitor live synchronization status
-db.onSyncStatusChange((status) => {
-  console.log('Sync status:', status); // 'connected', 'connecting', 'disconnected', 'error'
+client.onSyncStatusChange((status) => {
+  console.log('Sync status:', status);
 });
 ```
 
@@ -122,11 +124,14 @@ The standard server provides authentication, health, and WebSocket sync endpoint
 ## Architecture & Subpaths
 
 - **`tetherdb/client`**:
-  - `TetherDB`: Main database client with local-first storage, multi-app support, dynamic sync, and auth helpers.
+  - `TetherClient`: Main reactive facade client with local-first storage, multi-app support, auto-session, and auth helpers.
   - `Table`: Typed table wrapper around IndexedDB object stores supporting single and bulk CRUD (`put`, `putAll`, `delete`, `deleteAll`, `get`, `getAll`, `clear`).
-  - `TetherSyncClient`: Real-time WebSocket sync manager with debounced outbox draining and exponential backoff.
-  - `TetherAuthClient`: Lightweight HTTP client for authentication endpoints.
-  - `IDBManager`: IndexedDB layer with outbox and metadata stores.
+  - `Sync`: Real-time WebSocket sync coordinator with debounced outbox draining and exponential backoff.
+  - `Auth`: Internal authentication coordinator managing sessions and metadata persistence.
+  - `Database`: IndexedDB layer with outbox and metadata stores.
+
+
+
 - **`tetherdb/server`**:
   - `startServer`: Zero-config server launcher with automatic port assignment and clean shutdown.
   - `TetherServer`: Unified HTTP and WebSocket server with discovery endpoints.

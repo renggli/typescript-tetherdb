@@ -1,9 +1,10 @@
 import {
-  type AuthResult,
+  AuthStatus,
+  DataMode,
   SyncStatus,
   type Table,
   type TableChangeEvent,
-  TetherDB,
+  TetherClient,
 } from 'tetherdb';
 
 /**
@@ -40,23 +41,12 @@ enum AuthMode {
   Register = 'register',
 }
 
-// User State from storage
-let currentUser: AuthResult | null = (() => {
-  const saved = localStorage.getItem('tether_todo_user');
-  if (!saved) return null;
-  try {
-    return JSON.parse(saved) as AuthResult;
-  } catch {
-    return null;
-  }
-})();
-
 // Database & UI State
-const db = new TetherDB({ appId: 'todo-example' });
+const db = new TetherClient({ name: 'todo-example' });
 const todosTable: Table<TodoItem> = db.table<TodoItem>('todos');
+
 let currentFilter: FilterMode = FilterMode.All;
 let authMode: AuthMode = AuthMode.Login;
-let isReauthenticating = false;
 
 // DOM References
 const currentUsernameEl = document.getElementById(
@@ -118,17 +108,29 @@ function logEvent(category: LogCategory, tag: string, message: string): void {
 }
 
 /**
+ * Escapes HTML characters in user-provided strings.
+ */
+function escapeHtml(text: string): string {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+/**
  * Updates the user badge text.
  */
 function updateUserUI(): void {
-  currentUsernameEl.textContent = currentUser?.username ?? 'Offline Guest';
+  currentUsernameEl.textContent =
+    db.authStatus === AuthStatus.SignedIn
+      ? (db.username ?? 'Authenticated User')
+      : 'Offline Guest';
 }
 
 /**
  * Updates the sync status badge in the header.
  */
 function updateSyncStatusUI(status: SyncStatus): void {
-  statusPill.className = `status-pill status-${status}`;
+  statusPill.className = `status-pill status-${SyncStatus[status].toLowerCase()}`;
   switch (status) {
     case SyncStatus.Connected:
       statusText.textContent = 'Connected & Live';
@@ -140,7 +142,8 @@ function updateSyncStatusUI(status: SyncStatus): void {
       statusText.textContent = 'Offline (Local Only)';
       break;
     case SyncStatus.Error:
-      statusText.textContent = currentUser ? 'Sync Error' : 'Auth Required';
+      statusText.textContent =
+        db.authStatus === AuthStatus.SignedIn ? 'Sync Error' : 'Auth Required';
       break;
   }
 }
@@ -181,49 +184,48 @@ async function renderTodos(): Promise<void> {
       li.className = `todo-item ${item.data.completed ? 'completed' : ''}`;
       li.dataset.id = item.id;
 
-      li.innerHTML = `
-        <div class="todo-left">
-          <input type="checkbox" class="todo-checkbox" ${item.data.completed ? 'checked' : ''}>
-          <span class="todo-text">${escapeHtml(item.data.title)}</span>
-        </div>
-        <button type="button" class="delete-btn" title="Delete todo">✕</button>
-      `;
-
-      // Checkbox toggle: saves locally & triggers background sync via todosTable.put()
-      const checkbox = li.querySelector(
-        '.todo-checkbox',
-      ) as HTMLInputElement | null;
-      checkbox?.addEventListener('change', async () => {
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.className = 'todo-toggle';
+      checkbox.checked = item.data.completed;
+      checkbox.addEventListener('change', async () => {
         await todosTable.put(item.id, {
-          ...item.data,
+          title: item.data.title,
           completed: checkbox.checked,
         });
       });
 
-      // Delete: removes locally & triggers background sync via todosTable.delete()
-      const deleteBtn = li.querySelector(
-        '.delete-btn',
-      ) as HTMLButtonElement | null;
-      deleteBtn?.addEventListener('click', async () => {
+      const span = document.createElement('span');
+      span.className = 'todo-title';
+      span.textContent = item.data.title;
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'todo-delete-btn';
+      deleteBtn.setAttribute('aria-label', `Delete "${item.data.title}"`);
+      deleteBtn.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="3 6 5 6 21 6"></polyline>
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+        </svg>
+      `;
+      deleteBtn.addEventListener('click', async () => {
         await todosTable.delete(item.id);
       });
 
+      li.appendChild(checkbox);
+      li.appendChild(span);
+      li.appendChild(deleteBtn);
       todoList.appendChild(li);
     }
 
     if (remainingCount > 0) {
       const moreLi = document.createElement('li');
       moreLi.className = 'todo-item-more';
-      moreLi.textContent = `... and ${remainingCount} more`;
+      moreLi.textContent = `... and ${remainingCount} more items`;
       todoList.appendChild(moreLi);
     }
   }
-}
-
-function escapeHtml(text: string): string {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
 }
 
 // Add new Todo: writes locally to IndexedDB and automatically queues for sync if enabled
@@ -299,20 +301,30 @@ authForm.addEventListener('submit', async (e: SubmitEvent) => {
 
   const username = authUsername.value.trim();
   const password = authPassword.value;
-  const serverUrl = window.location.origin;
 
   try {
-    let result: AuthResult;
+    let success = false;
     if (authMode === AuthMode.Register) {
-      result = await db.register({ serverUrl, username, password });
+      success = await db.register({
+        username,
+        password,
+        remember: true,
+        dataMode: DataMode.Local,
+      });
     } else {
-      result = await db.login({ serverUrl, username, password });
+      success = await db.login({
+        username,
+        password,
+        remember: true,
+        dataMode: DataMode.Merge,
+      });
     }
 
-    currentUser = result;
-    localStorage.setItem('tether_todo_user', JSON.stringify(currentUser));
-    updateUserUI();
-    authDialog.close();
+    if (success) {
+      authDialog.close();
+    } else {
+      throw new Error('Authentication failed. Please check credentials.');
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Authentication error';
     authError.textContent = message;
@@ -321,11 +333,9 @@ authForm.addEventListener('submit', async (e: SubmitEvent) => {
 });
 
 /**
- * Initializes application, reactive table subscribers, and auto-connects sync if token exists.
+ * Initializes application, reactive table subscribers, and auto-connects sync.
  */
 async function init(): Promise<void> {
-  updateUserUI();
-
   // 1. Subscribe to reactive Table changes
   todosTable.subscribe((events: TableChangeEvent<TodoItem>[]) => {
     for (const { op, id, isRemote, data } of events) {
@@ -337,52 +347,21 @@ async function init(): Promise<void> {
     renderTodos();
   });
 
-  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${wsProtocol}//${window.location.host}/sync`;
-
-  // Helper to authenticate as demo account created by the server
-  const autoAuthenticateDemo = async () => {
-    try {
-      currentUser = await db.login({
-        serverUrl: window.location.origin,
-        username: 'demo',
-        password: 'password123',
-      });
-      localStorage.setItem('tether_todo_user', JSON.stringify(currentUser));
-      updateUserUI();
-    } catch {
-      // Server offline -> local-only offline mode
-    }
-  };
-
-  // 2. Monitor sync connection status changes with auto-recovery for stale/invalid tokens
-  db.onSyncStatusChange(async (status: SyncStatus) => {
-    updateSyncStatusUI(status);
-    logEvent(LogCategory.Sync, 'SyncStatus', status.toUpperCase());
-
-    if (status === SyncStatus.Error && !isReauthenticating) {
-      isReauthenticating = true;
-      localStorage.removeItem('tether_todo_user');
-      const wasDemo = currentUser?.username === 'demo' || !currentUser;
-      currentUser = null;
-      updateUserUI();
-
-      if (wasDemo) {
-        logEvent(LogCategory.Sync, 'Auth', 'Refreshing demo authentication...');
-        await autoAuthenticateDemo();
-      } else {
-        logEvent(LogCategory.Sync, 'Auth', 'Session expired. Please log in.');
-      }
-      isReauthenticating = false;
-    }
+  // 2. React to Auth status changes
+  db.onAuthStatusChange((status) => {
+    updateUserUI();
+    logEvent(LogCategory.Sync, 'Auth', `AuthStatus: ${AuthStatus[status]}`);
   });
 
-  // 3. Connect sync if user previously logged in, or auto-connect demo account
-  if (currentUser?.token) {
-    db.enableSync({ url: wsUrl, token: currentUser.token });
-  } else {
-    await autoAuthenticateDemo();
-  }
+  // 3. React to Sync status changes
+  db.onSyncStatusChange((status) => {
+    updateSyncStatusUI(status);
+    logEvent(
+      LogCategory.Sync,
+      'SyncStatus',
+      `SyncStatus: ${SyncStatus[status]}`,
+    );
+  });
 
   // Initial render from local IndexedDB
   await renderTodos();

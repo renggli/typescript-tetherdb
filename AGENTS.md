@@ -35,9 +35,16 @@ The codebase is organized into three decoupled layers with clear subpath exports
 
 - **Client Layer (`src/client/`)**:
   - Exported as `tetherdb/client`.
-  - **IndexedDB Layer (`idb.ts`)**: Atomic transaction coordinator managing user object stores alongside internal outbox and metadata stores.
+  - **TetherClient (`client.ts`)**: Main reactive facade client with local-first storage, multi-app support, auto-session, and auth helpers.
+  - **Auth (`auth.ts`)**: Internal authentication coordinator managing sessions, metadata, and auth HTTP endpoints.
+  - **Database (`database.ts`)**: Atomic transaction coordinator managing user object stores alongside internal outbox and metadata stores.
   - **Tables (`table.ts`)**: Typed table wrappers providing local-first CRUD operations and reactive event subscriptions.
-  - **Sync Client (`sync.ts`)**: Two-way WebSocket sync coordinator managing initial snapshot / diff downloads, outbox queue flushing, acknowledgments, and auto-reconnect backoff.
+  - **Sync (`sync.ts`)**: Two-way WebSocket sync coordinator managing initial snapshot / diff downloads, outbox queue flushing, acknowledgments, and auto-reconnect backoff.
+
+
+
+
+
 
 - **Server Layer (`src/server/`)**:
   - Exported as `tetherdb/server`.
@@ -60,7 +67,8 @@ The codebase is organized into three decoupled layers with clear subpath exports
 ## 🧪 Testing Rules
 
 - **Zero Test Side Effects**: Tests must be fully isolated and clean up resources (`afterEach`), including closing server listeners, active WebSockets, IndexedDB connections, and temporary filesystem directories.
-- **Fast Unit Tests**: Test core components (`IDBManager`, `Table`, `MemoryAuthAdapter`, `FileAuthAdapter`, `MemoryStorageAdapter`) in isolation.
+- **Fast Unit Tests**: Test core components (`Database`, `Table`, `MemoryAuthAdapter`, `FileAuthAdapter`, `MemoryStorageAdapter`) in isolation.
+
 - **End-to-End Sync Tests**: End-to-end tests must verify real-time multi-client scenarios:
   - Initial snapshot delivery on fresh client connection.
   - Delta diff catch-up after offline reconnect.

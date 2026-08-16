@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket as NodeWebSocket } from 'ws';
-import { TetherDB } from '../../src/client/db.js';
+import { TetherClient } from '../../src/client/client.js';
 import { startServer, TetherServer } from '../../src/server/server.js';
 import { FileStorage } from '../../src/server/storage/file/index.js';
 import { MemoryStorage } from '../../src/server/storage/index.js';
@@ -13,9 +13,8 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
   let tmpDir: string;
   let server: TetherServer;
   let port: number;
-  let serverUrl: string;
   let closeServer: (() => Promise<void>) | null = null;
-  const activeClients: TetherDB[] = [];
+  const activeClients: TetherClient[] = [];
 
   beforeEach(async () => {
     tmpDir = path.join(
@@ -37,7 +36,6 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
     const httpServer = await server.listen(0, '127.0.0.1');
     const addr = httpServer.address();
     port = typeof addr === 'object' && addr ? addr.port : 0;
-    serverUrl = `http://127.0.0.1:${port}`;
     closeServer = () => server.close();
   });
 
@@ -62,18 +60,20 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
 
   it('should isolate data across different applications for the same user', async () => {
     // 1. Register user
-    const db1 = new TetherDB({
+    const db1 = new TetherClient({
       name: `test_todo_app_${Date.now()}`,
       appId: 'todo-app',
+      host: '127.0.0.1',
+      port,
+      WebSocketClass: NodeWebSocket,
     });
     activeClients.push(db1);
 
-    const auth = await db1.register({
-      serverUrl,
+    const success1 = await db1.register({
       username: 'multi_user',
       password: 'password123',
-      WebSocketClass: NodeWebSocket,
     });
+    expect(success1).toBe(true);
 
     const todoTable = db1.table<{ title: string }>('items');
     await todoTable.put('todo_1', { title: 'First Todo Item' });
@@ -82,18 +82,20 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
     await new Promise((r) => setTimeout(r, 100));
 
     // 2. Open a separate application database for the same user
-    const db2 = new TetherDB({
+    const db2 = new TetherClient({
       name: `test_notes_app_${Date.now()}`,
       appId: 'notes-app',
+      host: '127.0.0.1',
+      port,
+      WebSocketClass: NodeWebSocket,
     });
     activeClients.push(db2);
 
-    await db2.login({
-      serverUrl,
+    const success2 = await db2.login({
       username: 'multi_user',
       password: 'password123',
-      WebSocketClass: NodeWebSocket,
     });
+    expect(success2).toBe(true);
 
     const notesTable = db2.table<{ title: string }>('items');
     await notesTable.put('note_1', { title: 'First Note Item' });
@@ -116,7 +118,7 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
     expect(apps.map((a) => a.id)).toContain('todo-app');
 
     // Check todo-app data
-    const user = await server.storage.getUser(auth.userId);
+    const user = await server.storage.getUserByUsername('multi_user');
     expect(user).toBeDefined();
     if (!user) return;
     const todoApp = await server.storage.getApp('todo-app');
@@ -133,43 +135,46 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
 
   it('should isolate real-time broadcasts so mutations in appA do not trigger subscribers in appB', async () => {
     // App A client 1
-    const clientA1 = new TetherDB({
+    const clientA1 = new TetherClient({
       name: `appA_c1_${Date.now()}`,
       appId: 'app-alpha',
+      host: '127.0.0.1',
+      port,
+      WebSocketClass: NodeWebSocket,
     });
     activeClients.push(clientA1);
 
     await clientA1.register({
-      serverUrl,
       username: 'broadcast_user',
       password: 'password123',
-      WebSocketClass: NodeWebSocket,
     });
 
     // App A client 2 (same app, same user)
-    const clientA2 = new TetherDB({
+    const clientA2 = new TetherClient({
       name: `appA_c2_${Date.now()}`,
       appId: 'app-alpha',
+      host: '127.0.0.1',
+      port,
+      WebSocketClass: NodeWebSocket,
     });
     activeClients.push(clientA2);
     await clientA2.login({
-      serverUrl,
       username: 'broadcast_user',
       password: 'password123',
-      WebSocketClass: NodeWebSocket,
     });
 
     // App B client 1 (different app, same user)
-    const clientB1 = new TetherDB({
+    const clientB1 = new TetherClient({
       name: `appB_c1_${Date.now()}`,
       appId: 'app-beta',
+      host: '127.0.0.1',
+      port,
+      WebSocketClass: NodeWebSocket,
     });
     activeClients.push(clientB1);
     await clientB1.login({
-      serverUrl,
       username: 'broadcast_user',
       password: 'password123',
-      WebSocketClass: NodeWebSocket,
     });
 
     const receivedA2: string[] = [];

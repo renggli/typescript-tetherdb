@@ -5,4 +5,5 @@
  */
 
 export * from './clock.js';
+export * from './path.js';
 export * from './types.js';
