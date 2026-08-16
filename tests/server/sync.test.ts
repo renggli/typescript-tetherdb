@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebSocket } from 'ws';
 import { MemoryStorage } from '../../src/server/storage/memory/index.js';
-import { SyncHub } from '../../src/server/sync-hub.js';
+import { Sync } from '../../src/server/sync.js';
 import {
   ClientMessageType,
   OperationType,
@@ -37,15 +37,15 @@ class MockServerWebSocket extends EventEmitter {
   }
 }
 
-describe('SyncHub (src/server/sync-hub.ts)', () => {
+describe('Sync (src/server/sync.ts)', () => {
   let storage: MemoryStorage;
-  let syncHub: SyncHub;
+  let sync: Sync;
   let validToken: string;
   let testUserId: string;
 
   beforeEach(async () => {
     storage = new MemoryStorage();
-    syncHub = new SyncHub(storage);
+    sync = new Sync(storage);
 
     const app = await storage.createApp('todo-app');
     await app.createTable('todos');
@@ -59,7 +59,7 @@ describe('SyncHub (src/server/sync-hub.ts)', () => {
   describe('Authentication Handshake (ClientMessageType.Auth)', () => {
     it('should reject connection if token is missing or empty', async () => {
       const ws = new MockServerWebSocket();
-      syncHub.handleConnection(ws as unknown as WebSocket);
+      sync.handleConnection(ws as unknown as WebSocket);
 
       ws.emitClientMessage({
         type: ClientMessageType.Auth,
@@ -80,7 +80,7 @@ describe('SyncHub (src/server/sync-hub.ts)', () => {
 
     it('should reject connection if token is invalid or expired', async () => {
       const ws = new MockServerWebSocket();
-      syncHub.handleConnection(ws as unknown as WebSocket);
+      sync.handleConnection(ws as unknown as WebSocket);
 
       ws.emitClientMessage({
         type: ClientMessageType.Auth,
@@ -101,7 +101,7 @@ describe('SyncHub (src/server/sync-hub.ts)', () => {
 
     it('should reject connection if appId is missing or empty', async () => {
       const ws = new MockServerWebSocket();
-      syncHub.handleConnection(ws as unknown as WebSocket);
+      sync.handleConnection(ws as unknown as WebSocket);
 
       ws.emitClientMessage({
         type: ClientMessageType.Auth,
@@ -122,7 +122,7 @@ describe('SyncHub (src/server/sync-hub.ts)', () => {
 
     it('should reject connection if application does not exist', async () => {
       const ws = new MockServerWebSocket();
-      syncHub.handleConnection(ws as unknown as WebSocket);
+      sync.handleConnection(ws as unknown as WebSocket);
 
       ws.emitClientMessage({
         type: ClientMessageType.Auth,
@@ -143,7 +143,7 @@ describe('SyncHub (src/server/sync-hub.ts)', () => {
 
     it('should successfully authenticate and return AuthSuccess + initial snapshot for seq 0', async () => {
       const ws = new MockServerWebSocket();
-      syncHub.handleConnection(ws as unknown as WebSocket);
+      sync.handleConnection(ws as unknown as WebSocket);
 
       ws.emitClientMessage({
         type: ClientMessageType.Auth,
@@ -194,7 +194,7 @@ describe('SyncHub (src/server/sync-hub.ts)', () => {
       ]);
 
       const ws = new MockServerWebSocket();
-      syncHub.handleConnection(ws as unknown as WebSocket);
+      sync.handleConnection(ws as unknown as WebSocket);
 
       ws.emitClientMessage({
         type: ClientMessageType.Auth,
@@ -241,7 +241,7 @@ describe('SyncHub (src/server/sync-hub.ts)', () => {
       ]);
 
       const ws = new MockServerWebSocket();
-      syncHub.handleConnection(ws as unknown as WebSocket);
+      sync.handleConnection(ws as unknown as WebSocket);
 
       ws.emitClientMessage({
         type: ClientMessageType.Auth,
@@ -284,7 +284,7 @@ describe('SyncHub (src/server/sync-hub.ts)', () => {
       await app?.applyChanges(user, changes);
 
       const ws = new MockServerWebSocket();
-      syncHub.handleConnection(ws as unknown as WebSocket);
+      sync.handleConnection(ws as unknown as WebSocket);
 
       // Client connecting with seq 1 (> 50 changes diff)
       ws.emitClientMessage({
@@ -307,7 +307,7 @@ describe('SyncHub (src/server/sync-hub.ts)', () => {
 
     it('should handle InitSync for authenticated client', async () => {
       const ws = new MockServerWebSocket();
-      syncHub.handleConnection(ws as unknown as WebSocket);
+      sync.handleConnection(ws as unknown as WebSocket);
 
       // 1. Auth
       ws.emitClientMessage({
@@ -333,7 +333,7 @@ describe('SyncHub (src/server/sync-hub.ts)', () => {
 
     it('should reject InitSync when client is not authenticated', async () => {
       const ws = new MockServerWebSocket();
-      syncHub.handleConnection(ws as unknown as WebSocket);
+      sync.handleConnection(ws as unknown as WebSocket);
 
       ws.emitClientMessage({
         type: ClientMessageType.InitSync,
@@ -353,7 +353,7 @@ describe('SyncHub (src/server/sync-hub.ts)', () => {
   describe('Change Ingestion & Real-Time Broadcasting (ClientMessageType.ChangeBatch)', () => {
     it('should reject ChangeBatch when client is not authenticated', async () => {
       const ws = new MockServerWebSocket();
-      syncHub.handleConnection(ws as unknown as WebSocket);
+      sync.handleConnection(ws as unknown as WebSocket);
 
       ws.emitClientMessage({
         type: ClientMessageType.ChangeBatch,
@@ -374,7 +374,7 @@ describe('SyncHub (src/server/sync-hub.ts)', () => {
     it('should apply changes, send ChangeAck to sender, and broadcast to other clients of the same app and user', async () => {
       // Client 1 (Sender)
       const ws1 = new MockServerWebSocket();
-      syncHub.handleConnection(ws1 as unknown as WebSocket);
+      sync.handleConnection(ws1 as unknown as WebSocket);
       ws1.emitClientMessage({
         type: ClientMessageType.Auth,
         token: validToken,
@@ -385,7 +385,7 @@ describe('SyncHub (src/server/sync-hub.ts)', () => {
 
       // Client 2 (Receiver - same app, same user)
       const ws2 = new MockServerWebSocket();
-      syncHub.handleConnection(ws2 as unknown as WebSocket);
+      sync.handleConnection(ws2 as unknown as WebSocket);
       ws2.emitClientMessage({
         type: ClientMessageType.Auth,
         token: validToken,
@@ -406,7 +406,7 @@ describe('SyncHub (src/server/sync-hub.ts)', () => {
             table: 'todos',
             id: 'item-1',
             op: OperationType.Put,
-            data: { title: 'SyncHub Todo' },
+            data: { title: 'Sync Todo' },
             timestamp: Date.now(),
             clientId: 'client-1',
           },
@@ -449,7 +449,7 @@ describe('SyncHub (src/server/sync-hub.ts)', () => {
         .mockImplementation(() => {});
 
       const ws = new MockServerWebSocket();
-      syncHub.handleConnection(ws as unknown as WebSocket);
+      sync.handleConnection(ws as unknown as WebSocket);
 
       ws.emitClientMessage({
         type: ClientMessageType.Auth,
@@ -480,7 +480,7 @@ describe('SyncHub (src/server/sync-hub.ts)', () => {
   describe('Ping & Error Handling', () => {
     it('should respond to Ping with Pong', async () => {
       const ws = new MockServerWebSocket();
-      syncHub.handleConnection(ws as unknown as WebSocket);
+      sync.handleConnection(ws as unknown as WebSocket);
 
       ws.emitClientMessage({ type: ClientMessageType.Ping });
       await new Promise((r) => setTimeout(r, 20));
@@ -495,7 +495,7 @@ describe('SyncHub (src/server/sync-hub.ts)', () => {
         .mockImplementation(() => {});
 
       const ws = new MockServerWebSocket();
-      syncHub.handleConnection(ws as unknown as WebSocket);
+      sync.handleConnection(ws as unknown as WebSocket);
 
       // 1. Invalid JSON
       ws.emit('message', '{ invalid');
@@ -519,7 +519,7 @@ describe('SyncHub (src/server/sync-hub.ts)', () => {
         .mockImplementation(() => {});
 
       const ws = new MockServerWebSocket();
-      syncHub.handleConnection(ws as unknown as WebSocket);
+      sync.handleConnection(ws as unknown as WebSocket);
 
       ws.emitClientMessage({
         type: ClientMessageType.Auth,
@@ -535,7 +535,7 @@ describe('SyncHub (src/server/sync-hub.ts)', () => {
       ws.close();
 
       // @ts-expect-error - inspecting internal map
-      expect(syncHub.webSocketToClient.has(ws)).toBe(false);
+      expect(sync.webSocketToClient.has(ws)).toBe(false);
 
       consoleSpy.mockRestore();
     });

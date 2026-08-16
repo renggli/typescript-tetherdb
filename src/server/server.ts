@@ -4,7 +4,7 @@ import { normalizeBasePath } from '../shared/index.js';
 import { TetherServerError, TetherServerErrorCode } from './errors.js';
 import type { Storage, UserStorage } from './storage/index.js';
 import { MemoryStorage } from './storage/memory/index.js';
-import { SyncHub } from './sync-hub.js';
+import { Sync } from './sync.js';
 import { normalizePassword, normalizeUsername } from './validate.js';
 
 /**
@@ -53,8 +53,8 @@ export interface RunningServer {
 export class TetherServer {
   /** Underlying storage engine for users, apps, and tables. */
   readonly storage: Storage;
-  /** Real-time synchronization connection and broadcast hub. */
-  readonly hub: SyncHub;
+  /** Real-time synchronization connection and broadcast coordinator. */
+  readonly sync: Sync;
   /** Base path for HTTP REST endpoints. */
   readonly basePath: string;
   /** Path for WebSocket upgrade requests. */
@@ -71,7 +71,7 @@ export class TetherServer {
    */
   constructor(options: TetherServerOptions = {}) {
     this.storage = options.storage ?? new MemoryStorage();
-    this.hub = new SyncHub(this.storage);
+    this.sync = new Sync(this.storage);
     this.basePath = normalizeBasePath(options.basePath ?? '');
     this.webSocketPath = options.webSocketPath ?? `${this.basePath}/sync`;
   }
@@ -122,7 +122,7 @@ export class TetherServer {
     if (!this.webSocketServer) {
       this.webSocketServer = new WebSocketServer({ noServer: true });
       this.webSocketServer.on('connection', (ws) => {
-        this.hub.handleConnection(ws);
+        this.sync.handleConnection(ws);
       });
     }
     server.on('upgrade', (req, socket, head) => {

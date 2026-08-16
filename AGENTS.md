@@ -51,7 +51,7 @@ The codebase is organized into three decoupled layers with clear subpath exports
   - Exported as `tetherdb/server`.
   - **Authentication (`auth/`)**: Pluggable authentication abstraction with implementations for in-memory testing (`MemoryAuthAdapter`) and filesystem persistence (`FileAuthAdapter`).
   - **Storage Adapters (`storage/`)**: Pluggable storage abstraction with implementations for in-memory testing (`MemoryStorageAdapter`) and per-user filesystem directories (`FileStorageAdapter`).
-  - **Sync Hub (`sync-hub.ts`)**: Real-time WebSocket connection manager and user-isolated broadcast engine.
+  - **Sync (`sync.ts`)**: Real-time WebSocket connection manager and user-isolated broadcast engine.
   - **Server (`server.ts`)**: Unified HTTP and WebSocket server handling authentication endpoints and real-time streaming connections.
 
 ## 🔑 Key TypeScript & Design Conventions

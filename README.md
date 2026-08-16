@@ -16,17 +16,13 @@
 - **Real-Time Broadcast**: Server broadcasts incoming changes in real-time to all other active client instances belonging to the same app and user.
 - **Sharded & Secure File Storage**: Persists data per app and user in sharded directories (`<baseDir>/<appId>/<shard>/<userId>/stores/`) with path confinement and injection defenses.
 - **Simple, Secure Auth**: Built-in account registration, password hashing (scrypt with salt), and HMAC-signed tokens.
-- **Modern Subpath Exports**: Import cleanly via `tetherdb/client`, `tetherdb/server`, and `tetherdb/shared`.
-
----
+- **Modern Subpath Exports**: Import cleanly via `tetherdb/client` and `tetherdb/server`.
 
 ## Installation
 
 ```bash
 npm install tetherdb
 ```
-
----
 
 ## Quick Start
 
@@ -62,8 +58,7 @@ interface Todo {
 }
 
 // 1. Initialize local client scoped to your application
-const client = new TetherClient('my-todos', {
-  appId: 'todo-app', // Partition data & sync channels per application
+const client = new TetherClient('todo-app', {
   host: 'localhost',
   port: 8080,
 });
@@ -105,10 +100,8 @@ client.onSyncStatusChange.register((status) => {
 });
 ```
 
----
-
 ## HTTP Endpoints
- 
+
 The standard server provides authentication and WebSocket sync endpoints:
 
 | Method | Endpoint | Description | Auth Required |
@@ -116,7 +109,6 @@ The standard server provides authentication and WebSocket sync endpoints:
 | `POST` | `/auth/register` | Register a new user account | No |
 | `POST` | `/auth/login` | Log in and receive signed session token | No |
 | `WS` | `/sync` | Two-way WebSocket real-time synchronization | Token handshake in auth message |
-
 
 ---
 
@@ -129,15 +121,13 @@ The standard server provides authentication and WebSocket sync endpoints:
   - `Auth`: Internal authentication coordinator managing sessions and metadata persistence.
   - `Database`: IndexedDB layer with outbox and metadata stores.
 
-
-
 - **`tetherdb/server`**:
   - `startServer`: Zero-config server launcher with automatic port assignment and clean shutdown.
   - `TetherServer`: Unified HTTP and WebSocket server with discovery endpoints.
   - `AuthAdapter`: Pluggable authentication interface for custom identity providers.
   - `MemoryAuthAdapter`: In-memory auth adapter for fast testing and ephemeral workloads.
   - `FileAuthAdapter`: Filesystem-persisted auth adapter storing user credentials and secret keys.
-  - `SyncHub`: WebSocket connection manager with app- and user-level change routing and broadcasting.
+  - `Sync`: WebSocket connection manager with app- and user-level change routing and broadcasting.
   - `FileStorageAdapter`: Multi-app sharded filesystem storage (`<baseDir>/<appId>/<shard>/<userId>/stores/`).
   - `MemoryStorageAdapter`: In-memory storage adapter for testing and ephemeral workloads.
 - **`tetherdb/shared`**:
