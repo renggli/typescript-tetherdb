@@ -348,18 +348,6 @@ export class Auth {
   }
 
   /**
-   * Checks the health status of the server.
-   */
-  async checkHealth(): Promise<boolean> {
-    try {
-      const res = await this.fetchFn(`${this.baseUrl}/health`);
-      return res.ok;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
    * Directly sets signed-in token (for explicit initial sync options).
    */
   setExplicitToken(token: string): void {

@@ -256,10 +256,20 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
     });
 
     expect(runner.port).toBeGreaterThan(0);
-    const res = await fetch(`http://${runner.host}:${runner.port}/health`);
-    expect(res.ok).toBe(true);
-    const body = (await res.json()) as { status: string };
-    expect(body.status).toBe('ok');
+    const regRes = await fetch(
+      `http://${runner.host}:${runner.port}/auth/register`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: 'starter_user',
+          password: 'password123',
+        }),
+      },
+    );
+    expect(regRes.ok).toBe(true);
+    const body = (await regRes.json()) as { userId: string; username: string };
+    expect(body.username).toBe('starter_user');
 
     await runner.close();
   });

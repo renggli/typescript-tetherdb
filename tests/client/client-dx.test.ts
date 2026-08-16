@@ -84,7 +84,6 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
       baseUrl: `http://127.0.0.1:${serverPort}`,
       db: tempDb,
     });
-    expect(await auth.checkHealth()).toBe(true);
 
     const regSuccess = await auth.register({
       username: 'dxuser',

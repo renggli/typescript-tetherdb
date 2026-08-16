@@ -45,9 +45,10 @@ export interface RunningServer {
 }
 
 /**
- * Unified HTTP and WebSocket server handling authentication endpoints (`/auth/register`, `/auth/login`),
- * health checks (`/health`), and real-time streaming connections (`/sync`).
+ * Unified HTTP and WebSocket server handling authentication endpoints (`/auth/register`, `/auth/login`)
+ * and real-time streaming connections (`/sync`).
  */
+
 export class TetherServer {
   readonly storage: Storage;
   readonly hub: SyncHub;
@@ -245,11 +246,6 @@ export class TetherServer {
         return true;
       }
 
-      if (method === 'GET' && url.pathname === `${this.basePath}/health`) {
-        this.handleHealth(res);
-        return true;
-      }
-
       return false;
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Internal server error';
@@ -265,10 +261,6 @@ export class TetherServer {
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     });
     res.end();
-  }
-
-  private handleHealth(res: http.ServerResponse): void {
-    this.sendJson(res, 200, { status: 'ok' });
   }
 
   private async handleRegister(

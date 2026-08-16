@@ -47,7 +47,7 @@ async function main(): Promise<void> {
 
   // 5. Create HTTP server and route API requests to TetherDB
   const server = http.createServer(async (req, res) => {
-    // Handle TetherDB REST endpoints (/auth/register, /auth/login, /health)
+    // Handle TetherDB REST endpoints (/auth/register, /auth/login)
     if (await tetherServer.handleHttpRequest(req, res)) {
       return;
     }

@@ -195,9 +195,17 @@ describe('TetherServer (src/server/server.ts)', () => {
       const addr = httpServer.address();
       const port = typeof addr === 'object' && addr ? addr.port : 8080;
 
-      const res = await fetch(`http://127.0.0.1:${port}/health`);
-      expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ status: 'ok' });
+      const res = await fetch(`http://127.0.0.1:${port}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: 'default_path_user',
+          password: 'password123',
+        }),
+      });
+      expect(res.status).toBe(201);
+      const data = (await res.json()) as { username: string };
+      expect(data.username).toBe('default_path_user');
     });
 
     it('should prefix all REST endpoints and default WebSocket path when basePath is configured', async () => {
@@ -210,14 +218,16 @@ describe('TetherServer (src/server/server.ts)', () => {
       const port = typeof addr === 'object' && addr ? addr.port : 8080;
 
       try {
-        // Health check on custom base path
-        const healthRes = await fetch(`http://127.0.0.1:${port}/api/v1/health`);
-        expect(healthRes.status).toBe(200);
-        expect(await healthRes.json()).toEqual({ status: 'ok' });
-
-        // Health check on root should return 404
-        const rootHealthRes = await fetch(`http://127.0.0.1:${port}/health`);
-        expect(rootHealthRes.status).toBe(404);
+        // Register on root path should return 404 when basePath is /api/v1
+        const rootRes = await fetch(`http://127.0.0.1:${port}/auth/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: 'pathuser',
+            password: 'pathpassword123',
+          }),
+        });
+        expect(rootRes.status).toBe(404);
 
         // Register user on custom base path
         const regRes = await fetch(

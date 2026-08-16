@@ -110,14 +110,14 @@ client.onSyncStatusChange((status) => {
 
 ## HTTP Endpoints
  
-The standard server provides authentication, health, and WebSocket sync endpoints:
+The standard server provides authentication and WebSocket sync endpoints:
 
 | Method | Endpoint | Description | Auth Required |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/health` | Server liveness check (`{ status: "ok" }`) | No |
 | `POST` | `/auth/register` | Register a new user account | No |
 | `POST` | `/auth/login` | Log in and receive signed session token | No |
 | `WS` | `/sync` | Two-way WebSocket real-time synchronization | Token handshake in auth message |
+
 
 ---
 
