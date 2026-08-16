@@ -39,13 +39,16 @@ export class UserFileStorage implements UserStorage {
   }
 
   async createToken(expiresInSeconds?: number): Promise<string> {
-    const secret = await this.storage.getSecret();
-    return createSessionToken(this.id, this.username, secret, expiresInSeconds);
+    return createSessionToken(
+      this.id,
+      this.username,
+      this.storage.secret,
+      expiresInSeconds,
+    );
   }
 
   async verifyToken(token: string): Promise<boolean> {
-    const secret = await this.storage.getSecret();
-    const payload = verifySessionToken(token, secret);
+    const payload = verifySessionToken(token, this.storage.secret);
     return payload !== null && payload.userId === this.id;
   }
 

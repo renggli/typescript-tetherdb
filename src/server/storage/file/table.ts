@@ -1,5 +1,4 @@
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import type {
   ChangeRecord,
   RecordSnapshotItem,
@@ -9,7 +8,6 @@ import { validateRecordId, validateUserId } from '../../validate.js';
 import type { TableStorage } from '../table.js';
 import type { UserStorage } from '../user.js';
 import type { AppFileStorage } from './app.js';
-import type { FileStorage } from './storage.js';
 
 /**
  * Filesystem-backed implementation of `TableStorage`.
@@ -17,22 +15,14 @@ import type { FileStorage } from './storage.js';
 export class TableFileStorage implements TableStorage {
   readonly name: string;
   readonly app: AppFileStorage;
-  private storage: FileStorage;
 
-  constructor(name: string, app: AppFileStorage, storage: FileStorage) {
+  constructor(name: string, app: AppFileStorage) {
     this.name = name;
     this.app = app;
-    this.storage = storage;
   }
 
   private getUserTableFile(userId: string): string {
-    const safeUserId = validateUserId(userId);
-    return path.join(
-      this.storage.baseDir,
-      this.app.id,
-      safeUserId,
-      `${this.name}.json`,
-    );
+    return this.app.getUserTableFile(userId, this.name);
   }
 
   private async readTableRecords(

@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
 import { hashPassword, verifySessionToken } from '../../crypto.js';
 import {
+  getUserBucket,
   normalizeUsername,
   validateAppId,
   validatePassword,
@@ -24,12 +25,31 @@ export interface SqliteUserData {
   createdAt: number;
 }
 
-export interface AppDbHandle {
+export interface UsersDbHandle {
   db: DatabaseSync;
-  stmtCheckTable: StatementSync;
+  stmtFindById: StatementSync;
+  stmtFindByUsername: StatementSync;
+  stmtInsertUser: StatementSync;
+  stmtUpdatePassword: StatementSync;
+  stmtDeleteUser: StatementSync;
+  stmtListUsers: StatementSync;
+}
+
+export interface AppsDbHandle {
+  db: DatabaseSync;
+  stmtFindApp: StatementSync;
+  stmtInsertApp: StatementSync;
+  stmtListApps: StatementSync;
+  stmtDeleteApp: StatementSync;
+  stmtFindTable: StatementSync;
   stmtInsertTable: StatementSync;
   stmtListTables: StatementSync;
   stmtDeleteTable: StatementSync;
+  stmtDeleteAppTables: StatementSync;
+}
+
+export interface UserAppDbHandle {
+  db: DatabaseSync;
   stmtGetRecord: StatementSync;
   stmtGetRecordForUpdate: StatementSync;
   stmtGetSnapshot: StatementSync;
@@ -42,18 +62,8 @@ export interface AppDbHandle {
   stmtGetChangelogSince: StatementSync;
   stmtPruneChangelog: StatementSync;
   stmtCountTableRecords: StatementSync;
-  stmtCheckUser: StatementSync;
-  stmtListUsers: StatementSync;
-}
-
-interface AuthDbHandle {
-  db: DatabaseSync;
-  stmtFindById: StatementSync;
-  stmtFindByUsername: StatementSync;
-  stmtInsertUser: StatementSync;
-  stmtUpdatePassword: StatementSync;
-  stmtDeleteUser: StatementSync;
-  stmtListUsers: StatementSync;
+  stmtDeleteTableRecords: StatementSync;
+  stmtDeleteTableChangelog: StatementSync;
 }
 
 export interface SqliteStorageOptions extends StorageOptions {
@@ -69,8 +79,9 @@ export class SqliteStorage implements Storage {
   readonly inMemory: boolean;
   readonly options: SqliteStorageOptions;
   readonly secret: string;
-  private appDbs: Map<string, AppDbHandle> = new Map();
-  private authHandle: AuthDbHandle | null = null;
+  private usersHandle: UsersDbHandle | null = null;
+  private appsHandle: AppsDbHandle | null = null;
+  private userAppDbs: Map<string, UserAppDbHandle> = new Map();
 
   constructor(options: SqliteStorageOptions = {}) {
     this.options = options;
@@ -91,8 +102,8 @@ export class SqliteStorage implements Storage {
     }
   }
 
-  private getAuthDb(): AuthDbHandle {
-    if (this.authHandle) return this.authHandle;
+  getUsersDb(): UsersDbHandle {
+    if (this.usersHandle) return this.usersHandle;
 
     const require = createRequire(import.meta.url);
     const { DatabaseSync } = require('node:sqlite') as {
@@ -101,7 +112,7 @@ export class SqliteStorage implements Storage {
 
     const dbPath = this.inMemory
       ? ':memory:'
-      : path.join(this.baseDir, 'auth.sqlite');
+      : path.join(this.baseDir, 'users.sqlite');
 
     const db = new DatabaseSync(dbPath);
 
@@ -120,7 +131,7 @@ export class SqliteStorage implements Storage {
       CREATE INDEX IF NOT EXISTS idx_users_username ON users (username);
     `);
 
-    this.authHandle = {
+    this.usersHandle = {
       db,
       stmtFindById: db.prepare(
         'SELECT id, username, password_hash, created_at FROM users WHERE id = ?',
@@ -140,22 +151,93 @@ export class SqliteStorage implements Storage {
       ),
     };
 
-    return this.authHandle;
+    return this.usersHandle;
   }
 
-  getAppDb(appId: string): { handle: AppDbHandle; safeAppId: string } {
-    const safeAppId = validateAppId(appId);
-    let handle = this.appDbs.get(safeAppId);
+  getAppsDb(): AppsDbHandle {
+    if (this.appsHandle) return this.appsHandle;
 
+    const require = createRequire(import.meta.url);
+    const { DatabaseSync } = require('node:sqlite') as {
+      DatabaseSync: new (path: string) => DatabaseSync;
+    };
+
+    const dbPath = this.inMemory
+      ? ':memory:'
+      : path.join(this.baseDir, 'apps.sqlite');
+
+    const db = new DatabaseSync(dbPath);
+
+    if (!this.inMemory) {
+      db.exec('PRAGMA journal_mode = WAL;');
+      db.exec('PRAGMA synchronous = NORMAL;');
+    }
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS apps (
+        id TEXT PRIMARY KEY,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS tables (
+        app_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (app_id, name)
+      );
+      CREATE INDEX IF NOT EXISTS idx_tables_app ON tables (app_id);
+    `);
+
+    this.appsHandle = {
+      db,
+      stmtFindApp: db.prepare('SELECT id, created_at FROM apps WHERE id = ?'),
+      stmtInsertApp: db.prepare(
+        'INSERT INTO apps (id, created_at) VALUES (?, ?)',
+      ),
+      stmtListApps: db.prepare('SELECT id FROM apps ORDER BY id ASC'),
+      stmtDeleteApp: db.prepare('DELETE FROM apps WHERE id = ?'),
+      stmtFindTable: db.prepare(
+        'SELECT name, created_at FROM tables WHERE app_id = ? AND name = ?',
+      ),
+      stmtInsertTable: db.prepare(
+        'INSERT INTO tables (app_id, name, created_at) VALUES (?, ?, ?)',
+      ),
+      stmtListTables: db.prepare(
+        'SELECT name FROM tables WHERE app_id = ? ORDER BY name ASC',
+      ),
+      stmtDeleteTable: db.prepare(
+        'DELETE FROM tables WHERE app_id = ? AND name = ?',
+      ),
+      stmtDeleteAppTables: db.prepare('DELETE FROM tables WHERE app_id = ?'),
+    };
+
+    return this.appsHandle;
+  }
+
+  getUserAppDb(appId: string, userId: string): UserAppDbHandle {
+    const safeAppId = validateAppId(appId);
+    const safeUserId = validateUserId(userId);
+    const cacheKey = `${safeAppId}:${safeUserId}`;
+
+    let handle = this.userAppDbs.get(cacheKey);
     if (!handle) {
       const require = createRequire(import.meta.url);
       const { DatabaseSync } = require('node:sqlite') as {
         DatabaseSync: new (path: string) => DatabaseSync;
       };
 
-      const dbPath = this.inMemory
-        ? ':memory:'
-        : path.join(this.baseDir, `${safeAppId}.sqlite`);
+      let dbPath: string;
+      if (this.inMemory) {
+        dbPath = ':memory:';
+      } else {
+        const bucket = getUserBucket(safeUserId);
+        const userDir = path.join(this.baseDir, safeAppId, bucket);
+        try {
+          fs.mkdirSync(userDir, { recursive: true });
+        } catch {
+          // Ignore
+        }
+        dbPath = path.join(userDir, `${safeUserId}.sqlite`);
+      }
 
       const db = new DatabaseSync(dbPath);
 
@@ -163,16 +245,9 @@ export class SqliteStorage implements Storage {
         db.exec('PRAGMA journal_mode = WAL;');
         db.exec('PRAGMA synchronous = NORMAL;');
       }
-      db.exec('PRAGMA foreign_keys = ON;');
 
       db.exec(`
-        CREATE TABLE IF NOT EXISTS tables (
-          name TEXT PRIMARY KEY,
-          created_at INTEGER NOT NULL
-        );
-
         CREATE TABLE IF NOT EXISTS records (
-          user_id TEXT NOT NULL,
           table_name TEXT NOT NULL,
           id TEXT NOT NULL,
           version INTEGER NOT NULL,
@@ -180,15 +255,14 @@ export class SqliteStorage implements Storage {
           client_id TEXT NOT NULL,
           deleted INTEGER NOT NULL,
           data TEXT,
-          PRIMARY KEY (user_id, table_name, id)
+          PRIMARY KEY (table_name, id)
         );
 
         CREATE INDEX IF NOT EXISTS idx_records_lookup
-          ON records (user_id, table_name, deleted);
+          ON records (table_name, deleted);
 
         CREATE TABLE IF NOT EXISTS changelog (
-          user_id TEXT NOT NULL,
-          seq INTEGER NOT NULL,
+          seq INTEGER PRIMARY KEY,
           table_name TEXT NOT NULL,
           id TEXT NOT NULL,
           op TEXT NOT NULL,
@@ -196,15 +270,13 @@ export class SqliteStorage implements Storage {
           timestamp INTEGER NOT NULL,
           client_id TEXT NOT NULL,
           deleted INTEGER NOT NULL,
-          data TEXT,
-          PRIMARY KEY (user_id, seq)
+          data TEXT
         );
 
         CREATE INDEX IF NOT EXISTS idx_changelog_sync
-          ON changelog (user_id, seq);
+          ON changelog (seq);
 
         CREATE TABLE IF NOT EXISTS user_meta (
-          user_id TEXT PRIMARY KEY,
           current_seq INTEGER NOT NULL,
           min_seq INTEGER NOT NULL
         );
@@ -212,65 +284,57 @@ export class SqliteStorage implements Storage {
 
       handle = {
         db,
-        stmtCheckTable: db.prepare('SELECT 1 FROM tables WHERE name = ?'),
-        stmtInsertTable: db.prepare(
-          'INSERT OR IGNORE INTO tables (name, created_at) VALUES (?, ?)',
-        ),
-        stmtListTables: db.prepare('SELECT name FROM tables ORDER BY name ASC'),
-        stmtDeleteTable: db.prepare('DELETE FROM tables WHERE name = ?'),
         stmtGetRecord: db.prepare(
-          'SELECT table_name, id, version, timestamp, client_id, deleted, data FROM records WHERE user_id = ? AND table_name = ? AND id = ? AND deleted = 0',
+          'SELECT table_name, id, version, timestamp, client_id, deleted, data FROM records WHERE table_name = ? AND id = ? AND deleted = 0',
         ),
         stmtGetRecordForUpdate: db.prepare(
-          'SELECT table_name, id, version, timestamp, client_id, deleted, data FROM records WHERE user_id = ? AND table_name = ? AND id = ?',
+          'SELECT table_name, id, version, timestamp, client_id, deleted, data FROM records WHERE table_name = ? AND id = ?',
         ),
         stmtGetSnapshot: db.prepare(
-          'SELECT table_name, id, version, timestamp, client_id, deleted, data FROM records WHERE user_id = ? AND deleted = 0',
+          'SELECT table_name, id, version, timestamp, client_id, deleted, data FROM records WHERE deleted = 0',
         ),
         stmtGetSnapshotByTable: db.prepare(
-          'SELECT table_name, id, version, timestamp, client_id, deleted, data FROM records WHERE user_id = ? AND table_name = ? AND deleted = 0',
+          'SELECT table_name, id, version, timestamp, client_id, deleted, data FROM records WHERE table_name = ? AND deleted = 0',
         ),
         stmtInsertRecord: db.prepare(
-          'INSERT INTO records (user_id, table_name, id, version, timestamp, client_id, deleted, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO records (table_name, id, version, timestamp, client_id, deleted, data) VALUES (?, ?, ?, ?, ?, ?, ?)',
         ),
         stmtUpdateRecord: db.prepare(
-          'UPDATE records SET version = ?, timestamp = ?, client_id = ?, deleted = ?, data = ? WHERE user_id = ? AND table_name = ? AND id = ?',
+          'UPDATE records SET version = ?, timestamp = ?, client_id = ?, deleted = ?, data = ? WHERE table_name = ? AND id = ?',
         ),
         stmtGetMeta: db.prepare(
-          'SELECT current_seq, min_seq FROM user_meta WHERE user_id = ?',
+          'SELECT current_seq, min_seq FROM user_meta LIMIT 1',
         ),
         stmtSetMeta: db.prepare(
-          'INSERT OR REPLACE INTO user_meta (user_id, current_seq, min_seq) VALUES (?, ?, ?)',
+          'INSERT OR REPLACE INTO user_meta (rowid, current_seq, min_seq) VALUES (1, ?, ?)',
         ),
         stmtInsertChangelog: db.prepare(
-          'INSERT INTO changelog (user_id, seq, table_name, id, op, version, timestamp, client_id, deleted, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO changelog (seq, table_name, id, op, version, timestamp, client_id, deleted, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
         ),
         stmtGetChangelogSince: db.prepare(
-          'SELECT seq, table_name, id, op, version, timestamp, client_id, deleted, data FROM changelog WHERE user_id = ? AND seq > ? ORDER BY seq ASC',
+          'SELECT seq, table_name, id, op, version, timestamp, client_id, deleted, data FROM changelog WHERE seq > ? ORDER BY seq ASC',
         ),
-        stmtPruneChangelog: db.prepare(
-          'DELETE FROM changelog WHERE user_id = ? AND seq < ?',
-        ),
+        stmtPruneChangelog: db.prepare('DELETE FROM changelog WHERE seq < ?'),
         stmtCountTableRecords: db.prepare(
-          'SELECT COUNT(*) as count FROM records WHERE user_id = ? AND table_name = ? AND deleted = 0',
+          'SELECT COUNT(*) as count FROM records WHERE table_name = ? AND deleted = 0',
         ),
-        stmtCheckUser: db.prepare(
-          'SELECT 1 FROM records WHERE user_id = ? UNION SELECT 1 FROM user_meta WHERE user_id = ? LIMIT 1',
+        stmtDeleteTableRecords: db.prepare(
+          'DELETE FROM records WHERE table_name = ?',
         ),
-        stmtListUsers: db.prepare(
-          'SELECT DISTINCT user_id FROM records UNION SELECT user_id FROM user_meta',
+        stmtDeleteTableChangelog: db.prepare(
+          'DELETE FROM changelog WHERE table_name = ?',
         ),
       };
 
-      this.appDbs.set(safeAppId, handle);
+      this.userAppDbs.set(cacheKey, handle);
     }
 
-    return { handle, safeAppId };
+    return handle;
   }
 
   findUserDataById(id: string): SqliteUserData | undefined {
-    const auth = this.getAuthDb();
-    const row = auth.stmtFindById.get(id) as
+    const usersDb = this.getUsersDb();
+    const row = usersDb.stmtFindById.get(id) as
       | {
           id: string;
           username: string;
@@ -288,69 +352,54 @@ export class SqliteStorage implements Storage {
   }
 
   updateUserData(id: string, passwordHash: string): void {
-    const auth = this.getAuthDb();
-    auth.stmtUpdatePassword.run(passwordHash, id);
+    const usersDb = this.getUsersDb();
+    usersDb.stmtUpdatePassword.run(passwordHash, id);
   }
 
   async createApp(id: string): Promise<AppStorage> {
     const safeId = validateAppId(id);
-    const existing = await this.getApp(safeId);
+    const appsDb = this.getAppsDb();
+    const existing = appsDb.stmtFindApp.get(safeId);
     if (existing) {
       throw new Error(`Application "${safeId}" already exists.`);
     }
-    this.getAppDb(safeId);
+
+    appsDb.stmtInsertApp.run(safeId, Date.now());
+
+    if (!this.inMemory) {
+      const appDir = path.join(this.baseDir, safeId);
+      try {
+        fs.mkdirSync(appDir, { recursive: true });
+      } catch {
+        // Ignore
+      }
+    }
+
     return new AppSqliteStorage(safeId, this);
   }
 
   async getApp(id: string): Promise<AppStorage | undefined> {
     const safeId = validateAppId(id);
-    if (this.appDbs.has(safeId)) {
+    const appsDb = this.getAppsDb();
+    const existing = appsDb.stmtFindApp.get(safeId);
+    if (existing) {
       return new AppSqliteStorage(safeId, this);
-    }
-    if (!this.inMemory) {
-      const dbFile = path.join(this.baseDir, `${safeId}.sqlite`);
-      if (fs.existsSync(dbFile)) {
-        return new AppSqliteStorage(safeId, this);
-      }
     }
     return undefined;
   }
 
   async getApps(): Promise<AppStorage[]> {
-    const appSet = new Set<string>();
-    for (const key of this.appDbs.keys()) {
-      appSet.add(key);
-    }
-
-    if (!this.inMemory) {
-      try {
-        const files = fs.readdirSync(this.baseDir);
-        for (const file of files) {
-          if (
-            file.endsWith('.sqlite') &&
-            file !== 'auth.sqlite' &&
-            !file.includes('-wal') &&
-            !file.includes('-shm')
-          ) {
-            appSet.add(file.replace(/\.sqlite$/, ''));
-          }
-        }
-      } catch {
-        // Ignore read error
-      }
-    }
-
-    return Array.from(appSet)
-      .sort()
-      .map((appId) => new AppSqliteStorage(appId, this));
+    const appsDb = this.getAppsDb();
+    const rows = appsDb.stmtListApps.all() as Array<{ id: string }>;
+    return rows.map((r) => new AppSqliteStorage(r.id, this));
   }
 
   async createUser(username: string, password: string): Promise<UserStorage> {
     const safeUsername = validateUsername(username);
     const validPassword = validatePassword(password);
-    const auth = this.getAuthDb();
+    const usersDb = this.getUsersDb();
 
-    const existing = auth.stmtFindByUsername.get(safeUsername);
+    const existing = usersDb.stmtFindByUsername.get(safeUsername);
     if (existing) {
       throw new Error(`Username "${safeUsername}" is already registered.`);
     }
@@ -359,7 +408,7 @@ export class SqliteStorage implements Storage {
     const passwordHash = await hashPassword(validPassword);
     const createdAt = Date.now();
 
-    auth.stmtInsertUser.run(userId, safeUsername, passwordHash, createdAt);
+    usersDb.stmtInsertUser.run(userId, safeUsername, passwordHash, createdAt);
     const userData: SqliteUserData = {
       id: userId,
       username: safeUsername,
@@ -382,8 +431,8 @@ export class SqliteStorage implements Storage {
   async getUserByUsername(username: string): Promise<UserStorage | undefined> {
     const safeUsername = normalizeUsername(username);
     if (!safeUsername) return undefined;
-    const auth = this.getAuthDb();
-    const row = auth.stmtFindByUsername.get(safeUsername) as
+    const usersDb = this.getUsersDb();
+    const row = usersDb.stmtFindByUsername.get(safeUsername) as
       | {
           id: string;
           username: string;
@@ -408,8 +457,8 @@ export class SqliteStorage implements Storage {
   }
 
   async getUsers(): Promise<UserStorage[]> {
-    const auth = this.getAuthDb();
-    const rows = auth.stmtListUsers.all() as Array<{
+    const usersDb = this.getUsersDb();
+    const rows = usersDb.stmtListUsers.all() as Array<{
       id: string;
       username: string;
       password_hash: string | null;
@@ -434,83 +483,138 @@ export class SqliteStorage implements Storage {
     const safeUserId = validateUserId(id);
     let deleted = false;
 
-    for (const handle of this.appDbs.values()) {
-      const res = handle.db
-        .prepare('DELETE FROM records WHERE user_id = ?')
-        .run(safeUserId) as { changes: number };
-      handle.db
-        .prepare('DELETE FROM changelog WHERE user_id = ?')
-        .run(safeUserId);
-      handle.db
-        .prepare('DELETE FROM user_meta WHERE user_id = ?')
-        .run(safeUserId);
-      if (res.changes > 0) deleted = true;
+    // Close and remove in-memory handles for this user
+    for (const [key, handle] of Array.from(this.userAppDbs.entries())) {
+      if (key.endsWith(`:${safeUserId}`)) {
+        try {
+          handle.db.close();
+        } catch {
+          // Ignore
+        }
+        this.userAppDbs.delete(key);
+      }
     }
 
-    const auth = this.getAuthDb();
-    const res = auth.stmtDeleteUser.run(safeUserId) as { changes: number };
+    // Delete user database files across all app directories
+    if (!this.inMemory) {
+      const bucket = getUserBucket(safeUserId);
+      const apps = this.getAppsDb().stmtListApps.all() as Array<{ id: string }>;
+      for (const app of apps) {
+        const userDbFile = path.join(
+          this.baseDir,
+          app.id,
+          bucket,
+          `${safeUserId}.sqlite`,
+        );
+        const walFile = `${userDbFile}-wal`;
+        const shmFile = `${userDbFile}-shm`;
+        try {
+          fs.unlinkSync(userDbFile);
+          deleted = true;
+        } catch {
+          // Ignore
+        }
+        try {
+          fs.unlinkSync(walFile);
+        } catch {
+          // Ignore
+        }
+        try {
+          fs.unlinkSync(shmFile);
+        } catch {
+          // Ignore
+        }
+      }
+    }
+
+    const usersDb = this.getUsersDb();
+    const res = usersDb.stmtDeleteUser.run(safeUserId) as { changes: number };
     if (res.changes > 0) deleted = true;
 
     return deleted;
   }
 
-  deleteAppDb(id: string): boolean {
+  deleteApp(id: string): boolean {
     const safeId = validateAppId(id);
     let deleted = false;
 
-    const handle = this.appDbs.get(safeId);
-    if (handle) {
-      try {
-        handle.db.close();
-      } catch {
-        // Ignore close error
+    // Close and remove in-memory user-app handles
+    for (const [key, handle] of Array.from(this.userAppDbs.entries())) {
+      if (key.startsWith(`${safeId}:`)) {
+        try {
+          handle.db.close();
+        } catch {
+          // Ignore
+        }
+        this.userAppDbs.delete(key);
       }
-      this.appDbs.delete(safeId);
-      deleted = true;
     }
 
-    if (!this.inMemory) {
-      const dbFile = path.join(this.baseDir, `${safeId}.sqlite`);
-      const walFile = path.join(this.baseDir, `${safeId}.sqlite-wal`);
-      const shmFile = path.join(this.baseDir, `${safeId}.sqlite-shm`);
+    const appsDb = this.getAppsDb();
+    appsDb.stmtDeleteAppTables.run(safeId);
+    const res = appsDb.stmtDeleteApp.run(safeId) as { changes: number };
+    if (res.changes > 0) deleted = true;
 
+    if (!this.inMemory) {
+      const appDir = path.join(this.baseDir, safeId);
       try {
-        fs.unlinkSync(dbFile);
+        fs.rmSync(appDir, { recursive: true, force: true });
         deleted = true;
       } catch {
-        // File may not exist
-      }
-      try {
-        fs.unlinkSync(walFile);
-      } catch {
-        // WAL may not exist
-      }
-      try {
-        fs.unlinkSync(shmFile);
-      } catch {
-        // SHM may not exist
+        // Ignore
       }
     }
 
     return deleted;
   }
 
+  deleteTable(appId: string, tableName: string): boolean {
+    const safeAppId = validateAppId(appId);
+    const appsDb = this.getAppsDb();
+    const res = appsDb.stmtDeleteTable.run(safeAppId, tableName) as {
+      changes: number;
+    };
+    if (res.changes === 0) return false;
+
+    // Clean up table data in any cached active handles for this app
+    for (const [key, handle] of this.userAppDbs.entries()) {
+      if (key.startsWith(`${safeAppId}:`)) {
+        try {
+          handle.stmtDeleteTableRecords.run(tableName);
+          handle.stmtDeleteTableChangelog.run(tableName);
+        } catch {
+          // Ignore
+        }
+      }
+    }
+
+    return true;
+  }
+
   async close(): Promise<void> {
-    if (this.authHandle) {
+    if (this.usersHandle) {
       try {
-        this.authHandle.db.close();
+        this.usersHandle.db.close();
       } catch {
         // Ignore
       }
-      this.authHandle = null;
+      this.usersHandle = null;
     }
-    for (const handle of this.appDbs.values()) {
+    if (this.appsHandle) {
+      try {
+        this.appsHandle.db.close();
+      } catch {
+        // Ignore
+      }
+      this.appsHandle = null;
+    }
+    for (const handle of this.userAppDbs.values()) {
       try {
         handle.db.close();
       } catch {
-        // Ignore close error
+        // Ignore
       }
     }
-    this.appDbs.clear();
+    this.userAppDbs.clear();
   }
 }

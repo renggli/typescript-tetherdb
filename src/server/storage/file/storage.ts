@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { hashPassword, verifySessionToken } from '../../crypto.js';
 import {
+  getUserBucket,
   normalizeUsername,
   validateAppId,
   validatePassword,
@@ -22,6 +23,11 @@ export interface FileUserData {
   createdAt: number;
 }
 
+export interface FileAppData {
+  id: string;
+  createdAt: number;
+}
+
 export interface FileStorageOptions extends StorageOptions {
   baseDir?: string;
 }
@@ -32,31 +38,21 @@ export interface FileStorageOptions extends StorageOptions {
 export class FileStorage implements Storage {
   readonly baseDir: string;
   readonly options: FileStorageOptions;
+  readonly secret: string;
   private userLocks: Map<string, Promise<unknown>> = new Map();
 
   constructor(options: FileStorageOptions = {}) {
     this.options = options;
     this.baseDir = path.resolve(options.baseDir ?? '.data');
+    this.secret = options.secret ?? crypto.randomBytes(32).toString('hex');
   }
 
   private get usersFile(): string {
     return path.join(this.baseDir, 'users.json');
   }
 
-  private get secretFile(): string {
-    return path.join(this.baseDir, 'secret.key');
-  }
-
-  async getSecret(): Promise<string> {
-    if (this.options.secret) return this.options.secret;
-    try {
-      return await fs.readFile(this.secretFile, 'utf-8');
-    } catch {
-      await fs.mkdir(this.baseDir, { recursive: true });
-      const secret = crypto.randomBytes(32).toString('hex');
-      await fs.writeFile(this.secretFile, secret, 'utf-8');
-      return secret;
-    }
+  private get appsFile(): string {
+    return path.join(this.baseDir, 'apps.json');
   }
 
   async withUserLock<T>(
@@ -111,6 +107,29 @@ export class FileStorage implements Storage {
     );
   }
 
+  private async readAppsFile(): Promise<Map<string, FileAppData>> {
+    try {
+      const content = await fs.readFile(this.appsFile, 'utf-8');
+      const list = JSON.parse(content) as FileAppData[];
+      const map = new Map<string, FileAppData>();
+      for (const a of list) {
+        map.set(a.id, a);
+      }
+      return map;
+    } catch {
+      return new Map();
+    }
+  }
+
+  private async writeAppsFile(apps: Map<string, FileAppData>): Promise<void> {
+    await fs.mkdir(this.baseDir, { recursive: true });
+    await fs.writeFile(
+      this.appsFile,
+      JSON.stringify(Array.from(apps.values()), null, 2),
+      'utf-8',
+    );
+  }
+
   async findUserDataById(id: string): Promise<FileUserData | undefined> {
     const users = await this.readUsersFile();
     return users.get(id);
@@ -129,50 +148,60 @@ export class FileStorage implements Storage {
 
   async createApp(id: string): Promise<AppStorage> {
     const safeId = validateAppId(id);
-    const existing = await this.getApp(safeId);
-    if (existing) {
+    const apps = await this.readAppsFile();
+    if (apps.has(safeId)) {
       throw new Error(`Application "${safeId}" already exists.`);
     }
+
     const appDir = path.join(this.baseDir, safeId);
     await fs.mkdir(appDir, { recursive: true });
 
-    const tablesFile = path.join(appDir, 'tables.json');
-    await fs.writeFile(tablesFile, JSON.stringify([]), 'utf-8');
+    const now = Date.now();
+    apps.set(safeId, { id: safeId, createdAt: now });
+    await this.writeAppsFile(apps);
+
+    const manifestFile = path.join(appDir, 'manifest.json');
+    await fs.writeFile(
+      manifestFile,
+      JSON.stringify(
+        {
+          id: safeId,
+          tables: [],
+          createdAt: now,
+          version: 1,
+        },
+        null,
+        2,
+      ),
+      'utf-8',
+    );
 
     return new AppFileStorage(safeId, this);
   }
 
   async getApp(id: string): Promise<AppStorage | undefined> {
     const safeId = validateAppId(id);
-    const appDir = path.join(this.baseDir, safeId);
-    try {
-      const stat = await fs.stat(appDir);
-      if (stat.isDirectory()) {
-        return new AppFileStorage(safeId, this);
-      }
-    } catch {
-      // Directory doesn't exist
+    const apps = await this.readAppsFile();
+    if (apps.has(safeId)) {
+      return new AppFileStorage(safeId, this);
     }
-    return undefined;
+    // Fallback: check if manifest.json exists on disk
+    const manifestFile = path.join(this.baseDir, safeId, 'manifest.json');
+    try {
+      await fs.stat(manifestFile);
+      apps.set(safeId, { id: safeId, createdAt: Date.now() });
+      await this.writeAppsFile(apps);
+      return new AppFileStorage(safeId, this);
+    } catch {
+      return undefined;
+    }
   }
 
   async getApps(): Promise<AppStorage[]> {
-    try {
-      const entries = await fs.readdir(this.baseDir, { withFileTypes: true });
-      const apps: AppStorage[] = [];
-      for (const entry of entries) {
-        if (
-          entry.isDirectory() &&
-          entry.name !== 'auth' &&
-          !entry.name.startsWith('.')
-        ) {
-          apps.push(new AppFileStorage(entry.name, this));
-        }
-      }
-      return apps;
-    } catch {
-      return [];
-    }
+    const apps = await this.readAppsFile();
+    return Array.from(apps.values())
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .map((a) => new AppFileStorage(a.id, this));
   }
 
   async createUser(username: string, password: string): Promise<UserStorage> {
@@ -222,8 +251,7 @@ export class FileStorage implements Storage {
   }
 
   async getUserByToken(token: string): Promise<UserStorage | undefined> {
-    const secret = await this.getSecret();
-    const payload = verifySessionToken(token, secret);
+    const payload = verifySessionToken(token, this.secret);
     if (!payload) return undefined;
     return this.getUser(payload.userId);
   }
@@ -240,8 +268,15 @@ export class FileStorage implements Storage {
     let deleted = false;
 
     const apps = await this.getApps();
+    const bucket = getUserBucket(safeUserId);
     for (const app of apps) {
-      const userDir = path.join(this.baseDir, app.id, safeUserId);
+      const userDir = path.join(
+        this.baseDir,
+        app.id,
+        'users',
+        bucket,
+        safeUserId,
+      );
       try {
         await fs.rm(userDir, { recursive: true, force: true });
         deleted = true;
@@ -255,6 +290,28 @@ export class FileStorage implements Storage {
       users.delete(safeUserId);
       await this.writeUsersFile(users);
       deleted = true;
+    }
+
+    return deleted;
+  }
+
+  async deleteApp(id: string): Promise<boolean> {
+    const safeId = validateAppId(id);
+    const apps = await this.readAppsFile();
+    let deleted = false;
+
+    if (apps.has(safeId)) {
+      apps.delete(safeId);
+      await this.writeAppsFile(apps);
+      deleted = true;
+    }
+
+    const appDir = path.join(this.baseDir, safeId);
+    try {
+      await fs.rm(appDir, { recursive: true, force: true });
+      deleted = true;
+    } catch {
+      // Ignore
     }
 
     return deleted;

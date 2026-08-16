@@ -8,6 +8,7 @@ import {
 } from '../../../shared/types.js';
 import {
   calculateByteSize,
+  getUserBucket,
   validateRecordId,
   validateTableName,
   validateUserId,
@@ -17,6 +18,13 @@ import type { TableStorage } from '../table.js';
 import type { UserStorage } from '../user.js';
 import type { FileStorage } from './storage.js';
 import { TableFileStorage } from './table.js';
+
+export interface AppManifest {
+  id: string;
+  tables: string[];
+  createdAt: number;
+  version: number;
+}
 
 interface UserMeta {
   currentSeq: number;
@@ -35,29 +43,57 @@ export class AppFileStorage implements AppStorage {
     this.storage = storage;
   }
 
-  private get appDir(): string {
+  get appDir(): string {
     return path.join(this.storage.baseDir, this.id);
   }
 
-  private get tablesFile(): string {
-    return path.join(this.appDir, 'tables.json');
+  private get manifestFile(): string {
+    return path.join(this.appDir, 'manifest.json');
   }
 
-  private getUserDir(userId: string): string {
+  getUserDir(userId: string): string {
     const safeUserId = validateUserId(userId);
-    return path.join(this.appDir, safeUserId);
+    const bucket = getUserBucket(safeUserId);
+    return path.join(this.appDir, 'users', bucket, safeUserId);
   }
 
   private getUserMetaFile(userId: string): string {
     return path.join(this.getUserDir(userId), 'meta.json');
   }
 
-  private getUserChangelogFile(userId: string): string {
-    return path.join(this.getUserDir(userId), 'changelog.json');
+  private getUserSyncFile(userId: string): string {
+    return path.join(this.getUserDir(userId), 'sync.jsonl');
   }
 
-  private getUserTableFile(userId: string, tableName: string): string {
-    return path.join(this.getUserDir(userId), `${tableName}.json`);
+  getUserTablesDir(userId: string): string {
+    return path.join(this.getUserDir(userId), 'tables');
+  }
+
+  getUserTableFile(userId: string, tableName: string): string {
+    return path.join(this.getUserTablesDir(userId), `${tableName}.json`);
+  }
+
+  private async readManifest(): Promise<AppManifest> {
+    try {
+      const content = await fs.readFile(this.manifestFile, 'utf-8');
+      return JSON.parse(content) as AppManifest;
+    } catch {
+      return {
+        id: this.id,
+        tables: [],
+        createdAt: Date.now(),
+        version: 1,
+      };
+    }
+  }
+
+  private async writeManifest(manifest: AppManifest): Promise<void> {
+    await fs.mkdir(this.appDir, { recursive: true });
+    await fs.writeFile(
+      this.manifestFile,
+      JSON.stringify(manifest, null, 2),
+      'utf-8',
+    );
   }
 
   private async readUserMeta(userId: string): Promise<UserMeta> {
@@ -78,30 +114,45 @@ export class AppFileStorage implements AppStorage {
     );
   }
 
-  private async readUserChangelog(
+  private async readUserSync(
     userId: string,
   ): Promise<Array<ChangeRecord & { seq: number }>> {
     try {
-      const content = await fs.readFile(
-        this.getUserChangelogFile(userId),
-        'utf-8',
-      );
-      return JSON.parse(content) as Array<ChangeRecord & { seq: number }>;
+      const content = await fs.readFile(this.getUserSyncFile(userId), 'utf-8');
+      const lines = content.split('\n');
+      const changes: Array<ChangeRecord & { seq: number }> = [];
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed) {
+          changes.push(JSON.parse(trimmed) as ChangeRecord & { seq: number });
+        }
+      }
+      return changes;
     } catch {
       return [];
     }
   }
 
-  private async writeUserChangelog(
+  private async appendUserSync(
     userId: string,
-    changelog: Array<ChangeRecord & { seq: number }>,
+    changes: Array<ChangeRecord & { seq: number }>,
+  ): Promise<void> {
+    if (changes.length === 0) return;
+    await fs.mkdir(this.getUserDir(userId), { recursive: true });
+    const content = `${changes.map((c) => JSON.stringify(c)).join('\n')}\n`;
+    await fs.appendFile(this.getUserSyncFile(userId), content, 'utf-8');
+  }
+
+  private async rewriteUserSync(
+    userId: string,
+    changes: Array<ChangeRecord & { seq: number }>,
   ): Promise<void> {
     await fs.mkdir(this.getUserDir(userId), { recursive: true });
-    await fs.writeFile(
-      this.getUserChangelogFile(userId),
-      JSON.stringify(changelog, null, 2),
-      'utf-8',
-    );
+    const content =
+      changes.length > 0
+        ? `${changes.map((c) => JSON.stringify(c)).join('\n')}\n`
+        : '';
+    await fs.writeFile(this.getUserSyncFile(userId), content, 'utf-8');
   }
 
   private async readTableRecords(
@@ -129,7 +180,7 @@ export class AppFileStorage implements AppStorage {
     tableName: string,
     records: Map<string, StoredRecord>,
   ): Promise<void> {
-    await fs.mkdir(this.getUserDir(userId), { recursive: true });
+    await fs.mkdir(this.getUserTablesDir(userId), { recursive: true });
     await fs.writeFile(
       this.getUserTableFile(userId, tableName),
       JSON.stringify(Array.from(records.values()), null, 2),
@@ -137,49 +188,32 @@ export class AppFileStorage implements AppStorage {
     );
   }
 
-  private async readTablesFile(): Promise<string[]> {
-    try {
-      const content = await fs.readFile(this.tablesFile, 'utf-8');
-      return JSON.parse(content) as string[];
-    } catch {
-      return [];
-    }
-  }
-
-  private async writeTablesFile(tables: string[]): Promise<void> {
-    await fs.mkdir(this.appDir, { recursive: true });
-    await fs.writeFile(
-      this.tablesFile,
-      JSON.stringify(Array.from(new Set(tables)).sort(), null, 2),
-      'utf-8',
-    );
-  }
-
   async createTable(name: string): Promise<TableStorage> {
     const safeName = validateTableName(name);
-    const tables = await this.readTablesFile();
-    if (tables.includes(safeName)) {
+    const manifest = await this.readManifest();
+    if (manifest.tables.includes(safeName)) {
       throw new Error(
         `Table "${safeName}" already exists in app "${this.id}".`,
       );
     }
-    tables.push(safeName);
-    await this.writeTablesFile(tables);
-    return new TableFileStorage(safeName, this, this.storage);
+    manifest.tables.push(safeName);
+    manifest.tables.sort();
+    await this.writeManifest(manifest);
+    return new TableFileStorage(safeName, this);
   }
 
   async getTable(name: string): Promise<TableStorage | undefined> {
     const safeName = validateTableName(name);
-    const tables = await this.readTablesFile();
-    if (tables.includes(safeName)) {
-      return new TableFileStorage(safeName, this, this.storage);
+    const manifest = await this.readManifest();
+    if (manifest.tables.includes(safeName)) {
+      return new TableFileStorage(safeName, this);
     }
     return undefined;
   }
 
   async getTables(): Promise<TableStorage[]> {
-    const tables = await this.readTablesFile();
-    return tables.map((name) => new TableFileStorage(name, this, this.storage));
+    const manifest = await this.readManifest();
+    return manifest.tables.map((name) => new TableFileStorage(name, this));
   }
 
   async applyChanges(
@@ -187,7 +221,8 @@ export class AppFileStorage implements AppStorage {
     changes: ChangeRecord[],
   ): Promise<{ applied: ChangeRecord[]; newSeq: number }> {
     return this.storage.withUserLock(user.id, this.id, async () => {
-      const registeredTables = new Set(await this.readTablesFile());
+      const manifest = await this.readManifest();
+      const registeredTables = new Set(manifest.tables);
       const safeUserId = validateUserId(user.id);
       const applied: ChangeRecord[] = [];
 
@@ -197,7 +232,7 @@ export class AppFileStorage implements AppStorage {
       const maxChangelog = this.storage.options.maxChangelogEntries ?? 1000;
 
       const meta = await this.readUserMeta(safeUserId);
-      const changelog = await this.readUserChangelog(safeUserId);
+      const syncChanges = await this.readUserSync(safeUserId);
 
       // Cache of modified tables
       const modifiedTables = new Map<string, Map<string, StoredRecord>>();
@@ -274,15 +309,7 @@ export class AppFileStorage implements AppStorage {
           };
 
           applied.push(appliedChange);
-          changelog.push(appliedChange);
-
-          if (changelog.length > maxChangelog) {
-            const pruneCount = changelog.length - maxChangelog;
-            changelog.splice(0, pruneCount);
-            if (changelog.length > 0) {
-              meta.minSeq = changelog[0].seq;
-            }
-          }
+          syncChanges.push(appliedChange);
         }
       }
 
@@ -290,7 +317,21 @@ export class AppFileStorage implements AppStorage {
         for (const [tableName, records] of modifiedTables.entries()) {
           await this.writeTableRecords(safeUserId, tableName, records);
         }
-        await this.writeUserChangelog(safeUserId, changelog);
+
+        if (syncChanges.length > maxChangelog) {
+          const pruneCount = syncChanges.length - maxChangelog;
+          syncChanges.splice(0, pruneCount);
+          if (syncChanges.length > 0) {
+            meta.minSeq = syncChanges[0].seq;
+          }
+          await this.rewriteUserSync(safeUserId, syncChanges);
+        } else {
+          await this.appendUserSync(
+            safeUserId,
+            applied as Array<ChangeRecord & { seq: number }>,
+          );
+        }
+
         await this.writeUserMeta(safeUserId, meta);
       }
 
@@ -315,8 +356,8 @@ export class AppFileStorage implements AppStorage {
       return { changes: [], currentSeq, requiresSnapshot: true };
     }
 
-    const changelog = await this.readUserChangelog(safeUserId);
-    const changes = changelog.filter((c) => c.seq > fromSeq);
+    const syncChanges = await this.readUserSync(safeUserId);
+    const changes = syncChanges.filter((c) => c.seq > fromSeq);
     return { changes, currentSeq, requiresSnapshot: false };
   }
 
@@ -327,42 +368,45 @@ export class AppFileStorage implements AppStorage {
   }
 
   async delete(): Promise<boolean> {
-    try {
-      await fs.rm(this.appDir, { recursive: true, force: true });
-      return true;
-    } catch {
-      return false;
-    }
+    return this.storage.deleteApp(this.id);
   }
 
   async deleteTable(name: string): Promise<boolean> {
     const safeName = validateTableName(name);
-    const tables = await this.readTablesFile();
-    const idx = tables.indexOf(safeName);
+    const manifest = await this.readManifest();
+    const idx = manifest.tables.indexOf(safeName);
     if (idx === -1) return false;
 
-    tables.splice(idx, 1);
-    await this.writeTablesFile(tables);
+    manifest.tables.splice(idx, 1);
+    await this.writeManifest(manifest);
 
     // Delete table file from all user directories
+    const usersRoot = path.join(this.appDir, 'users');
     try {
-      const entries = await fs.readdir(this.appDir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (entry.isDirectory()) {
-          const tableFile = path.join(
-            this.appDir,
-            entry.name,
-            `${safeName}.json`,
-          );
-          try {
-            await fs.rm(tableFile, { force: true });
-          } catch {
-            // Ignore
+      const buckets = await fs.readdir(usersRoot, { withFileTypes: true });
+      for (const bucket of buckets) {
+        if (bucket.isDirectory()) {
+          const bucketDir = path.join(usersRoot, bucket.name);
+          const users = await fs.readdir(bucketDir, { withFileTypes: true });
+          for (const user of users) {
+            if (user.isDirectory()) {
+              const tableFile = path.join(
+                bucketDir,
+                user.name,
+                'tables',
+                `${safeName}.json`,
+              );
+              try {
+                await fs.rm(tableFile, { force: true });
+              } catch {
+                // Ignore
+              }
+            }
           }
         }
       }
     } catch {
-      // Ignore
+      // Ignore if users directory doesn't exist
     }
 
     return true;

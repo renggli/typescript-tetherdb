@@ -45,9 +45,9 @@ export class TableSqliteStorage implements TableStorage {
   ): Promise<StoredRecord | undefined> {
     const safeUserId = validateUserId(user.id);
     const safeId = validateRecordId(id);
-    const handle = this.app.getDbHandle();
+    const handle = this.app.getUserDb(safeUserId);
 
-    const row = handle.stmtGetRecord.get(safeUserId, this.name, safeId) as
+    const row = handle.stmtGetRecord.get(this.name, safeId) as
       | RawRecordRow
       | undefined;
     if (!row) return undefined;
@@ -64,9 +64,8 @@ export class TableSqliteStorage implements TableStorage {
 
   async getAllRecords(user: UserStorage): Promise<RecordSnapshotItem[]> {
     const safeUserId = validateUserId(user.id);
-    const handle = this.app.getDbHandle();
+    const handle = this.app.getUserDb(safeUserId);
     const rows = handle.stmtGetSnapshotByTable.all(
-      safeUserId,
       this.name,
     ) as unknown as RawRecordRow[];
 

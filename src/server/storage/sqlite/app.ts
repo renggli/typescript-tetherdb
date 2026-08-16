@@ -9,7 +9,7 @@ import {
 import type { AppStorage } from '../app.js';
 import type { TableStorage } from '../table.js';
 import type { UserStorage } from '../user.js';
-import type { AppDbHandle, SqliteStorage } from './storage.js';
+import type { SqliteStorage, UserAppDbHandle } from './storage.js';
 import { TableSqliteStorage } from './table.js';
 
 interface RawRecordRow {
@@ -51,12 +51,8 @@ export class AppSqliteStorage implements AppStorage {
     this.storage = storage;
   }
 
-  get handle(): AppDbHandle {
-    return this.storage.getAppDb(this.id).handle;
-  }
-
-  getDbHandle(): AppDbHandle {
-    return this.handle;
+  getUserDb(userId: string): UserAppDbHandle {
+    return this.storage.getUserAppDb(this.id, userId);
   }
 
   private parseData(raw: string | null): unknown {
@@ -76,19 +72,21 @@ export class AppSqliteStorage implements AppStorage {
 
   async createTable(name: string): Promise<TableStorage> {
     const safeName = validateTableName(name);
-    const existing = this.handle.stmtCheckTable.get(safeName);
+    const appsDb = this.storage.getAppsDb();
+    const existing = appsDb.stmtFindTable.get(this.id, safeName);
     if (existing) {
       throw new Error(
         `Table "${safeName}" already exists in app "${this.id}".`,
       );
     }
-    this.handle.stmtInsertTable.run(safeName, Date.now());
+    appsDb.stmtInsertTable.run(this.id, safeName, Date.now());
     return new TableSqliteStorage(safeName, this);
   }
 
   async getTable(name: string): Promise<TableStorage | undefined> {
     const safeName = validateTableName(name);
-    const row = this.handle.stmtCheckTable.get(safeName);
+    const appsDb = this.storage.getAppsDb();
+    const row = appsDb.stmtFindTable.get(this.id, safeName);
     if (row) {
       return new TableSqliteStorage(safeName, this);
     }
@@ -96,9 +94,8 @@ export class AppSqliteStorage implements AppStorage {
   }
 
   async getTables(): Promise<TableStorage[]> {
-    const rows = this.handle.stmtListTables.all() as unknown as Array<{
-      name: string;
-    }>;
+    const appsDb = this.storage.getAppsDb();
+    const rows = appsDb.stmtListTables.all(this.id) as Array<{ name: string }>;
     return rows.map((r) => new TableSqliteStorage(r.name, this));
   }
 
@@ -107,8 +104,9 @@ export class AppSqliteStorage implements AppStorage {
     changes: ChangeRecord[],
   ): Promise<{ applied: ChangeRecord[]; newSeq: number }> {
     const safeUserId = validateUserId(user.id);
+    const appsDb = this.storage.getAppsDb();
+    const handle = this.getUserDb(safeUserId);
     const applied: ChangeRecord[] = [];
-    const handle = this.handle;
 
     const maxRecords = this.storage.options.maxRecordsPerTable ?? 10000;
     const maxRecordSize = this.storage.options.maxRecordSizeBytes ?? 512 * 1024;
@@ -116,9 +114,7 @@ export class AppSqliteStorage implements AppStorage {
 
     handle.db.exec('BEGIN IMMEDIATE TRANSACTION');
     try {
-      const metaRow = handle.stmtGetMeta.get(safeUserId) as
-        | RawMetaRow
-        | undefined;
+      const metaRow = handle.stmtGetMeta.get() as RawMetaRow | undefined;
       let currentSeq = metaRow?.current_seq ?? 0;
       let minSeq = metaRow?.min_seq ?? 0;
 
@@ -126,7 +122,7 @@ export class AppSqliteStorage implements AppStorage {
         const tableName = validateTableName(change.table);
         const recordId = validateRecordId(change.id);
 
-        const tableExists = handle.stmtCheckTable.get(tableName);
+        const tableExists = appsDb.stmtFindTable.get(this.id, tableName);
         if (!tableExists) {
           throw new Error(
             `Table "${tableName}" does not exist in app "${this.id}".`,
@@ -134,16 +130,14 @@ export class AppSqliteStorage implements AppStorage {
         }
 
         const existingRecord = handle.stmtGetRecordForUpdate.get(
-          safeUserId,
           tableName,
           recordId,
         ) as RawRecordRow | undefined;
 
         if (change.op === OperationType.Put && !existingRecord) {
-          const countRow = handle.stmtCountTableRecords.get(
-            safeUserId,
-            tableName,
-          ) as { count: number } | undefined;
+          const countRow = handle.stmtCountTableRecords.get(tableName) as
+            | { count: number }
+            | undefined;
           const tableCount = countRow?.count ?? 0;
           if (tableCount >= maxRecords) {
             throw new Error(
@@ -195,13 +189,11 @@ export class AppSqliteStorage implements AppStorage {
               change.clientId ?? '',
               isDeleted ? 1 : 0,
               serializedData,
-              safeUserId,
               tableName,
               recordId,
             );
           } else {
             handle.stmtInsertRecord.run(
-              safeUserId,
               tableName,
               recordId,
               nextVersion,
@@ -213,7 +205,6 @@ export class AppSqliteStorage implements AppStorage {
           }
 
           handle.stmtInsertChangelog.run(
-            safeUserId,
             assignedSeq,
             tableName,
             recordId,
@@ -242,12 +233,12 @@ export class AppSqliteStorage implements AppStorage {
 
       if (currentSeq - minSeq + 1 > maxChangelog) {
         const newMinSeq = currentSeq - maxChangelog + 1;
-        handle.stmtPruneChangelog.run(safeUserId, newMinSeq);
+        handle.stmtPruneChangelog.run(newMinSeq);
         minSeq = newMinSeq;
       }
 
       if (applied.length > 0) {
-        handle.stmtSetMeta.run(safeUserId, currentSeq, minSeq);
+        handle.stmtSetMeta.run(currentSeq, minSeq);
       }
 
       handle.db.exec('COMMIT');
@@ -267,9 +258,8 @@ export class AppSqliteStorage implements AppStorage {
     requiresSnapshot?: boolean;
   }> {
     const safeUserId = validateUserId(user.id);
-    const metaRow = this.handle.stmtGetMeta.get(safeUserId) as
-      | RawMetaRow
-      | undefined;
+    const handle = this.getUserDb(safeUserId);
+    const metaRow = handle.stmtGetMeta.get() as RawMetaRow | undefined;
     const currentSeq = metaRow?.current_seq ?? 0;
     const minSeq = metaRow?.min_seq ?? 0;
 
@@ -277,8 +267,7 @@ export class AppSqliteStorage implements AppStorage {
       return { changes: [], currentSeq, requiresSnapshot: true };
     }
 
-    const rows = this.handle.stmtGetChangelogSince.all(
-      safeUserId,
+    const rows = handle.stmtGetChangelogSince.all(
       fromSeq,
     ) as unknown as RawChangelogRow[];
 
@@ -303,35 +292,16 @@ export class AppSqliteStorage implements AppStorage {
 
   async getCurrentSeq(user: UserStorage): Promise<number> {
     const safeUserId = validateUserId(user.id);
-    const metaRow = this.handle.stmtGetMeta.get(safeUserId) as
-      | RawMetaRow
-      | undefined;
+    const handle = this.getUserDb(safeUserId);
+    const metaRow = handle.stmtGetMeta.get() as RawMetaRow | undefined;
     return metaRow?.current_seq ?? 0;
   }
 
   async delete(): Promise<boolean> {
-    return this.storage.deleteAppDb(this.id);
+    return this.storage.deleteApp(this.id);
   }
 
   deleteTable(name: string): boolean {
-    const safeName = validateTableName(name);
-    const exists = this.handle.stmtCheckTable.get(safeName);
-    if (!exists) return false;
-
-    this.handle.db.exec('BEGIN IMMEDIATE TRANSACTION');
-    try {
-      this.handle.stmtDeleteTable.run(safeName);
-      this.handle.db
-        .prepare('DELETE FROM records WHERE table_name = ?')
-        .run(safeName);
-      this.handle.db
-        .prepare('DELETE FROM changelog WHERE table_name = ?')
-        .run(safeName);
-      this.handle.db.exec('COMMIT');
-      return true;
-    } catch (err) {
-      this.handle.db.exec('ROLLBACK');
-      throw err;
-    }
+    return this.storage.deleteTable(this.id, name);
   }
 }

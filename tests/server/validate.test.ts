@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   calculateByteSize,
+  getUserBucket,
   MAX_PASSWORD_LENGTH,
   MAX_USERNAME_LENGTH,
   MIN_PASSWORD_LENGTH,
@@ -217,6 +218,16 @@ describe('src/server/validate.ts', () => {
       const circular: Record<string, unknown> = {};
       circular.self = circular;
       expect(calculateByteSize(circular)).toBe(0);
+    });
+  });
+
+  describe('getUserBucket', () => {
+    it('should calculate 2-character hex/hash bucket', () => {
+      expect(getUserBucket('f47ac10b-58cc-4372-a567-0e02b2c3d479')).toBe('f4');
+      expect(getUserBucket('0a1b2c3d')).toBe('0a');
+      expect(getUserBucket('user_42')).toBe('us');
+      expect(getUserBucket('A1-test')).toBe('a1');
+      expect(getUserBucket('x')).toBe('0x');
     });
   });
 });

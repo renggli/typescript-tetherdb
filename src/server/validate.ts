@@ -184,3 +184,15 @@ export function calculateByteSize(value: unknown): number {
     return 0;
   }
 }
+
+/**
+ * Calculates a 2-character hex/hash bucket for directory partitioning by user ID.
+ *
+ * @param userId - Unique user identifier.
+ * @returns 2-character bucket string (e.g. 'f4', '0a').
+ */
+export function getUserBucket(userId: string): string {
+  const safeId = validateUserId(userId);
+  const clean = safeId.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+  return clean.length >= 2 ? clean.slice(0, 2) : clean.padStart(2, '0');
+}
