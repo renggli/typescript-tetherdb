@@ -1,6 +1,5 @@
 import {
   AuthStatus,
-  DataMode,
   SyncStatus,
   type Table,
   type TableChangeEvent,
@@ -74,6 +73,13 @@ const authDialog = document.getElementById('authDialog') as HTMLDialogElement;
 const closeAuthModalBtn = document.getElementById(
   'closeAuthModalBtn',
 ) as HTMLButtonElement;
+const sessionSection = document.getElementById(
+  'sessionSection',
+) as HTMLDivElement;
+const modalUsername = document.getElementById(
+  'modalUsername',
+) as HTMLSpanElement;
+const logoutBtn = document.getElementById('logoutBtn') as HTMLButtonElement;
 const tabLogin = document.getElementById('tabLogin') as HTMLButtonElement;
 const tabRegister = document.getElementById('tabRegister') as HTMLButtonElement;
 const authForm = document.getElementById('authForm') as HTMLFormElement;
@@ -184,9 +190,12 @@ async function renderTodos(): Promise<void> {
       li.className = `todo-item ${item.data.completed ? 'completed' : ''}`;
       li.dataset.id = item.id;
 
+      const todoLeft = document.createElement('div');
+      todoLeft.className = 'todo-left';
+
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
-      checkbox.className = 'todo-toggle';
+      checkbox.className = 'todo-checkbox';
       checkbox.checked = item.data.completed;
       checkbox.addEventListener('change', async () => {
         await todosTable.put(item.id, {
@@ -196,12 +205,15 @@ async function renderTodos(): Promise<void> {
       });
 
       const span = document.createElement('span');
-      span.className = 'todo-title';
+      span.className = 'todo-text';
       span.textContent = item.data.title;
+
+      todoLeft.appendChild(checkbox);
+      todoLeft.appendChild(span);
 
       const deleteBtn = document.createElement('button');
       deleteBtn.type = 'button';
-      deleteBtn.className = 'todo-delete-btn';
+      deleteBtn.className = 'delete-btn';
       deleteBtn.setAttribute('aria-label', `Delete "${item.data.title}"`);
       deleteBtn.innerHTML = `
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -213,8 +225,7 @@ async function renderTodos(): Promise<void> {
         await todosTable.delete(item.id);
       });
 
-      li.appendChild(checkbox);
-      li.appendChild(span);
+      li.appendChild(todoLeft);
       li.appendChild(deleteBtn);
       todoList.appendChild(li);
     }
@@ -272,10 +283,23 @@ userBadgeBtn.addEventListener('click', () => {
   authError.classList.remove('visible');
   authUsername.value = '';
   authPassword.value = '';
+
+  if (db.authStatus === AuthStatus.SignedIn) {
+    sessionSection.style.display = 'block';
+    modalUsername.textContent = db.username ?? 'User';
+  } else {
+    sessionSection.style.display = 'none';
+  }
+
   authDialog.showModal();
 });
 
 closeAuthModalBtn.addEventListener('click', () => {
+  authDialog.close();
+});
+
+logoutBtn.addEventListener('click', async () => {
+  await db.logout();
   authDialog.close();
 });
 
@@ -309,14 +333,12 @@ authForm.addEventListener('submit', async (e: SubmitEvent) => {
         username,
         password,
         remember: true,
-        dataMode: DataMode.Local,
       });
     } else {
       success = await db.login({
         username,
         password,
         remember: true,
-        dataMode: DataMode.Merge,
       });
     }
 
@@ -350,6 +372,7 @@ async function init(): Promise<void> {
   // 2. React to Auth status changes
   db.onAuthStatusChange.register((status) => {
     updateUserUI();
+    renderTodos();
     logEvent(LogCategory.Sync, 'Auth', `AuthStatus: ${AuthStatus[status]}`);
   });
 
@@ -363,8 +386,24 @@ async function init(): Promise<void> {
     );
   });
 
-  // Initial render from local IndexedDB
+  // 4. Initial UI rendering
+  updateUserUI();
+  updateSyncStatusUI(db.syncStatus);
   await renderTodos();
+
+  // 5. Restore existing session or authenticate with the default demo account
+  if (db.authStatus !== AuthStatus.SignedIn) {
+    const restored = await db.login();
+    if (!restored) {
+      await db
+        .login({
+          username: 'demo',
+          password: 'password123',
+          remember: true,
+        })
+        .catch(() => null);
+    }
+  }
 }
 
 init();

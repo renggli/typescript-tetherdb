@@ -16,17 +16,18 @@
         </div>
         <button type="button" id="userBadgeBtn" class="user-badge" title="Click to switch account">
           <span>👤</span>
-          <span id="currentUsername">demo</span>
+          <span id="currentUsername">Offline Guest</span>
         </button>
       </div>
 
       <div class="status-bar">
         <div id="statusPill" class="status-pill status-disconnected">
           <span class="status-dot"></span>
-          <span id="statusText">Connecting...</span>
+          <span id="statusText">Offline (Local Only)</span>
         </div>
         <span id="itemCount" class="text-muted">0 items</span>
       </div>
+
     </header>
 
     <!-- Todo App Card -->
@@ -83,10 +84,20 @@
       <button type="button" id="closeAuthModalBtn" class="modal-close">✕</button>
     </div>
 
+    <div id="sessionSection" style="display: none;">
+      <div class="modal-user-info">
+        <span>Logged in as <strong id="modalUsername">demo</strong></span>
+        <button type="button" id="logoutBtn" class="btn btn-danger">Sign Out</button>
+      </div>
+      <hr class="modal-divider">
+      <div class="modal-section-label">Switch Account</div>
+    </div>
+
     <div class="modal-tabs">
       <button type="button" id="tabLogin" class="modal-tab active">Login</button>
       <button type="button" id="tabRegister" class="modal-tab">Register</button>
     </div>
+
 
     <form id="authForm" class="modal-form">
       <div class="form-group">

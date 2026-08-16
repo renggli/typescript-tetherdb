@@ -195,7 +195,69 @@ describe('Auth (src/client/auth.ts)', () => {
       expect(await storage.getMeta('auth')).toBeUndefined();
     });
 
-    it('should clear tables when DataMode.Clear is specified on register', async () => {
+    it('should preserve local data by default when registering from SignedOut state', async () => {
+      const clearSpy = vi.spyOn(storage, 'clearTables');
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          userId: 'usr-guest',
+          username: 'guest_user',
+          token: 'token-guest',
+        }),
+      });
+
+      const auth = new Auth({
+        baseUrl: 'http://127.0.0.1:8080',
+        storage,
+        fetchFn: mockFetch as unknown as typeof fetch,
+      });
+
+      expect(auth.status).toBe(AuthStatus.SignedOut);
+      await auth.register({
+        username: 'guest_user',
+        password: 'password123',
+      });
+
+      expect(clearSpy).not.toHaveBeenCalled();
+    });
+
+    it('should clear local data by default when registering from an already SignedIn state', async () => {
+      const clearSpy = vi.spyOn(storage, 'clearTables');
+      const setMetaSpy = vi.spyOn(storage, 'setMeta');
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          userId: 'usr-new',
+          username: 'new_user',
+          token: 'token-new',
+        }),
+      });
+
+      await storage.setMeta('auth', {
+        userId: 'usr-old',
+        username: 'old_user',
+        token: 'token-old',
+      });
+
+      const auth = new Auth({
+        baseUrl: 'http://127.0.0.1:8080',
+        storage,
+        fetchFn: mockFetch as unknown as typeof fetch,
+      });
+
+      await auth.restoreSession();
+      expect(auth.status).toBe(AuthStatus.SignedIn);
+
+      await auth.register({
+        username: 'new_user',
+        password: 'password123',
+      });
+
+      expect(clearSpy).toHaveBeenCalledWith(true);
+      expect(setMetaSpy).toHaveBeenCalledWith('lastSyncSeq', 0);
+    });
+
+    it('should clear tables when DataMode.Clear is explicitly specified on register', async () => {
       const clearSpy = vi.spyOn(storage, 'clearTables');
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -218,7 +280,7 @@ describe('Auth (src/client/auth.ts)', () => {
         dataMode: DataMode.Clear,
       });
 
-      expect(clearSpy).toHaveBeenCalled();
+      expect(clearSpy).toHaveBeenCalledWith(true);
     });
 
     it('should transition to AuthStatus.Error and return false when server returns error response', async () => {
@@ -321,7 +383,31 @@ describe('Auth (src/client/auth.ts)', () => {
       consoleSpy.mockRestore();
     });
 
-    it('should handle DataMode.Clear and DataMode.Remote on login', async () => {
+    it('should default to DataMode.Remote on login and reset lastSyncSeq', async () => {
+      const clearSpy = vi.spyOn(storage, 'clearTables');
+      const setMetaSpy = vi.spyOn(storage, 'setMeta');
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          userId: 'u',
+          username: 'u',
+          token: 't',
+        }),
+      });
+
+      const auth = new Auth({
+        baseUrl: 'http://127.0.0.1:8080',
+        storage,
+        fetchFn: mockFetch as unknown as typeof fetch,
+      });
+
+      await auth.login({ username: 'u', password: 'p' });
+      expect(clearSpy).toHaveBeenCalledWith(false);
+      expect(setMetaSpy).toHaveBeenCalledWith('lastSyncSeq', 0);
+    });
+
+    it('should handle DataMode.Clear and DataMode.Merge on login', async () => {
       const clearSpy = vi.spyOn(storage, 'clearTables');
       const setMetaSpy = vi.spyOn(storage, 'setMeta');
 
@@ -346,16 +432,18 @@ describe('Auth (src/client/auth.ts)', () => {
         password: 'p',
         dataMode: DataMode.Clear,
       });
-      expect(clearSpy).toHaveBeenCalledWith();
+      expect(clearSpy).toHaveBeenCalledWith(true);
 
-      // DataMode.Remote
+      // DataMode.Merge
+      clearSpy.mockClear();
+      setMetaSpy.mockClear();
       await auth.login({
         username: 'u',
         password: 'p',
-        dataMode: DataMode.Remote,
+        dataMode: DataMode.Merge,
       });
-      expect(clearSpy).toHaveBeenCalledWith(false);
-      expect(setMetaSpy).toHaveBeenCalledWith('lastSyncSeq', 0);
+      expect(clearSpy).not.toHaveBeenCalled();
+      expect(setMetaSpy).not.toHaveBeenCalledWith('lastSyncSeq', 0);
     });
 
     it('should handle HTTP failure during login', async () => {
@@ -410,7 +498,22 @@ describe('Auth (src/client/auth.ts)', () => {
       expect(statuses).toEqual([AuthStatus.SignedOut]);
     });
 
-    it('should clear tables on logout when DataMode.Clear is requested', async () => {
+    it('should clear tables and reset lastSyncSeq by default on logout (DataMode.Clear)', async () => {
+      const clearSpy = vi.spyOn(storage, 'clearTables');
+      const setMetaSpy = vi.spyOn(storage, 'setMeta');
+
+      const auth = new Auth({
+        baseUrl: 'http://127.0.0.1:8080',
+        storage,
+        fetchFn: mockFetch as unknown as typeof fetch,
+      });
+
+      await auth.logout();
+      expect(clearSpy).toHaveBeenCalledWith(true);
+      expect(setMetaSpy).toHaveBeenCalledWith('lastSyncSeq', 0);
+    });
+
+    it('should preserve tables on logout when DataMode.Local is requested', async () => {
       const clearSpy = vi.spyOn(storage, 'clearTables');
 
       const auth = new Auth({
@@ -419,8 +522,8 @@ describe('Auth (src/client/auth.ts)', () => {
         fetchFn: mockFetch as unknown as typeof fetch,
       });
 
-      await auth.logout({ dataMode: DataMode.Clear });
-      expect(clearSpy).toHaveBeenCalled();
+      await auth.logout({ dataMode: DataMode.Local });
+      expect(clearSpy).not.toHaveBeenCalled();
     });
   });
 

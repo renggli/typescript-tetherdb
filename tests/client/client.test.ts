@@ -62,7 +62,10 @@ describe('TetherClient Facade (src/client/client.ts)', () => {
 
     it('should export AuthStatus and DataMode enums from client.ts', () => {
       expect(AuthStatus.SignedIn).toBe(2);
-      expect(DataMode.Merge).toBe(0);
+      expect(DataMode.Remote).toBe(0);
+      expect(DataMode.Local).toBe(1);
+      expect(DataMode.Merge).toBe(2);
+      expect(DataMode.Clear).toBe(3);
     });
   });
 

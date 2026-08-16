@@ -18,7 +18,7 @@
 import * as http from 'node:http';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SqliteStorage, TetherServer } from 'tetherdb/server';
+import { FileStorage, TetherServer } from 'tetherdb/server';
 import { createServer as createViteServer } from 'vite';
 
 const rootDir = fileURLToPath(new URL('..', import.meta.url));
@@ -29,7 +29,7 @@ async function main(): Promise<void> {
   const host = process.env.HOST ?? '0.0.0.0';
 
   // 1. Configure storage persistence (FileStorage, SqliteStorage, or MemoryStorage)
-  const storage = new SqliteStorage({ baseDir: dataDir });
+  const storage = new FileStorage({ baseDir: dataDir });
 
   // 2. Instantiate TetherServer with configured storage backend
   const tetherServer = new TetherServer({ storage });

@@ -5,13 +5,13 @@ import type { Storage } from './storage.js';
  * Data reconciliation and persistence strategy for auth and session operations.
  */
 export enum DataMode {
-  /** Merge local and remote changes using Last-Write-Wins (default for login). */
-  Merge,
-  /** Preserve local data and upload/reconcile with remote (default for register & logout). */
-  Local,
-  /** Overwrite local data with remote server snapshot. */
+  /** Overwrite local data with remote server snapshot (default for login). */
   Remote,
-  /** Wipe local data tables. */
+  /** Preserve local data and upload/reconcile with remote (default for register from signed-out state). */
+  Local,
+  /** Merge local and remote changes using Last-Write-Wins. */
+  Merge,
+  /** Wipe local data tables and reset sync sequence (default for logout and register from signed-in state). */
   Clear,
 }
 
@@ -39,7 +39,7 @@ export interface RegisterOptions {
   password: string;
   /** Persist session in IndexedDB for automatic login across sessions (default: false). */
   remember?: boolean;
-  /** Local data handling mode (default: DataMode.Local). */
+  /** Local data handling mode (defaults to DataMode.Local when signed out, or DataMode.Clear when already signed in). */
   dataMode?: DataMode;
 }
 
@@ -53,7 +53,7 @@ export interface LoginOptions {
   password?: string;
   /** Persist session in IndexedDB for automatic login across sessions (default: false). */
   remember?: boolean;
-  /** Data reconciliation mode (default: DataMode.Merge). */
+  /** Data reconciliation mode (default: DataMode.Remote). */
   dataMode?: DataMode;
 }
 
@@ -61,7 +61,7 @@ export interface LoginOptions {
  * Options for logging out of the current user session.
  */
 export interface LogoutOptions {
-  /** Data preservation mode (default: DataMode.Local to preserve data; DataMode.Clear to wipe tables). */
+  /** Data preservation mode (default: DataMode.Clear to wipe local data; DataMode.Local to preserve data). */
   dataMode?: DataMode;
 }
 
@@ -183,12 +183,19 @@ export class Auth {
       throw new Error('Registration requires username and password.');
     }
 
+    const previousStatus = this.currentAuthStatus;
     this.setStatus(AuthStatus.SigningIn);
 
     try {
-      const dataMode = options.dataMode ?? DataMode.Local;
-      if (dataMode === DataMode.Clear) {
-        await this.storage.clearTables();
+      const defaultDataMode =
+        previousStatus === AuthStatus.SignedIn
+          ? DataMode.Clear
+          : DataMode.Local;
+      const dataMode = options.dataMode ?? defaultDataMode;
+
+      if (dataMode === DataMode.Clear || dataMode === DataMode.Remote) {
+        await this.storage.clearTables(true);
+        await this.storage.setMeta('lastSyncSeq', 0);
       }
 
       const res = await this.fetchFn(`${this.baseUrl}/auth/register`, {
@@ -286,9 +293,10 @@ export class Auth {
       this.currentUsername = username;
       this.currentUserId = userId;
 
-      const dataMode = options.dataMode ?? DataMode.Merge;
+      const dataMode = options.dataMode ?? DataMode.Remote;
       if (dataMode === DataMode.Clear) {
-        await this.storage.clearTables();
+        await this.storage.clearTables(true);
+        await this.storage.setMeta('lastSyncSeq', 0);
       } else if (dataMode === DataMode.Remote) {
         await this.storage.clearTables(false);
         await this.storage.setMeta('lastSyncSeq', 0);
@@ -313,9 +321,10 @@ export class Auth {
 
     await this.storage.deleteMeta('auth');
 
-    const dataMode = options.dataMode ?? DataMode.Local;
+    const dataMode = options.dataMode ?? DataMode.Clear;
     if (dataMode === DataMode.Clear) {
-      await this.storage.clearTables();
+      await this.storage.clearTables(true);
+      await this.storage.setMeta('lastSyncSeq', 0);
     }
 
     this.setStatus(AuthStatus.SignedOut);

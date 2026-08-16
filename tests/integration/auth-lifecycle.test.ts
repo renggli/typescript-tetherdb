@@ -322,7 +322,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
     expect((await todos2.getAll()).length).toBe(1);
   });
 
-  it('should handle logout with default DataMode.Local preserving data and DataMode.Clear wiping data', async () => {
+  it('should handle logout with default DataMode.Clear wiping data and DataMode.Local preserving data', async () => {
     const dbName = `db-logout-${Math.random().toString(36).substring(2, 8)}`;
     const client = new TetherClient({
       name: dbName,
@@ -342,13 +342,11 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
     const todos = client.table<{ title: string }>('todos');
     await todos.put('g1', { title: 'Grace todo' });
 
-    // 1. Logout with default (DataMode.Local)
-    await client.logout();
+    // 1. Logout with DataMode.Local preserves data
+    await client.logout({ dataMode: DataMode.Local });
 
     expect(client.authStatus).toBe(AuthStatus.SignedOut);
     expect(client.syncStatus).toBe(SyncStatus.Disconnected);
-
-    // Local data is preserved
     expect(await todos.get('g1')).toEqual({ title: 'Grace todo' });
 
     // 2. Log back in
@@ -358,9 +356,47 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
     });
     expect(client.authStatus).toBe(AuthStatus.SignedIn);
 
-    // 3. Logout with DataMode.Clear
-    await client.logout({ dataMode: DataMode.Clear });
+    // 3. Logout with default (DataMode.Clear) wipes local data
+    await client.logout();
     expect(client.authStatus).toBe(AuthStatus.SignedOut);
+    expect(await todos.getAll()).toHaveLength(0);
+  });
+
+  it('should clear previous user data when registering a new account while already signed in', async () => {
+    const client = new TetherClient({
+      name: `db-reg-switch-${Math.random().toString(36).substring(2, 8)}`,
+      appId: 'test-app',
+      host: '127.0.0.1',
+      port: serverPort,
+      WebSocketClass: WebSocket,
+    });
+    clientsToClose.push(client);
+
+    // Register User 1 while SignedOut (keeps local data)
+    const todos = client.table<{ title: string }>('todos');
+    await todos.put('u1-item', { title: 'User 1 Todo' });
+
+    await client.register({
+      username: 'user_first',
+      password: 'password123',
+    });
+    expect(client.authStatus).toBe(AuthStatus.SignedIn);
+    expect(client.username).toBe('user_first');
+
+    await delay(200);
+    expect((await todos.getAll()).length).toBe(1);
+
+    // Register User 2 while already SignedIn (defaults to clearing previous user data)
+    await client.register({
+      username: 'user_second',
+      password: 'password123',
+    });
+    expect(client.authStatus).toBe(AuthStatus.SignedIn);
+    expect(client.username).toBe('user_second');
+
+    await delay(200);
+
+    // New user should start with clean local state
     expect(await todos.getAll()).toHaveLength(0);
   });
 
@@ -427,5 +463,74 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
     const storedAuth = await checkStorage.getMeta('auth');
     expect(storedAuth).toBeUndefined();
     await checkStorage.close();
+  });
+
+  it('should fetch remote data when switching between user accounts with default DataMode.Remote', async () => {
+    // 1. Create client and register User A
+    const client = new TetherClient({
+      name: `db-switch-${Math.random().toString(36).substring(2, 8)}`,
+      appId: 'test-app',
+      host: '127.0.0.1',
+      port: serverPort,
+      WebSocketClass: WebSocket,
+    });
+    clientsToClose.push(client);
+
+    await client.register({
+      username: 'user_a',
+      password: 'password123',
+      remember: true,
+    });
+
+    const todos = client.table<{ title: string }>('todos');
+    await todos.put('a1', { title: 'User A Todo' });
+    await delay(250);
+
+    expect((await todos.getAll()).map((t) => t.title)).toEqual(['User A Todo']);
+
+    // 2. Pre-create User B with their own data directly on server
+    const userB = await server.storage.createUser('user_b', 'password123');
+    const app = await server.storage.getApp('test-app');
+    await app?.applyChanges(userB, [
+      {
+        table: 'todos',
+        id: 'b1',
+        op: 1, // Put
+        data: { title: 'User B Remote Todo' },
+        timestamp: Date.now(),
+        clientId: 'server-seed',
+      },
+    ]);
+
+    // 3. Switch account by logging in as User B (uses default DataMode.Remote)
+    const successB = await client.login({
+      username: 'user_b',
+      password: 'password123',
+      remember: true,
+    });
+    expect(successB).toBe(true);
+    expect(client.username).toBe('user_b');
+
+    // Wait for snapshot sync
+    await delay(350);
+
+    // Client should now have User B's remote data and none of User A's data
+    const todosUserB = await todos.getAll();
+    expect(todosUserB.map((t) => t.title)).toEqual(['User B Remote Todo']);
+
+    // 4. Switch back to User A
+    const successA = await client.login({
+      username: 'user_a',
+      password: 'password123',
+      remember: true,
+    });
+    expect(successA).toBe(true);
+    expect(client.username).toBe('user_a');
+
+    await delay(350);
+
+    // Client should now have User A's data restored from server snapshot
+    const todosUserA = await todos.getAll();
+    expect(todosUserA.map((t) => t.title)).toEqual(['User A Todo']);
   });
 });

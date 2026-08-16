@@ -245,6 +245,25 @@ header {
   background: var(--primary-hover);
 }
 
+.btn-danger {
+  background: var(--danger);
+  color: white;
+}
+
+.btn-danger:hover {
+  background: #dc2626;
+}
+
+.btn-outline {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+}
+
+.btn-outline:hover {
+  background: var(--surface-hover);
+}
+
 .controls-bar {
   display: flex;
   align-items: center;
@@ -585,4 +604,28 @@ dialog::backdrop {
 .modal-tab.active {
   color: var(--primary);
   border-bottom-color: var(--primary);
+}
+
+.modal-user-info {
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.modal-divider {
+  margin: 1rem 0 0.875rem;
+  border: none;
+  border-top: 1px solid var(--border);
+}
+
+.modal-section-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 0.625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
