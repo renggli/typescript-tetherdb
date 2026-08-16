@@ -3,17 +3,18 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  type BackendType,
+  createBackend,
+  handleServeCommand,
+  runCli,
+} from '../../src/server/cli.js';
+import {
   FileStorage,
   MemoryStorage,
   SqliteStorage,
 } from '../../src/server/storage/index.js';
-import {
-  type BackendType,
-  createBackend,
-  runCli,
-} from '../../src/server/tetherdb.js';
 
-describe('src/server/tetherdb.ts (CLI commands and backends)', () => {
+describe('src/server/cli.ts (CLI commands and backends)', () => {
   let tmpDir: string;
 
   beforeEach(async () => {
@@ -62,6 +63,37 @@ describe('src/server/tetherdb.ts (CLI commands and backends)', () => {
       expect(() =>
         createBackend('unknown_backend' as unknown as BackendType),
       ).toThrow('Unknown backend type');
+    });
+  });
+
+  describe('handleServeCommand', () => {
+    it('should launch server and log formatted endpoints', async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const storage = createBackend('memory');
+      const running = await handleServeCommand(
+        storage,
+        'memory',
+        '.data',
+        0,
+        '127.0.0.1',
+      );
+
+      expect(running).toBeDefined();
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'TetherDB server listening at: http://127.0.0.1:',
+        ),
+      );
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('WebSocket sync endpoint: ws://127.0.0.1:'),
+      );
+      expect(logSpy).toHaveBeenCalledWith(
+        'Storage backend: in-memory (ephemeral)',
+      );
+
+      await running.close();
+      await storage.close?.();
+      logSpy.mockRestore();
     });
   });
 

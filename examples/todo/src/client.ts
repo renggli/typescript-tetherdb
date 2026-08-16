@@ -3,7 +3,6 @@ import {
   SyncStatus,
   type Table,
   type TableChangeEvent,
-  TetherAuthClient,
   TetherDB,
 } from 'tetherdb';
 
@@ -341,30 +340,18 @@ async function init(): Promise<void> {
   const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = `${wsProtocol}//${window.location.host}/sync`;
 
-  // Helper to authenticate as demo account
+  // Helper to authenticate as demo account created by the server
   const autoAuthenticateDemo = async () => {
-    const authClient = new TetherAuthClient({
-      serverUrl: window.location.origin,
-    });
     try {
-      let auth = await authClient
-        .login({ username: 'demo', password: 'password123' })
-        .catch(() => null);
-
-      if (!auth) {
-        auth = await authClient
-          .register({ username: 'demo', password: 'password123' })
-          .catch(() => null);
-      }
-
-      if (auth) {
-        currentUser = auth;
-        localStorage.setItem('tether_todo_user', JSON.stringify(currentUser));
-        updateUserUI();
-        db.enableSync({ url: wsUrl, token: auth.token });
-      }
+      currentUser = await db.login({
+        serverUrl: window.location.origin,
+        username: 'demo',
+        password: 'password123',
+      });
+      localStorage.setItem('tether_todo_user', JSON.stringify(currentUser));
+      updateUserUI();
     } catch {
-      // Server offline -> offline mode
+      // Server offline -> local-only offline mode
     }
   };
 
