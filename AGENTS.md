@@ -2,7 +2,8 @@
 
 This document outlines the core architecture, developer rules, TypeScript conventions, and testing guidelines for developing TetherDB.
 
----
+> [!IMPORTANT]
+> At this point of the development no backward compatibility is needed: this applies to and is not limited to storage layer, the public APIs, and all types, classes, enums, fields, methods, function, ... Directly update all dependencies, documentation and tests when changing things. Focus on a readable, clean, and elegant implementation without any cruft.
 
 ## 🚨 Developer Rules & Quality Checks
 

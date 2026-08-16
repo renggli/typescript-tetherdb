@@ -11,8 +11,10 @@ import { normalizePassword, normalizeUsername } from './validate.js';
 export interface TetherServerOptions {
   /** Custom storage instance. Defaults to MemoryStorage if not defined. */
   storage?: Storage;
+  /** Base path for HTTP REST endpoints (defaults to ''). */
+  basePath?: string;
   /** Path for WebSocket upgrade requests (defaults to '/sync'). */
-  wsPath?: string;
+  webSocketPath?: string;
 }
 
 /**
@@ -46,10 +48,12 @@ export interface RunningServer {
  * health checks (`/health`), and real-time streaming connections (`/sync`).
  */
 export class TetherServer {
-  private storageEngine: Storage;
-  private syncHub: SyncHub;
-  private wss: WebSocketServer | null = null;
-  private wsPath: string;
+  readonly storage: Storage;
+  readonly hub: SyncHub;
+  readonly basePath: string;
+  readonly webSocketPath: string;
+  httpServer: http.Server | null = null;
+  webSocketServer: WebSocketServer | null = null;
 
   /**
    * Initializes a new TetherServer instance.
@@ -57,9 +61,10 @@ export class TetherServer {
    * @param options - Configuration options for storage and endpoints.
    */
   constructor(options: TetherServerOptions = {}) {
-    this.storageEngine = options.storage ?? new MemoryStorage();
-    this.syncHub = new SyncHub(this.storageEngine);
-    this.wsPath = options.wsPath ?? '/sync';
+    this.storage = options.storage ?? new MemoryStorage();
+    this.hub = new SyncHub(this.storage);
+    this.basePath = normalizeBasePath(options.basePath ?? '');
+    this.webSocketPath = options.webSocketPath ?? `${this.basePath}/sync`;
   }
 
   /**
@@ -70,9 +75,9 @@ export class TetherServer {
    * @param tables - Array of table names.
    */
   async declareApp(appId: string, tables: string[] = []): Promise<void> {
-    let app = await this.storageEngine.getApp(appId);
+    let app = await this.storage.getApp(appId);
     if (!app) {
-      app = await this.storageEngine.createApp(appId);
+      app = await this.storage.createApp(appId);
     }
     for (const table of tables) {
       const existing = await app.getTable(table);
@@ -91,36 +96,13 @@ export class TetherServer {
    * @returns UserStorage handle for the declared user.
    */
   async declareUser(username: string, password: string): Promise<UserStorage> {
-    const user = await this.storageEngine.getUserByUsername(username);
+    const user = await this.storage.getUserByUsername(username);
     if (user) {
       await user.changePassword(password);
       return user;
     }
-    return this.storageEngine.createUser(username, password);
+    return this.storage.createUser(username, password);
   }
-
-  /**
-   * The underlying storage instance.
-   */
-  get storage(): Storage {
-    return this.storageEngine;
-  }
-
-  /**
-   * The WebSocket synchronization hub instance.
-   */
-  get hub(): SyncHub {
-    return this.syncHub;
-  }
-
-  /**
-   * The underlying HTTP server instance, if listening.
-   */
-  get httpServer(): http.Server | null {
-    return this._httpServer;
-  }
-
-  private _httpServer: http.Server | null = null;
 
   /**
    * Attaches WebSocket synchronization handling to an existing HTTP server.
@@ -128,21 +110,20 @@ export class TetherServer {
    * @param server - The HTTP server instance to attach to.
    */
   attach(server: http.Server): void {
-    if (!this.wss) {
-      this.wss = new WebSocketServer({ noServer: true });
-      this.wss.on('connection', (ws) => {
-        this.syncHub.handleConnection(ws);
+    if (!this.webSocketServer) {
+      this.webSocketServer = new WebSocketServer({ noServer: true });
+      this.webSocketServer.on('connection', (ws) => {
+        this.hub.handleConnection(ws);
       });
     }
-
     server.on('upgrade', (req, socket, head) => {
       const url = new URL(
         req.url ?? '',
         `http://${req.headers.host ?? 'localhost'}`,
       );
-      if (url.pathname === this.wsPath) {
-        this.wss?.handleUpgrade(req, socket, head, (ws) => {
-          this.wss?.emit('connection', ws, req);
+      if (url.pathname === this.webSocketPath) {
+        this.webSocketServer?.handleUpgrade(req, socket, head, (ws) => {
+          this.webSocketServer?.emit('connection', ws, req);
         });
       } else {
         socket.destroy();
@@ -159,18 +140,16 @@ export class TetherServer {
    */
   async listen(port = 8080, host = '0.0.0.0'): Promise<http.Server> {
     return new Promise<http.Server>((resolve) => {
-      this._httpServer = http.createServer(async (req, res) => {
+      this.httpServer = http.createServer(async (req, res) => {
         const handled = await this.handleHttpRequest(req, res);
         if (!handled) {
           this.sendJson(res, 404, { error: 'Not found' });
         }
       });
-
-      this.attach(this._httpServer);
-
-      this._httpServer.listen(port, host, () => {
-        if (this._httpServer) {
-          resolve(this._httpServer);
+      this.attach(this.httpServer);
+      this.httpServer.listen(port, host, () => {
+        if (this.httpServer) {
+          resolve(this.httpServer);
         }
       });
     });
@@ -181,13 +160,13 @@ export class TetherServer {
    */
   async close(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      if (this.wss) {
-        this.wss.close();
-        this.wss = null;
+      if (this.webSocketServer) {
+        this.webSocketServer.close();
+        this.webSocketServer = null;
       }
-      if (this._httpServer) {
-        this._httpServer.close((err) => {
-          this._httpServer = null;
+      if (this.httpServer) {
+        this.httpServer.close((err) => {
+          this.httpServer = null;
           if (err) reject(err);
           else resolve();
         });
@@ -247,101 +226,26 @@ export class TetherServer {
     const method = req.method?.toUpperCase();
 
     if (method === 'OPTIONS') {
-      res.writeHead(204, {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-      });
-      res.end();
+      this.handleOptions(res);
       return true;
     }
 
     try {
-      // POST /auth/register
-      if (method === 'POST' && url.pathname === '/auth/register') {
-        const body = await this.readJsonBody(req);
-        const { username, password } = body as {
-          username?: string;
-          password?: string;
-        };
-        const normUsername = normalizeUsername(username ?? '');
-        const normPassword = normalizePassword(password ?? '');
-        if (!normUsername) {
-          this.sendJson(res, 400, {
-            error: 'Missing or invalid required field: username',
-          });
-          return true;
-        }
-        if (!normPassword) {
-          this.sendJson(res, 400, {
-            error: 'Missing or invalid required field: password',
-          });
-          return true;
-        }
-
-        try {
-          const user = await this.storageEngine.createUser(
-            normUsername,
-            normPassword,
-          );
-          const token = await user.createToken();
-          this.sendJson(res, 201, {
-            userId: user.id,
-            username: user.username,
-            token,
-          });
-          return true;
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : 'Registration error';
-          this.sendJson(res, 409, { error: msg });
-          return true;
-        }
-      }
-
-      // POST /auth/login
-      if (method === 'POST' && url.pathname === '/auth/login') {
-        const body = await this.readJsonBody(req);
-        const { username, password } = body as {
-          username?: string;
-          password?: string;
-        };
-        const normUsername = normalizeUsername(username ?? '');
-        const normPassword = normalizePassword(password ?? '');
-        if (!normUsername || !normPassword) {
-          this.sendJson(res, 400, {
-            error: 'Missing required field: username and password',
-          });
-          return true;
-        }
-
-        const user = await this.storageEngine.getUserByUsername(normUsername);
-        if (!user) {
-          this.sendJson(res, 401, {
-            error: 'Invalid username or password',
-          });
-          return true;
-        }
-
-        const valid = await user.verifyPassword(normPassword);
-        if (!valid) {
-          this.sendJson(res, 401, {
-            error: 'Invalid username or password',
-          });
-          return true;
-        }
-
-        const token = await user.createToken();
-        this.sendJson(res, 200, {
-          userId: user.id,
-          username: user.username,
-          token,
-        });
+      if (
+        method === 'POST' &&
+        url.pathname === `${this.basePath}/auth/register`
+      ) {
+        await this.handleRegister(req, res);
         return true;
       }
 
-      // Health check endpoint
-      if (method === 'GET' && url.pathname === '/health') {
-        this.sendJson(res, 200, { status: 'ok' });
+      if (method === 'POST' && url.pathname === `${this.basePath}/auth/login`) {
+        await this.handleLogin(req, res);
+        return true;
+      }
+
+      if (method === 'GET' && url.pathname === `${this.basePath}/health`) {
+        this.handleHealth(res);
         return true;
       }
 
@@ -351,6 +255,93 @@ export class TetherServer {
       this.sendJson(res, 500, { error: msg });
       return true;
     }
+  }
+
+  private handleOptions(res: http.ServerResponse): void {
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    });
+    res.end();
+  }
+
+  private handleHealth(res: http.ServerResponse): void {
+    this.sendJson(res, 200, { status: 'ok' });
+  }
+
+  private async handleRegister(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<void> {
+    const body = await this.readJsonBody(req);
+    const { username, password } = body as {
+      username?: string;
+      password?: string;
+    };
+    const normUsername = normalizeUsername(username ?? '');
+    const normPassword = normalizePassword(password ?? '');
+    if (!normUsername || !normPassword) {
+      this.sendJson(res, 400, {
+        error: 'Missing or invalid required field: username and password',
+      });
+      return;
+    }
+
+    try {
+      const user = await this.storage.createUser(normUsername, normPassword);
+      const token = await user.createToken();
+      this.sendJson(res, 201, {
+        userId: user.id,
+        username: user.username,
+        token,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Registration error';
+      this.sendJson(res, 409, { error: msg });
+    }
+  }
+
+  private async handleLogin(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<void> {
+    const body = await this.readJsonBody(req);
+    const { username, password } = body as {
+      username?: string;
+      password?: string;
+    };
+    const normUsername = normalizeUsername(username ?? '');
+    const normPassword = normalizePassword(password ?? '');
+    if (!normUsername || !normPassword) {
+      this.sendJson(res, 400, {
+        error: 'Missing required field: username and password',
+      });
+      return;
+    }
+
+    const user = await this.storage.getUserByUsername(normUsername);
+    if (!user) {
+      this.sendJson(res, 401, {
+        error: 'Invalid username or password',
+      });
+      return;
+    }
+
+    const valid = await user.verifyPassword(normPassword);
+    if (!valid) {
+      this.sendJson(res, 401, {
+        error: 'Invalid username or password',
+      });
+      return;
+    }
+
+    const token = await user.createToken();
+    this.sendJson(res, 200, {
+      userId: user.id,
+      username: user.username,
+      token,
+    });
   }
 }
 
@@ -382,4 +373,11 @@ export async function startServer(
       await server.close();
     },
   };
+}
+
+function normalizeBasePath(path: string): string {
+  if (path === '' || path === '/') return '';
+  if (path.endsWith('/')) path = path.slice(0, path.length - 1);
+  if (!path.startsWith('/')) path = `/${path}`;
+  return path === '/' ? '' : path;
 }
