@@ -268,7 +268,7 @@ export class AppSqliteStorage implements AppStorage {
     const currentSeq = metaRow?.current_seq ?? 0;
     const minSeq = metaRow?.min_seq ?? 0;
 
-    if (fromSeq < minSeq && minSeq > 0) {
+    if ((fromSeq < minSeq && minSeq > 0) || fromSeq > currentSeq) {
       return { changes: [], currentSeq, requiresSnapshot: true };
     }
 

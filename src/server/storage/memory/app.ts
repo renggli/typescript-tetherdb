@@ -164,7 +164,7 @@ export class AppMemoryStorage implements AppStorage {
     const currentSeq = userState.currentSeq;
     const minSeq = userState.minSeq;
 
-    if (fromSeq < minSeq && minSeq > 0) {
+    if ((fromSeq < minSeq && minSeq > 0) || fromSeq > currentSeq) {
       return { changes: [], currentSeq, requiresSnapshot: true };
     }
 

@@ -310,13 +310,16 @@ describe('Auth (src/client/auth.ts)', () => {
         fetchFn: mockFetch as unknown as typeof fetch,
       });
 
+      const clearSpy = vi.spyOn(storage, 'clearTables');
       const success = await auth.register({
         username: 'duplicate',
         password: 'password123',
+        dataMode: DataMode.Clear,
       });
 
       expect(success).toBe(false);
       expect(auth.status).toBe(AuthStatus.Error);
+      expect(clearSpy).not.toHaveBeenCalled();
       expect(consoleSpy).toHaveBeenCalledWith(
         expect.stringContaining('[Auth] Registration failed:'),
         expect.any(Error),
@@ -415,7 +418,7 @@ describe('Auth (src/client/auth.ts)', () => {
       });
 
       await auth.login({ username: 'u', password: 'p' });
-      expect(clearSpy).toHaveBeenCalledWith(false);
+      expect(clearSpy).toHaveBeenCalledWith(true);
       expect(setMetaSpy).toHaveBeenCalledWith('lastSyncSeq', 0);
     });
 

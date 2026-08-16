@@ -357,7 +357,7 @@ export class AppFileStorage implements AppStorage {
     const currentSeq = meta.currentSeq;
     const minSeq = meta.minSeq;
 
-    if (fromSeq < minSeq && minSeq > 0) {
+    if ((fromSeq < minSeq && minSeq > 0) || fromSeq > currentSeq) {
       return { changes: [], currentSeq, requiresSnapshot: true };
     }
 

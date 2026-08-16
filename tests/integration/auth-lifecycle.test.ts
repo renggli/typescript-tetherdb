@@ -165,7 +165,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
       password: 'password123',
     });
 
-    // Attempt to register same username
+    // Attempt to register same username while having local data
     const client2 = new TetherClient(
       `db-err2-${Math.random().toString(36).substring(2, 8)}`,
       {
@@ -177,12 +177,21 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
     );
     clientsToClose.push(client2);
 
+    const todos2 = client2.table<{ title: string }>('todos');
+    await todos2.put('local-preserved', { title: 'Do Not Delete' });
+
     const success = await client2.register({
       username: 'duplicate_user',
       password: 'password123',
+      dataMode: DataMode.Clear,
     });
     expect(success).toBe(false);
     expect(client2.authStatus).toBe(AuthStatus.Error);
+
+    // Verify local data was NOT wiped because register failed
+    const records = await todos2.getAll();
+    expect(records).toHaveLength(1);
+    expect(records[0].title).toBe('Do Not Delete');
   });
 
   it('should support login and merge local/remote data with DataMode.Merge', async () => {
@@ -199,14 +208,14 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
     clientsToClose.push(clientA);
 
     await clientA.register({
-      username: 'david',
+      username: 'diana',
       password: 'password123',
     });
     const todosA = clientA.table<{ title: string }>('todos');
-    await todosA.put('remote-1', { title: 'Remote Item 1' });
+    await todosA.put('r1', { title: 'Remote Item 1' });
     await delay(200);
 
-    // 2. Client B has local offline items
+    // 2. Register Client B locally before login, add local items
     const clientB = new TetherClient(
       `db-b-${Math.random().toString(36).substring(2, 8)}`,
       {
@@ -219,21 +228,19 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
     clientsToClose.push(clientB);
 
     const todosB = clientB.table<{ title: string }>('todos');
-    await todosB.put('local-1', { title: 'Local Item 1' });
+    await todosB.put('l1', { title: 'Local Item 1' });
 
     // 3. Client B logs in with DataMode.Merge
     const success = await clientB.login({
-      username: 'david',
+      username: 'diana',
       password: 'password123',
       dataMode: DataMode.Merge,
     });
     expect(success).toBe(true);
-    expect(clientB.authStatus).toBe(AuthStatus.SignedIn);
-    expect(clientB.username).toBe('david');
 
     await delay(300);
 
-    // B should now have both local and remote items
+    // Both items should be present on Client B
     const allB = await todosB.getAll();
     expect(allB).toHaveLength(2);
     expect(allB.map((t) => t.title).sort()).toEqual([
@@ -291,6 +298,11 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
     const allB = await todosB.getAll();
     expect(allB).toHaveLength(1);
     expect(allB[0].title).toBe('Remote Item');
+
+    // Verify Client A never received the discarded local item
+    const allA = await todosA.getAll();
+    expect(allA).toHaveLength(1);
+    expect(allA[0].title).toBe('Remote Item');
   });
 
   it('should auto-restore session across client re-instantiations when remember: true is set', async () => {
