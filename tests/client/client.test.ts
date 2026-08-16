@@ -147,7 +147,7 @@ describe('TetherClient local operations (src/client/)', () => {
     const todos = db.table<{ title: string }>('todos');
     await todos.put('out1', { title: 'Outbox Test' });
 
-    const outbox = await db.idb.getPendingOutbox();
+    const outbox = await db.database.getPendingOutbox();
     expect(outbox).toHaveLength(1);
     expect(outbox[0].change.table).toBe('todos');
     expect(outbox[0].change.id).toBe('out1');
@@ -165,16 +165,16 @@ describe('TetherClient local operations (src/client/)', () => {
   });
 
   it('should manage and persist sync metadata (lastSyncSeq, tokens)', async () => {
-    await db.idb.setMeta('lastSyncSeq', 12345);
-    const seq = await db.idb.getMeta<number>('lastSyncSeq');
+    await db.database.setMeta('lastSyncSeq', 12345);
+    const seq = await db.database.getMeta<number>('lastSyncSeq');
     expect(seq).toBe(12345);
 
-    await db.idb.setMeta('authToken', 'sample.jwt.token');
-    const token = await db.idb.getMeta<string>('authToken');
+    await db.database.setMeta('authToken', 'sample.jwt.token');
+    const token = await db.database.getMeta<string>('authToken');
     expect(token).toBe('sample.jwt.token');
 
-    await db.idb.deleteMeta('authToken');
-    const deletedToken = await db.idb.getMeta<string>('authToken');
+    await db.database.deleteMeta('authToken');
+    const deletedToken = await db.database.getMeta<string>('authToken');
     expect(deletedToken).toBeUndefined();
   });
 
@@ -213,41 +213,40 @@ describe('TetherClient local operations (src/client/)', () => {
     await customAppDb.close();
   });
 
-  it('should infer basePath and webSocketPath by default mirroring server options', async () => {
-    // Default: basePath is '', webSocketPath is '/sync'
+  it('should infer baseUrl and sync url by default mirroring server options', async () => {
+    // Default: baseUrl is '', sync url is undefined (offline)
     const defaultClient = new TetherClient({
       name: 'default-paths-app',
     });
-    expect(defaultClient.basePath).toBe('');
-    expect(defaultClient.webSocketPath).toBe('/sync');
+    expect(defaultClient.auth.baseUrl).toBe('');
+    expect(defaultClient.sync.url).toBeUndefined();
     await defaultClient.close();
 
-    // Base path without leading/trailing slash: normalized to '/api', webSocketPath inferred as '/api/sync'
+    // Base path without leading/trailing slash: normalized to '/api'
     const apiApp = new TetherClient({
       name: 'api-app',
       basePath: 'api',
     });
-    expect(apiApp.basePath).toBe('/api');
-    expect(apiApp.webSocketPath).toBe('/api/sync');
+    expect(apiApp.auth.baseUrl).toBe('/api');
     await apiApp.close();
 
-    // Nested base path with slashes: normalized to '/api/v1', webSocketPath inferred as '/api/v1/sync'
+    // Nested base path with slashes: normalized to '/api/v1'
     const v1App = new TetherClient({
       name: 'v1-app',
       basePath: '/api/v1/',
     });
-    expect(v1App.basePath).toBe('/api/v1');
-    expect(v1App.webSocketPath).toBe('/api/v1/sync');
+    expect(v1App.auth.baseUrl).toBe('/api/v1');
     await v1App.close();
 
-    // Explicit webSocketPath override
+    // Explicit webSocketPath override with host
     const customWsApp = new TetherClient({
       name: 'custom-ws-app',
+      host: 'example.com',
       basePath: '/api',
       webSocketPath: '/custom-socket',
     });
-    expect(customWsApp.basePath).toBe('/api');
-    expect(customWsApp.webSocketPath).toBe('/custom-socket');
+    expect(customWsApp.auth.baseUrl).toBe('http://example.com/api');
+    expect(customWsApp.sync.url).toBe('ws://example.com/custom-socket');
     await customWsApp.close();
 
     // Host, port, and isSecure options
@@ -259,13 +258,8 @@ describe('TetherClient local operations (src/client/)', () => {
       basePath: '/v1',
     });
 
-    expect(secureClient.host).toBe('api.example.com');
-    expect(secureClient.port).toBe(8443);
-    expect(secureClient.isSecure).toBe(true);
-    expect(secureClient.httpOrigin).toBe('https://api.example.com:8443');
-    expect(secureClient.webSocketUrl).toBe(
-      'wss://api.example.com:8443/v1/sync',
-    );
+    expect(secureClient.auth.baseUrl).toBe('https://api.example.com:8443/v1');
+    expect(secureClient.sync.url).toBe('wss://api.example.com:8443/v1/sync');
     await secureClient.close();
   });
 

@@ -41,7 +41,6 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
 
   afterEach(async () => {
     for (const client of activeClients) {
-      client.disableSync();
       await client.close();
     }
     activeClients.length = 0;

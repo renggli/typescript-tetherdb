@@ -67,29 +67,18 @@ export interface ITable {
  */
 export class Table<T = unknown> implements ITable {
   private tableName: string;
-  private idb: Database;
-  private clientId: string;
-  private onLocalChange?: () => void;
+  private database: Database;
   private listeners: Set<TableChangeListener<T>> = new Set();
 
   /**
    * Creates a new Table instance.
    *
    * @param tableName - Name of the table.
-   * @param idb - IndexedDB transaction coordinator.
-   * @param clientId - The unique client identifier.
-   * @param onLocalChange - Optional callback invoked after local mutations are committed.
+   * @param database - Database transaction coordinator.
    */
-  constructor(
-    tableName: string,
-    idb: Database,
-    clientId: string,
-    onLocalChange?: () => void,
-  ) {
+  constructor(tableName: string, database: Database) {
     this.tableName = tableName;
-    this.idb = idb;
-    this.clientId = clientId;
-    this.onLocalChange = onLocalChange;
+    this.database = database;
   }
 
   /**
@@ -100,13 +89,20 @@ export class Table<T = unknown> implements ITable {
   }
 
   /**
+   * The client identifier for local mutations.
+   */
+  get clientId(): string {
+    return this.database.clientId;
+  }
+
+  /**
    * Retrieves a single record by its identifier.
    *
    * @param id - The unique record identifier.
    * @returns A promise resolving to the record data, or `null` if not found.
    */
   async get(id: string): Promise<T | null> {
-    const record = await this.idb.getRecord<T>(this.tableName, id);
+    const record = await this.database.getRecord<T>(this.tableName, id);
     return record ? record.data : null;
   }
 
@@ -119,7 +115,7 @@ export class Table<T = unknown> implements ITable {
   async getAll(ids?: string[]): Promise<T[]> {
     if (ids !== undefined) {
       if (ids.length === 0) return [];
-      const map = await this.idb.getRecords<T>(this.tableName, ids);
+      const map = await this.database.getRecords<T>(this.tableName, ids);
       const results: T[] = [];
       for (const id of ids) {
         const rec = map.get(id);
@@ -129,7 +125,7 @@ export class Table<T = unknown> implements ITable {
       }
       return results;
     }
-    const records = await this.idb.getAllRecords<T>(this.tableName);
+    const records = await this.database.getAllRecords<T>(this.tableName);
     return records.map((r) => r.data);
   }
 
@@ -139,7 +135,7 @@ export class Table<T = unknown> implements ITable {
    * @returns A promise resolving to the number of deleted records.
    */
   async clear(): Promise<number> {
-    const records = await this.idb.getAllRecords<T>(this.tableName);
+    const records = await this.database.getAllRecords<T>(this.tableName);
     const ids = records.map((r) => r.id);
     return this.deleteAll(ids);
   }
@@ -151,7 +147,7 @@ export class Table<T = unknown> implements ITable {
    * @returns A promise resolving to the stored record with metadata, or `undefined` if not found.
    */
   async getWithMetadata(id: string): Promise<StoredRecord<T> | undefined> {
-    return this.idb.getRecord<T>(this.tableName, id);
+    return this.database.getRecord<T>(this.tableName, id);
   }
 
   /**
@@ -160,7 +156,7 @@ export class Table<T = unknown> implements ITable {
    * @returns A promise resolving to an array of stored records with metadata.
    */
   async getAllWithMetadata(): Promise<StoredRecord<T>[]> {
-    return this.idb.getAllRecords<T>(this.tableName);
+    return this.database.getAllRecords<T>(this.tableName);
   }
 
   /**
@@ -186,7 +182,7 @@ export class Table<T = unknown> implements ITable {
     if (entries.length === 0) return [];
 
     const ids = entries.map((e) => e.id);
-    const existingMap = await this.idb.getRecords<T>(this.tableName, ids);
+    const existingMap = await this.database.getRecords<T>(this.tableName, ids);
     const now = Date.now();
     const clientId = this.clientId;
 
@@ -225,9 +221,8 @@ export class Table<T = unknown> implements ITable {
       savedData.push(entry.data);
     }
 
-    await this.idb.applyLocalChanges(this.tableName, mutations);
+    await this.database.applyLocalChanges(this.tableName, mutations);
     this.notifyListeners(events);
-    this.onLocalChange?.();
     return savedData;
   }
 
@@ -252,7 +247,7 @@ export class Table<T = unknown> implements ITable {
   async deleteAll(ids: string[]): Promise<number> {
     if (ids.length === 0) return 0;
 
-    const existingMap = await this.idb.getRecords<T>(this.tableName, ids);
+    const existingMap = await this.database.getRecords<T>(this.tableName, ids);
     const now = Date.now();
     const clientId = this.clientId;
 
@@ -288,9 +283,8 @@ export class Table<T = unknown> implements ITable {
     }
 
     if (mutations.length > 0) {
-      await this.idb.applyLocalChanges(this.tableName, mutations);
+      await this.database.applyLocalChanges(this.tableName, mutations);
       this.notifyListeners(events);
-      this.onLocalChange?.();
     }
 
     return mutations.length;

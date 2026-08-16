@@ -3,7 +3,10 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
-import { TetherClient } from '../../src/client/client.js';
+import {
+  TetherClient,
+  type TetherClientOptions,
+} from '../../src/client/client.js';
 import { SyncStatus } from '../../src/client/sync.js';
 
 import { TetherServer } from '../../src/server/server.js';
@@ -16,9 +19,7 @@ function delay(ms: number) {
 
 describe('End-to-End WebSocket Sync (src/client/)', () => {
   let server: TetherServer;
-  let wsUrl: string;
   let tmpDir: string;
-  let userToken: string;
   let port: number;
 
   beforeEach(async () => {
@@ -43,11 +44,9 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
     const httpServer = await server.listen(0, '127.0.0.1');
     const addr = httpServer.address();
     port = typeof addr === 'object' && addr ? addr.port : 0;
-    wsUrl = `ws://127.0.0.1:${port}/sync`;
 
-    // Register user
-    const user = await server.storage.createUser('testuser', 'password123');
-    userToken = await user.createToken();
+    // Register test user
+    await server.declareUser('testuser', 'password123');
   });
 
   afterEach(async () => {
@@ -55,16 +54,23 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it('should sync local changes from Client A to server', async () => {
-    const clientA = new TetherClient({
-      name: `client-a-${Math.random().toString(36).substring(2, 8)}`,
+  function createClient(
+    name: string,
+    overrides: Partial<TetherClientOptions> = {},
+  ) {
+    return new TetherClient({
+      name: `${name}-${Math.random().toString(36).substring(2, 8)}`,
       appId: 'default',
-      sync: {
-        url: wsUrl,
-        token: userToken,
-        WebSocketClass: WebSocket,
-      },
+      host: '127.0.0.1',
+      port,
+      WebSocketClass: WebSocket,
+      ...overrides,
     });
+  }
+
+  it('should sync local changes from Client A to server', async () => {
+    const clientA = createClient('client-a');
+    await clientA.login({ username: 'testuser', password: 'password123' });
 
     const todosA = clientA.table<{ title: string; done: boolean }>('todos');
     await todosA.put('t1', { title: 'Buy groceries', done: false });
@@ -72,7 +78,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
     // Wait for sync to flush
     await delay(400);
 
-    const user = await server.storage.getUserByToken(userToken);
+    const user = await server.storage.getUserByUsername('testuser');
     expect(user).toBeDefined();
     if (!user) return;
     const defaultApp = await server.storage.getApp('default');
@@ -89,15 +95,8 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
 
   it('should perform initial snapshot sync on new client connection', async () => {
     // Client A creates data
-    const clientA = new TetherClient({
-      name: `client-a-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'default',
-      sync: {
-        url: wsUrl,
-        token: userToken,
-        WebSocketClass: WebSocket,
-      },
-    });
+    const clientA = createClient('client-a');
+    await clientA.login({ username: 'testuser', password: 'password123' });
 
     const todosA = clientA.table<{ title: string; done: boolean }>('todos');
     await todosA.put('t1', { title: 'Write code', done: false });
@@ -107,15 +106,8 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
     await clientA.close();
 
     // Client B connects from clean state
-    const clientB = new TetherClient({
-      name: `client-b-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'default',
-      sync: {
-        url: wsUrl,
-        token: userToken,
-        WebSocketClass: WebSocket,
-      },
-    });
+    const clientB = createClient('client-b');
+    await clientB.login({ username: 'testuser', password: 'password123' });
 
     // Wait for connection and snapshot delivery
     await delay(200);
@@ -132,25 +124,11 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
   });
 
   it('should broadcast real-time changes between concurrent clients', async () => {
-    const clientA = new TetherClient({
-      name: `client-a-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'default',
-      sync: {
-        url: wsUrl,
-        token: userToken,
-        WebSocketClass: WebSocket,
-      },
-    });
+    const clientA = createClient('client-a');
+    const clientB = createClient('client-b');
 
-    const clientB = new TetherClient({
-      name: `client-b-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'default',
-      sync: {
-        url: wsUrl,
-        token: userToken,
-        WebSocketClass: WebSocket,
-      },
-    });
+    await clientA.login({ username: 'testuser', password: 'password123' });
+    await clientB.login({ username: 'testuser', password: 'password123' });
 
     await delay(150);
 
@@ -183,15 +161,8 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
   });
 
   it('should catch up with diff sync after being offline', async () => {
-    const clientA = new TetherClient({
-      name: `client-a-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'default',
-      sync: {
-        url: wsUrl,
-        token: userToken,
-        WebSocketClass: WebSocket,
-      },
-    });
+    const clientA = createClient('client-a');
+    await clientA.login({ username: 'testuser', password: 'password123' });
 
     const itemsA = clientA.table<{ name: string }>('items');
     await itemsA.put('item-1', { name: 'First' });
@@ -202,12 +173,11 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
     let clientB = new TetherClient({
       name: clientBName,
       appId: 'default',
-      sync: {
-        url: wsUrl,
-        token: userToken,
-        WebSocketClass: WebSocket,
-      },
+      host: '127.0.0.1',
+      port,
+      WebSocketClass: WebSocket,
     });
+    await clientB.login({ username: 'testuser', password: 'password123' });
 
     await delay(200);
     const itemsB1 = clientB.table<{ name: string }>('items');
@@ -225,12 +195,11 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
     clientB = new TetherClient({
       name: clientBName,
       appId: 'default',
-      sync: {
-        url: wsUrl,
-        token: userToken,
-        WebSocketClass: WebSocket,
-      },
+      host: '127.0.0.1',
+      port,
+      WebSocketClass: WebSocket,
     });
+    await clientB.login({ username: 'testuser', password: 'password123' });
 
     await delay(250);
 
@@ -244,28 +213,13 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
   });
 
   it('should enforce multi-tenant isolation across users', async () => {
-    const user2 = await server.storage.createUser('otheruser', 'password123');
-    const user2Token = await user2.createToken();
+    await server.declareUser('otheruser', 'password123');
 
-    const clientUser1 = new TetherClient({
-      name: `client-u1-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'default',
-      sync: {
-        url: wsUrl,
-        token: userToken,
-        WebSocketClass: WebSocket,
-      },
-    });
+    const clientUser1 = createClient('client-u1');
+    const clientUser2 = createClient('client-u2');
 
-    const clientUser2 = new TetherClient({
-      name: `client-u2-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'default',
-      sync: {
-        url: wsUrl,
-        token: user2Token,
-        WebSocketClass: WebSocket,
-      },
-    });
+    await clientUser1.login({ username: 'testuser', password: 'password123' });
+    await clientUser2.login({ username: 'otheruser', password: 'password123' });
 
     await delay(150);
 
@@ -284,7 +238,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
 
   it('should deliver snapshot and update local database in batch when diff is large', async () => {
     // Populate 60 changes in server storage for user
-    const user = await server.storage.getUserByToken(userToken);
+    const user = await server.storage.getUserByUsername('testuser');
     expect(user).toBeDefined();
 
     const changes = [];
@@ -304,15 +258,8 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
     await defaultApp?.applyChanges(user, changes);
 
     // New client connects with lastSyncSeq: 1 (so 59 changes diff > 50 threshold)
-    const client = new TetherClient({
-      name: `client-bulk-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'default',
-      sync: {
-        url: wsUrl,
-        token: userToken,
-        WebSocketClass: WebSocket,
-      },
-    });
+    const client = createClient('client-bulk');
+    await client.login({ username: 'testuser', password: 'password123' });
 
     const tasksTable = client.table<{ title: string }>('tasks');
     await delay(300);
@@ -324,25 +271,11 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
   });
 
   it('should batch rapid local mutations and beam them to remote clients cohesively', async () => {
-    const clientA = new TetherClient({
-      name: `client-a-bulk-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'default',
-      sync: {
-        url: wsUrl,
-        token: userToken,
-        WebSocketClass: WebSocket,
-      },
-    });
+    const clientA = createClient('client-a-bulk');
+    const clientB = createClient('client-b-bulk');
 
-    const clientB = new TetherClient({
-      name: `client-b-bulk-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'default',
-      sync: {
-        url: wsUrl,
-        token: userToken,
-        WebSocketClass: WebSocket,
-      },
-    });
+    await clientA.login({ username: 'testuser', password: 'password123' });
+    await clientB.login({ username: 'testuser', password: 'password123' });
 
     await delay(150);
 
@@ -371,16 +304,10 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
   });
 
   it('should handle keepalive ping and respond with pong without error', async () => {
-    const client = new TetherClient({
-      name: `client-ping-${Math.random().toString(36).substring(2, 8)}`,
-      appId: 'default',
-      sync: {
-        url: wsUrl,
-        token: userToken,
-        pingIntervalMs: 50, // Rapid ping for test
-        WebSocketClass: WebSocket,
-      },
+    const client = createClient('client-ping', {
+      pingIntervalMs: 50, // Rapid ping for test
     });
+    await client.login({ username: 'testuser', password: 'password123' });
 
     await delay(150);
     expect(client.syncStatus).toBe(SyncStatus.Connected);

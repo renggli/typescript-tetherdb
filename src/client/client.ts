@@ -1,4 +1,3 @@
-import { generateClientId } from '../shared/clock.js';
 import { normalizeBasePath } from '../shared/path.js';
 import {
   Auth,
@@ -9,13 +8,8 @@ import {
 } from './auth.js';
 
 import { Database } from './database.js';
-import {
-  Sync,
-  type SyncOptions,
-  type SyncStatus,
-  type WebSocketConstructor,
-} from './sync.js';
-import { type ITable, Table } from './table.js';
+import { Sync, type SyncStatus, type WebSocketConstructor } from './sync.js';
+import type { Table } from './table.js';
 
 export {
   Auth,
@@ -46,12 +40,16 @@ export interface TetherClientOptions {
   basePath?: string;
   /** Path for WebSocket upgrade requests (defaults to `${basePath}/sync`). */
   webSocketPath?: string;
-  /** Custom WebSocket constructor for Node.js environments. */
-  WebSocketClass?: WebSocketConstructor;
   /** Optional custom fetch implementation for authentication requests. */
   fetch?: typeof fetch;
-  /** Optional real-time WebSocket sync configuration. */
-  sync?: Partial<SyncOptions> & { token: string };
+  /** Custom WebSocket constructor for streaming requests. */
+  WebSocketClass?: WebSocketConstructor;
+  /** Initial reconnection backoff delay in milliseconds (defaults to 1000). */
+  reconnectIntervalMs?: number;
+  /** Maximum reconnection backoff delay in milliseconds (defaults to 30000). */
+  maxReconnectIntervalMs?: number;
+  /** Periodic keepalive ping interval in milliseconds (defaults to 30000). Set to 0 to disable. */
+  pingIntervalMs?: number;
 }
 
 /**
@@ -59,24 +57,14 @@ export interface TetherClientOptions {
  * local-first storage, automatic auth lifecycle, and background synchronization.
  */
 export class TetherClient {
-  readonly name: string;
-  readonly appId: string;
-  readonly clientId: string;
-  readonly host?: string;
-  readonly port?: number;
-  readonly isSecure: boolean;
-  readonly basePath: string;
-  readonly webSocketPath: string;
-  readonly WebSocketClass?: WebSocketConstructor;
-  readonly idb: Database;
+  /** Internal IndexedDB database coordinator. */
+  readonly database: Database;
 
   /** Internal authentication coordinator. */
   readonly auth: Auth;
 
-  /** Readonly real-time WebSocket synchronization coordinator. */
+  /** Real-time WebSocket synchronization coordinator. */
   readonly sync: Sync;
-
-  private tables: Map<string, ITable> = new Map();
 
   /**
    * Initializes a new TetherClient instance and wires reactive auth & sync coordination.
@@ -87,85 +75,44 @@ export class TetherClient {
     if (!options.name) {
       throw new Error('Missing required name in TetherClient options.');
     }
-    const isBrowser = typeof window !== 'undefined' && Boolean(window.location);
 
-    this.name = options.name;
-    this.appId = options.appId ?? options.name;
-    this.clientId = generateClientId();
-    this.isSecure =
-      options.isSecure ??
-      (isBrowser ? window.location.protocol === 'https:' : false);
-    this.host =
-      options.host ??
-      (isBrowser ? window.location.hostname || undefined : undefined);
-    this.port =
-      options.port ??
-      (isBrowser && window.location.port
-        ? Number.parseInt(window.location.port, 10)
-        : undefined);
-    this.basePath = normalizeBasePath(options.basePath ?? '');
-    this.webSocketPath = options.webSocketPath ?? `${this.basePath}/sync`;
-    this.WebSocketClass = options.WebSocketClass;
+    this.database = this.createDatabase(options);
+    this.auth = this.createAuth(options, this.database);
+    this.sync = this.createSync(options, this.database);
 
-    this.idb = new Database(this.name, [], options.version ?? 1);
-
-    this.auth = new Auth({
-      baseUrl: this.httpOrigin
-        ? `${this.httpOrigin}${this.basePath}`
-        : this.basePath,
-      db: this.idb,
-      fetchFn: options.fetch,
-    });
-
-    this.sync = new Sync(this.idb, (tableName) => this.table(tableName), {
-      url: this.webSocketUrl,
-      appId: this.appId,
-      clientId: this.clientId,
-      WebSocketClass: this.WebSocketClass,
+    this.database.setOnLocalChange(() => {
+      this.sync.schedulePush();
     });
 
     // Coordinate auth and sync lifecycle reactively
     this.auth.onStatusChange((status) => {
       if (status === AuthStatus.SignedIn && this.auth.token) {
-        this.sync.connect(this.auth.token, this.webSocketUrl);
+        this.sync.connect(this.auth.token);
       } else {
         this.sync.disconnect();
       }
     });
-
-    if (options.sync) {
-      this.auth.setExplicitToken(options.sync.token);
-      this.sync.connect(
-        options.sync.token,
-        options.sync.url ?? this.webSocketUrl,
-      );
-    }
   }
 
   /**
-   * The resolved HTTP origin for remote server requests, or `undefined` if no host is known.
+   * Name of the local IndexedDB database.
    */
-  get httpOrigin(): string | undefined {
-    if (!this.host) return undefined;
-    const hostHeader =
-      this.port !== undefined && !this.host.includes(':')
-        ? `${this.host}:${this.port}`
-        : this.host;
-    const proto = this.isSecure ? 'https' : 'http';
-    return `${proto}://${hostHeader}`;
+  get name(): string {
+    return this.database.name;
   }
 
   /**
-   * The resolved WebSocket URL for real-time synchronization, or `undefined` if no host is known.
+   * Application namespace identifier.
    */
-  get webSocketUrl(): string | undefined {
-    if (!this.host) return undefined;
-    const hostHeader =
-      this.port !== undefined && !this.host.includes(':')
-        ? `${this.host}:${this.port}`
-        : this.host;
-    const proto = this.isSecure ? 'wss' : 'ws';
-    return `${proto}://${hostHeader}${this.webSocketPath}`;
+  get appId(): string {
+    return this.sync.appId;
+  }
+
+  /**
+   * Unique client instance identifier.
+   */
+  get clientId(): string {
+    return this.database.clientId;
   }
 
   // -- Database ------------------------------------------------------
@@ -179,21 +126,14 @@ export class TetherClient {
    * @returns A typed `Table<T>` instance.
    */
   table<T = unknown>(name: string): Table<T> {
-    let tbl = this.tables.get(name);
-    if (!tbl) {
-      tbl = new Table<T>(name, this.idb, this.clientId, () => {
-        this.sync.schedulePush();
-      });
-      this.tables.set(name, tbl);
-    }
-    return tbl as Table<T>;
+    return this.database.table<T>(name);
   }
 
   /**
    * Clears all local application tables, outbox entries, and sync metadata.
    */
   async clear(): Promise<void> {
-    await this.idb.clearAllData();
+    await this.database.clearAllData();
   }
 
   /**
@@ -201,7 +141,7 @@ export class TetherClient {
    */
   async close(): Promise<void> {
     this.sync.destroy();
-    await this.idb.close();
+    await this.database.close();
   }
 
   // -- Authentication ------------------------------------------------------
@@ -279,20 +219,76 @@ export class TetherClient {
     return this.sync.onStatusChange(listener);
   }
 
-  /**
-   * Dynamically enables and connects synchronization for this database.
-   *
-   * @param options - Configuration options for sync.
-   */
-  enableSync(options: Partial<SyncOptions> & { token: string }): void {
-    this.auth.setExplicitToken(options.token);
-    this.sync.connect(options.token, options.url ?? this.webSocketUrl);
+  // -- Private Helpers ------------------------------------------------------
+
+  private createDatabase(options: TetherClientOptions): Database {
+    return new Database(options.name, {
+      version: options.version,
+    });
   }
 
-  /**
-   * Disables synchronization and disconnects the WebSocket while keeping local IndexedDB operational.
-   */
-  disableSync(): void {
-    this.sync.disconnect();
+  private createAuth(options: TetherClientOptions, database: Database): Auth {
+    return new Auth({
+      baseUrl: this.resolveBaseUrl(options),
+      database,
+      fetchFn: options.fetch,
+    });
+  }
+
+  private createSync(options: TetherClientOptions, database: Database): Sync {
+    return new Sync(database, {
+      url: this.resolveWebSocketUrl(options),
+      appId: options.appId ?? options.name,
+      clientId: database.clientId,
+      WebSocketClass: options.WebSocketClass,
+      reconnectIntervalMs: options.reconnectIntervalMs,
+      maxReconnectIntervalMs: options.maxReconnectIntervalMs,
+      pingIntervalMs: options.pingIntervalMs,
+    });
+  }
+
+  private resolveHostHeader(options: TetherClientOptions): {
+    host?: string;
+    isSecure: boolean;
+  } {
+    const isBrowser = typeof window !== 'undefined' && Boolean(window.location);
+    const host =
+      options.host ??
+      (isBrowser ? window.location.hostname || undefined : undefined);
+    const port =
+      options.port ??
+      (isBrowser && window.location.port
+        ? Number.parseInt(window.location.port, 10)
+        : undefined);
+    const isSecure =
+      options.isSecure ??
+      (isBrowser ? window.location.protocol === 'https:' : false);
+
+    if (!host) {
+      return { host: undefined, isSecure };
+    }
+
+    const hostHeader =
+      port !== undefined && !host.includes(':') ? `${host}:${port}` : host;
+    return { host: hostHeader, isSecure };
+  }
+
+  private resolveBaseUrl(options: TetherClientOptions): string {
+    const basePath = normalizeBasePath(options.basePath ?? '');
+    const { host, isSecure } = this.resolveHostHeader(options);
+    if (!host) return basePath;
+    const proto = isSecure ? 'https' : 'http';
+    return `${proto}://${host}${basePath}`;
+  }
+
+  private resolveWebSocketUrl(
+    options: TetherClientOptions,
+  ): string | undefined {
+    const { host, isSecure } = this.resolveHostHeader(options);
+    if (!host) return undefined;
+    const basePath = normalizeBasePath(options.basePath ?? '');
+    const webSocketPath = options.webSocketPath ?? `${basePath}/sync`;
+    const proto = isSecure ? 'wss' : 'ws';
+    return `${proto}://${host}${webSocketPath}`;
   }
 }

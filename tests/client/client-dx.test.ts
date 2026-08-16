@@ -15,7 +15,6 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
   let server: TetherServer;
   let httpServer: http.Server;
   let serverPort: number;
-  let wsUrl: string;
   const clientsToClose: TetherClient[] = [];
 
   const delay = (ms: number) =>
@@ -28,7 +27,6 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
     const addr = httpServer.address();
     if (addr && typeof addr === 'object') {
       serverPort = addr.port;
-      wsUrl = `ws://127.0.0.1:${addr.port}/sync`;
     }
   });
 
@@ -82,7 +80,7 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
     );
     const auth = new Auth({
       baseUrl: `http://127.0.0.1:${serverPort}`,
-      db: tempDb,
+      database: tempDb,
     });
 
     const regSuccess = await auth.register({
@@ -131,7 +129,7 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
     ]);
 
     expect((await todos.getAll()).length).toBe(2);
-    const pendingOutbox = await db.idb.getPendingOutbox();
+    const pendingOutbox = await db.database.getPendingOutbox();
     expect(pendingOutbox).toHaveLength(2);
 
     // 3. User registers account -> seamlessly connects sync & uploads local data
@@ -150,7 +148,7 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
     expect(statuses).toContain(SyncStatus.Connected);
 
     // Outbox should now be completely drained
-    const outboxAfter = await db.idb.getPendingOutbox();
+    const outboxAfter = await db.database.getPendingOutbox();
     expect(outboxAfter).toHaveLength(0);
 
     // Server storage should now have the 2 records
@@ -174,12 +172,8 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
     });
     clientsToClose.push(db);
 
-    expect(db.host).toBe('127.0.0.1');
-    expect(db.port).toBe(serverPort);
-    expect(db.basePath).toBe('');
-    expect(db.webSocketPath).toBe('/sync');
-    expect(db.httpOrigin).toBe(`http://127.0.0.1:${serverPort}`);
-    expect(db.webSocketUrl).toBe(`ws://127.0.0.1:${serverPort}/sync`);
+    expect(db.auth.baseUrl).toBe(`http://127.0.0.1:${serverPort}`);
+    expect(db.sync.url).toBe(`ws://127.0.0.1:${serverPort}/sync`);
 
     // Calling register with username and password should just work by default!
     const success = await db.register({
@@ -193,46 +187,40 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
     expect(db.syncStatus).toBe(SyncStatus.Connected);
   });
 
-  it('should allow disconnecting and reconnecting sync dynamically', async () => {
-    const user = await server.storage.createUser('dynamic_user', 'password123');
-    const token = await user.createToken();
+  it('should automatically connect and disconnect sync on login and logout', async () => {
+    await server.storage.createUser('dynamic_user', 'password123');
 
     const db = new TetherClient({
       name: `dynamic-db-${Math.random().toString(36).substring(2, 8)}`,
       appId: 'default',
+      host: '127.0.0.1',
+      port: serverPort,
+      WebSocketClass: WebSocket,
     });
     clientsToClose.push(db);
 
-    // Connect sync dynamically
-    db.enableSync({
-      url: wsUrl,
-      token,
-      WebSocketClass: WebSocket,
-    });
+    expect(db.syncStatus).toBe(SyncStatus.Disconnected);
 
+    // Login connects sync
+    await db.login({ username: 'dynamic_user', password: 'password123' });
     await delay(150);
     expect(db.syncStatus).toBe(SyncStatus.Connected);
 
-    // Disconnect sync
-    db.disableSync();
+    // Logout disconnects sync
+    await db.logout();
     expect(db.syncStatus).toBe(SyncStatus.Disconnected);
 
     // Local operations still work offline
     const notes = db.table<{ text: string }>('notes');
-    await notes.put('1', { text: 'Created while sync disabled' });
+    await notes.put('1', { text: 'Created while sync disconnected' });
     expect((await notes.getAll()).length).toBe(1);
 
-    // Re-enable sync
-    db.enableSync({
-      url: wsUrl,
-      token,
-      WebSocketClass: WebSocket,
-    });
-
+    // Re-login connects sync and flushes outbox
+    await db.login({ username: 'dynamic_user', password: 'password123' });
     await delay(200);
     expect(db.syncStatus).toBe(SyncStatus.Connected);
 
-    const outbox = await db.idb.getPendingOutbox();
+    const outbox = await db.database.getPendingOutbox();
     expect(outbox).toHaveLength(0);
   });
 

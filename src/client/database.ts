@@ -1,14 +1,30 @@
+import { generateClientId } from '../shared/clock.js';
 import {
   type ChangeRecord,
   OperationType,
   type StoredRecord,
 } from '../shared/types.js';
+import { type ITable, Table } from './table.js';
 
 /** Internal IndexedDB object store name used for queuing pending outgoing mutations. */
 export const OUTBOX_STORE = '__tether_outbox';
 
 /** Internal IndexedDB object store name used for client metadata and sync progression tracking. */
 export const META_STORE = '__tether_meta';
+
+/**
+ * Options for configuring a Database instance.
+ */
+export interface DatabaseOptions {
+  /** Unique client instance identifier. Defaults to auto-generated ID. */
+  clientId?: string;
+  /** Initial application tables to pre-declare. */
+  initialTables?: string[];
+  /** Database schema version (defaults to 1). */
+  version?: number;
+  /** Optional callback invoked after local mutations are committed. */
+  onLocalChange?: () => void;
+}
 
 /**
  * Represents a pending mutation queue item within the internal IndexedDB outbox.
@@ -44,20 +60,50 @@ export interface LocalMutationItem<T = unknown> {
  * All mutations and ingestion workflows are batched by default.
  */
 export class Database {
+  readonly name: string;
+  readonly clientId: string;
   private dbPromise: Promise<IDBDatabase> | null = null;
-  private dbName: string;
   private tableNames: Set<string>;
+  private tables: Map<string, ITable> = new Map();
+  private onLocalChangeCallback?: () => void;
 
   /**
    * Creates a new Database instance.
    *
-   * @param dbName - Name of the IndexedDB database.
-   * @param initialTables - Array of application table names to initialize.
-   * @param _version - Database schema version (reserved for future use).
+   * @param name - Name of the IndexedDB database.
+   * @param options - Configuration options for tables, schema version, client ID, and local change notifications.
    */
-  constructor(dbName: string, initialTables: string[] = [], _version = 1) {
-    this.dbName = dbName;
-    this.tableNames = new Set(initialTables);
+  constructor(name: string, options: DatabaseOptions = {}) {
+    this.name = name;
+    this.clientId = options.clientId ?? generateClientId();
+    this.tableNames = new Set(options.initialTables ?? []);
+    this.onLocalChangeCallback = options.onLocalChange;
+  }
+
+  /**
+   * Sets or updates the callback invoked after local changes are persisted.
+   *
+   * @param callback - Notification callback or undefined to clear.
+   */
+  setOnLocalChange(callback?: () => void): void {
+    this.onLocalChangeCallback = callback;
+  }
+
+  /**
+   * Obtains a typed table reference for reading, mutating, and subscribing to records.
+   * Tables are created dynamically on-demand if not already declared.
+   *
+   * @typeParam T - Data payload model type for records in this table.
+   * @param name - The table name.
+   * @returns A typed `Table<T>` instance.
+   */
+  table<T = unknown>(name: string): Table<T> {
+    let tbl = this.tables.get(name);
+    if (!tbl) {
+      tbl = new Table<T>(name, this);
+      this.tables.set(name, tbl);
+    }
+    return tbl as Table<T>;
   }
 
   /**
@@ -69,7 +115,7 @@ export class Database {
     if (this.dbPromise) return this.dbPromise;
 
     this.dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open(this.dbName);
+      const request = indexedDB.open(this.name);
 
       request.onupgradeneeded = (_event) => {
         const db = request.result;
@@ -101,7 +147,7 @@ export class Database {
         ) {
           const nextVersion = db.version + 1;
           db.close();
-          const upgradeRequest = indexedDB.open(this.dbName, nextVersion);
+          const upgradeRequest = indexedDB.open(this.name, nextVersion);
           upgradeRequest.onupgradeneeded = () => {
             const uDb = upgradeRequest.result;
             if (!uDb.objectStoreNames.contains(OUTBOX_STORE)) {
@@ -121,9 +167,9 @@ export class Database {
           };
           upgradeRequest.onsuccess = () => resolve(upgradeRequest.result);
           upgradeRequest.onerror = () => reject(upgradeRequest.error);
-          return;
+        } else {
+          resolve(db);
         }
-        resolve(db);
       };
 
       request.onerror = () => reject(request.error);
@@ -151,7 +197,7 @@ export class Database {
     const nextVersion = db.version + 1;
     db.close();
     this.dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
-      const upgradeReq = indexedDB.open(this.dbName, nextVersion);
+      const upgradeReq = indexedDB.open(this.name, nextVersion);
       upgradeReq.onupgradeneeded = () => {
         const uDb = upgradeReq.result;
         if (!uDb.objectStoreNames.contains(OUTBOX_STORE)) {
@@ -360,7 +406,10 @@ export class Database {
         records.push(record);
       }
 
-      tx.oncomplete = () => resolve(records);
+      tx.oncomplete = () => {
+        this.onLocalChangeCallback?.();
+        resolve(records);
+      };
       tx.onerror = () => reject(tx.error);
     });
   }

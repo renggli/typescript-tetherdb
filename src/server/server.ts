@@ -178,38 +178,6 @@ export class TetherServer {
     });
   }
 
-  private sendJson(res: http.ServerResponse, status: number, data: unknown) {
-    res.writeHead(status, {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    });
-    res.end(JSON.stringify(data));
-  }
-
-  private async readJsonBody(
-    req: http.IncomingMessage,
-  ): Promise<Record<string, unknown>> {
-    return new Promise((resolve, reject) => {
-      let body = '';
-      req.on('data', (chunk) => {
-        body += chunk;
-        if (body.length > 1024 * 1024) {
-          reject(new Error('Payload too large'));
-        }
-      });
-      req.on('end', () => {
-        try {
-          resolve(body ? JSON.parse(body) : {});
-        } catch {
-          reject(new Error('Invalid JSON'));
-        }
-      });
-      req.on('error', reject);
-    });
-  }
-
   /**
    * Handles incoming HTTP requests for authentication and discovery endpoints.
    *
@@ -252,6 +220,40 @@ export class TetherServer {
       this.sendJson(res, 500, { error: msg });
       return true;
     }
+  }
+
+  // -- Private Helpers ------------------------------------------------------
+
+  private sendJson(res: http.ServerResponse, status: number, data: unknown) {
+    res.writeHead(status, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    });
+    res.end(JSON.stringify(data));
+  }
+
+  private async readJsonBody(
+    req: http.IncomingMessage,
+  ): Promise<Record<string, unknown>> {
+    return new Promise((resolve, reject) => {
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > 1024 * 1024) {
+          reject(new Error('Payload too large'));
+        }
+      });
+      req.on('end', () => {
+        try {
+          resolve(body ? JSON.parse(body) : {});
+        } catch {
+          reject(new Error('Invalid JSON'));
+        }
+      });
+      req.on('error', reject);
+    });
   }
 
   private handleOptions(res: http.ServerResponse): void {

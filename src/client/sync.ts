@@ -8,7 +8,6 @@ import {
   ServerMessageType,
 } from '../shared/types.js';
 import type { Database } from './database.js';
-import type { ITable } from './table.js';
 
 /**
  * Operational state of the synchronization coordinator.
@@ -60,10 +59,10 @@ export interface SyncOptions {
  */
 export class Sync {
   url?: string;
+  readonly appId: string;
+  readonly clientId: string;
   private token?: string;
-  private idb: Database;
-  private getTable: (name: string) => ITable;
-  private clientId: string;
+  private database: Database;
   private options: SyncOptions;
   private webSocket: WebSocket | null = null;
   private currentStatus: SyncStatus = SyncStatus.Disconnected;
@@ -79,15 +78,10 @@ export class Sync {
   /**
    * Creates a new Sync instance.
    *
-   * @param idb - IndexedDB transaction manager.
-   * @param getTable - Function to resolve a table by name.
+   * @param database - Database transaction coordinator.
    * @param options - Configuration options for sync and connection.
    */
-  constructor(
-    idb: Database,
-    getTable: (name: string) => ITable,
-    options: SyncOptions,
-  ) {
+  constructor(database: Database, options: SyncOptions) {
     if (!options.appId) {
       throw new Error('Missing required appId in SyncOptions.');
     }
@@ -96,8 +90,8 @@ export class Sync {
     }
     this.url = options.url;
     this.token = options.token;
-    this.idb = idb;
-    this.getTable = getTable;
+    this.database = database;
+    this.appId = options.appId;
     this.clientId = options.clientId;
     this.options = {
       reconnectIntervalMs: 1000,
@@ -137,18 +131,6 @@ export class Sync {
     this.statusListeners.add(listener);
     listener(this.currentStatus);
     return () => this.statusListeners.delete(listener);
-  }
-
-  private setStatus(newStatus: SyncStatus) {
-    if (this.currentStatus === newStatus) return;
-    this.currentStatus = newStatus;
-    for (const listener of this.statusListeners) {
-      try {
-        listener(newStatus);
-      } catch (err) {
-        console.error('[Sync] Status listener error:', err);
-      }
-    }
   }
 
   /**
@@ -254,6 +236,77 @@ export class Sync {
     this.statusListeners.clear();
   }
 
+  /**
+   * Schedules a debounced push of pending outbox mutations.
+   *
+   * @param delayMs - Debounce delay in milliseconds (defaults to 10).
+   */
+  schedulePush(delayMs = 10): void {
+    if (this.pushTimer) clearTimeout(this.pushTimer);
+    this.pushTimer = setTimeout(() => {
+      this.pushTimer = null;
+      this.pushOutbox();
+    }, delayMs);
+  }
+
+  /**
+   * Immediately extracts queued outbox changes and transmits them to the server.
+   */
+  async pushOutbox(): Promise<void> {
+    if (
+      this.isPushing ||
+      this.currentStatus !== SyncStatus.Connected ||
+      !this.webSocket ||
+      this.webSocket.readyState !== (this.webSocket.OPEN ?? 1)
+    ) {
+      return;
+    }
+
+    this.isPushing = true;
+    try {
+      const pending = await this.database.getPendingOutbox(500);
+      if (pending.length === 0) return;
+
+      const batchId = `batch_${Math.random().toString(36).substring(2, 10)}`;
+      const localIds: number[] = [];
+      const changes: ChangeRecord[] = [];
+
+      for (const entry of pending) {
+        if (entry.localId !== undefined) {
+          localIds.push(entry.localId);
+        }
+        changes.push(entry.change);
+      }
+
+      this.pendingBatches.set(batchId, localIds);
+
+      this.send({
+        type: ClientMessageType.ChangeBatch,
+        clientId: this.clientId,
+        batchId,
+        changes,
+      });
+    } catch (err) {
+      console.error('[Sync] Failed to push outbox batch:', err);
+    } finally {
+      this.isPushing = false;
+    }
+  }
+
+  // -- Private Helpers ------------------------------------------------------
+
+  private setStatus(newStatus: SyncStatus) {
+    if (this.currentStatus === newStatus) return;
+    this.currentStatus = newStatus;
+    for (const listener of this.statusListeners) {
+      try {
+        listener(newStatus);
+      } catch (err) {
+        console.error('[Sync] Status listener error:', err);
+      }
+    }
+  }
+
   private startPing() {
     this.stopPing();
     const interval = this.options.pingIntervalMs ?? 30000;
@@ -294,7 +347,8 @@ export class Sync {
   }
 
   private async sendAuth() {
-    const lastSyncSeq = (await this.idb.getMeta<number>('lastSyncSeq')) ?? 0;
+    const lastSyncSeq =
+      (await this.database.getMeta<number>('lastSyncSeq')) ?? 0;
     this.send({
       type: ClientMessageType.Auth,
       token: this.token ?? '',
@@ -337,10 +391,10 @@ export class Sync {
         const localIds = this.pendingBatches.get(msg.batchId);
         if (localIds) {
           this.pendingBatches.delete(msg.batchId);
-          await this.idb.removeOutboxEntries(localIds);
+          await this.database.removeOutboxEntries(localIds);
         }
         if (msg.appliedSeq !== undefined) {
-          await this.idb.setMeta('lastSyncSeq', msg.appliedSeq);
+          await this.database.setMeta('lastSyncSeq', msg.appliedSeq);
         }
         await this.pushOutbox();
         break;
@@ -374,10 +428,10 @@ export class Sync {
       });
     }
 
-    await this.idb.applySnapshotBatch(records, seq);
+    await this.database.applySnapshotBatch(records, seq);
 
     for (const [tableName, events] of tableEvents.entries()) {
-      const table = this.getTable(tableName);
+      const table = this.database.table(tableName);
       table.notifyRemoteChanges(events);
     }
   }
@@ -405,68 +459,11 @@ export class Sync {
       });
     }
 
-    await this.idb.applyRemoteChangesBatch(changes, seq);
+    await this.database.applyRemoteChangesBatch(changes, seq);
 
     for (const [tableName, events] of tableEvents.entries()) {
-      const table = this.getTable(tableName);
+      const table = this.database.table(tableName);
       table.notifyRemoteChanges(events);
-    }
-  }
-
-  /**
-   * Schedules a debounced push of pending outbox mutations.
-   *
-   * @param delayMs - Debounce delay in milliseconds (defaults to 10).
-   */
-  schedulePush(delayMs = 10): void {
-    if (this.pushTimer) clearTimeout(this.pushTimer);
-    this.pushTimer = setTimeout(() => {
-      this.pushTimer = null;
-      this.pushOutbox();
-    }, delayMs);
-  }
-
-  /**
-   * Immediately extracts queued outbox changes and transmits them to the server.
-   */
-  async pushOutbox(): Promise<void> {
-    if (
-      this.isPushing ||
-      this.currentStatus !== SyncStatus.Connected ||
-      !this.webSocket ||
-      this.webSocket.readyState !== (this.webSocket.OPEN ?? 1)
-    ) {
-      return;
-    }
-
-    this.isPushing = true;
-    try {
-      const pending = await this.idb.getPendingOutbox(500);
-      if (pending.length === 0) return;
-
-      const batchId = `batch_${Math.random().toString(36).substring(2, 10)}`;
-      const localIds: number[] = [];
-      const changes: ChangeRecord[] = [];
-
-      for (const entry of pending) {
-        if (entry.localId !== undefined) {
-          localIds.push(entry.localId);
-        }
-        changes.push(entry.change);
-      }
-
-      this.pendingBatches.set(batchId, localIds);
-
-      this.send({
-        type: ClientMessageType.ChangeBatch,
-        clientId: this.clientId,
-        batchId,
-        changes,
-      });
-    } catch (err) {
-      console.error('[Sync] Failed to push outbox batch:', err);
-    } finally {
-      this.isPushing = false;
     }
   }
 }

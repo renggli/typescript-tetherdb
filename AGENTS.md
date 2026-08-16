@@ -8,6 +8,7 @@ This document outlines the core architecture, developer rules, TypeScript conven
 ## 🚨 Developer Rules & Quality Checks
 
 - **Structure & Documentation**: Public APIs, exported types, classes, and functions must be placed at the top of the file and thoroughly documented with JSDoc comments. Methods should be concise, focused, and readable. Avoid unnecessary abbreviations in identifiers.
+- **Private Helpers at the Bottom**: Place private helper methods and internal utility functions at the bottom of classes and files so that the public API and core lifecycle methods appear clearly at the top.
 - **No `any` Types**: Never use the `any` type. Leverage strict types, `unknown`, explicit generics (`<T = unknown>`), type narrowing, or specific interfaces/unions instead.
 - **Reusability & Duplication**: Reuse logic, types, and utility functions across modules. Refactor shared functions into utility modules (`src/shared/`). Do not duplicate code.
 - **Nullish Coalescing (`??`) for Fallbacks**: Always use the nullish coalescing operator (`??`) when assigning default fallback values for `null` or `undefined`. Reserve `||` exclusively for boolean logical condition checks.

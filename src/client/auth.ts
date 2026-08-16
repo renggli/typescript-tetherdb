@@ -90,7 +90,7 @@ export interface StoredAuthSession {
  */
 export interface AuthDependencies {
   baseUrl: string;
-  db: Database;
+  database: Database;
   fetchFn?: typeof fetch;
 }
 
@@ -99,8 +99,8 @@ export interface AuthDependencies {
  * metadata persistence, and reconciliation state transitions.
  */
 export class Auth {
-  private baseUrl: string;
-  private db: Database;
+  readonly baseUrl: string;
+  private database: Database;
   private fetchFn: typeof fetch;
 
   private currentAuthStatus: AuthStatus = AuthStatus.SignedOut;
@@ -112,7 +112,7 @@ export class Auth {
 
   constructor(dependencies: AuthDependencies) {
     this.baseUrl = dependencies.baseUrl;
-    this.db = dependencies.db;
+    this.database = dependencies.database;
 
     const rawFetch =
       dependencies.fetchFn ??
@@ -171,24 +171,12 @@ export class Auth {
     };
   }
 
-  private setStatus(status: AuthStatus): void {
-    if (this.currentAuthStatus === status) return;
-    this.currentAuthStatus = status;
-    for (const listener of this.statusListeners) {
-      try {
-        listener(status);
-      } catch (err) {
-        console.error('[Auth] Status listener error:', err);
-      }
-    }
-  }
-
   /**
    * Restores any remembered session from IndexedDB metadata on startup.
    */
   async restoreSession(): Promise<void> {
     try {
-      const session = await this.db.getMeta<StoredAuthSession>('auth');
+      const session = await this.database.getMeta<StoredAuthSession>('auth');
       if (session?.token && session.username) {
         this.currentUserId = session.userId;
         this.currentUsername = session.username;
@@ -213,7 +201,7 @@ export class Auth {
     try {
       const dataMode = options.dataMode ?? DataMode.Local;
       if (dataMode === DataMode.Clear) {
-        await this.db.clearTables();
+        await this.database.clearTables();
       }
 
       const res = await this.fetchFn(`${this.baseUrl}/auth/register`, {
@@ -235,13 +223,13 @@ export class Auth {
       this.currentToken = data.token;
 
       if (options.remember) {
-        await this.db.setMeta('auth', {
+        await this.database.setMeta('auth', {
           token: data.token,
           userId: data.userId,
           username: data.username,
         });
       } else {
-        await this.db.deleteMeta('auth');
+        await this.database.deleteMeta('auth');
       }
 
       this.setStatus(AuthStatus.SignedIn);
@@ -286,16 +274,16 @@ export class Auth {
         userId = data.userId;
 
         if (options.remember) {
-          await this.db.setMeta('auth', {
+          await this.database.setMeta('auth', {
             token: data.token,
             userId: data.userId,
             username: data.username,
           });
         } else {
-          await this.db.deleteMeta('auth');
+          await this.database.deleteMeta('auth');
         }
       } else if (!token) {
-        const stored = await this.db.getMeta<StoredAuthSession>('auth');
+        const stored = await this.database.getMeta<StoredAuthSession>('auth');
         if (stored?.token) {
           token = stored.token;
           username = stored.username;
@@ -313,10 +301,10 @@ export class Auth {
 
       const dataMode = options.dataMode ?? DataMode.Merge;
       if (dataMode === DataMode.Clear) {
-        await this.db.clearTables();
+        await this.database.clearTables();
       } else if (dataMode === DataMode.Remote) {
-        await this.db.clearTables(false);
-        await this.db.setMeta('lastSyncSeq', 0);
+        await this.database.clearTables(false);
+        await this.database.setMeta('lastSyncSeq', 0);
       }
 
       this.setStatus(AuthStatus.SignedIn);
@@ -336,22 +324,28 @@ export class Auth {
     this.currentUsername = undefined;
     this.currentToken = undefined;
 
-    await this.db.deleteMeta('auth');
+    await this.database.deleteMeta('auth');
 
     const dataMode = options.dataMode ?? DataMode.Local;
     if (dataMode === DataMode.Clear) {
-      await this.db.clearTables();
+      await this.database.clearTables();
     }
 
     this.setStatus(AuthStatus.SignedOut);
     return true;
   }
 
-  /**
-   * Directly sets signed-in token (for explicit initial sync options).
-   */
-  setExplicitToken(token: string): void {
-    this.currentToken = token;
-    this.setStatus(AuthStatus.SignedIn);
+  // -- Private Helpers ------------------------------------------------------
+
+  private setStatus(status: AuthStatus): void {
+    if (this.currentAuthStatus === status) return;
+    this.currentAuthStatus = status;
+    for (const listener of this.statusListeners) {
+      try {
+        listener(status);
+      } catch (err) {
+        console.error('[Auth] Status listener error:', err);
+      }
+    }
   }
 }
