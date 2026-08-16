@@ -30,9 +30,9 @@ describe('Table (src/client/table.ts)', () => {
   });
 
   describe('get & getAll', () => {
-    it('should return null when getting a non-existent record', async () => {
+    it('should return undefined when getting a non-existent record', async () => {
       const result = await table.get('non-existent');
-      expect(result).toBeNull();
+      expect(result).toBeUndefined();
     });
 
     it('should retrieve a single record after put', async () => {
@@ -182,7 +182,7 @@ describe('Table (src/client/table.ts)', () => {
         },
       ]);
 
-      expect(await table.get('d1')).toBeNull();
+      expect(await table.get('d1')).toBeUndefined();
     });
 
     it('should handle deleteAll with empty array returning 0', async () => {

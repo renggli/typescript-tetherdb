@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import type {
   ChangeRecord,
-  RecordSnapshotItem,
+  SnapshotRecord,
   StoredRecord,
 } from '../../../shared/types.js';
 import { validateRecordId, validateUserId } from '../../validate.js';
@@ -56,10 +56,10 @@ export class TableFileStorage implements TableStorage {
     return record;
   }
 
-  async getAllRecords(user: UserStorage): Promise<RecordSnapshotItem[]> {
+  async getAllRecords(user: UserStorage): Promise<SnapshotRecord[]> {
     const safeUserId = validateUserId(user.id);
     const map = await this.readTableRecords(safeUserId);
-    const items: RecordSnapshotItem[] = [];
+    const items: SnapshotRecord[] = [];
 
     for (const rec of map.values()) {
       if (!rec.deleted) {

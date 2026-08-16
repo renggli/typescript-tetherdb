@@ -5,7 +5,7 @@ import {
   OperationType,
   type StoredRecord,
 } from '../shared/types.js';
-import { type ITable, Table } from './table.js';
+import { Table } from './table.js';
 
 /** Internal IndexedDB object store name used for queuing pending outgoing mutations. */
 export const OUTBOX_STORE = '__tether_outbox';
@@ -53,7 +53,7 @@ export class Storage {
   /** Reactive event registry triggered when mutations are committed to the local database. */
   readonly onLocalChange = new EventRegistry<void>();
   private databasePromise: Promise<IDBDatabase> | null = null;
-  private tables: Map<string, ITable> = new Map();
+  private tables: Map<string, Table<unknown>> = new Map();
 
   /**
    * Creates a new Storage instance.
@@ -76,10 +76,10 @@ export class Storage {
   table<T = unknown>(name: string): Table<T> {
     let tbl = this.tables.get(name);
     if (!tbl) {
-      tbl = new Table<T>(name, this);
+      tbl = new Table(name, this) as Table<unknown>;
       this.tables.set(name, tbl);
     }
-    return tbl as Table<T>;
+    return tbl as unknown as Table<T>;
   }
 
   /**

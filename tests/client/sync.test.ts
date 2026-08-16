@@ -85,7 +85,7 @@ describe('Sync (src/client/sync.ts)', () => {
       appId: 'test-app',
       clientId: 'test-client',
       url: 'ws://127.0.0.1:8080/sync',
-      WebSocketClass: MockWebSocket as unknown as WebSocketConstructor,
+      webSocketClass: MockWebSocket as unknown as WebSocketConstructor,
       ...options,
     });
     syncInstances.push(sync);
@@ -200,7 +200,7 @@ describe('Sync (src/client/sync.ts)', () => {
         appId: 'test-app',
         clientId: 'client-xyz',
         url: 'ws://localhost/sync',
-        WebSocketClass: undefined,
+        webSocketClass: undefined,
       });
       syncInstances.push(sync);
 
@@ -226,7 +226,7 @@ describe('Sync (src/client/sync.ts)', () => {
       }) as unknown as WebSocketConstructor;
 
       const sync = createSync({
-        WebSocketClass: BrokenWebSocket,
+        webSocketClass: BrokenWebSocket,
         reconnectIntervalMs: 50,
       });
 
@@ -239,7 +239,7 @@ describe('Sync (src/client/sync.ts)', () => {
       const sync = new Sync(storage, {
         appId: 'test-app',
         clientId: 'client-xyz',
-        WebSocketClass: MockWebSocket as unknown as WebSocketConstructor,
+        webSocketClass: MockWebSocket as unknown as WebSocketConstructor,
       });
       syncInstances.push(sync);
 
@@ -327,7 +327,7 @@ describe('Sync (src/client/sync.ts)', () => {
       await new Promise((r) => setTimeout(r, 25));
 
       expect(await table.get('snap-1')).toEqual({ title: 'Snap Todo' });
-      expect(await table.get('snap-del')).toBeNull();
+      expect(await table.get('snap-del')).toBeUndefined();
       expect(tableEvents).toHaveLength(2);
       expect(await storage.getMeta('lastSyncSeq')).toBe(50);
     });

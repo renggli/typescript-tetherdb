@@ -30,7 +30,7 @@ export interface TetherClientOptions {
   /** Remote server port number (e.g. 8080). Defaults to current browser port. */
   port?: number;
   /** Whether to use secure HTTPS and WSS protocols (defaults to `true` in secure browser contexts, `false` otherwise). */
-  isSecure?: boolean;
+  secure?: boolean;
   /** Base path for HTTP REST endpoints (defaults to ''). */
   basePath?: string;
   /** Path for WebSocket upgrade requests (defaults to `${basePath}/sync`). */
@@ -38,7 +38,7 @@ export interface TetherClientOptions {
   /** Optional custom fetch implementation for authentication requests. */
   fetch?: typeof fetch;
   /** Custom WebSocket constructor for streaming requests. */
-  WebSocketClass?: WebSocketConstructor;
+  webSocketClass?: WebSocketConstructor;
   /** Initial reconnection backoff delay in milliseconds (defaults to 1000). */
   reconnectIntervalMs?: number;
   /** Maximum reconnection backoff delay in milliseconds (defaults to 30000). */
@@ -198,7 +198,7 @@ export class TetherClient {
       url: this.resolveWebSocketUrl(options),
       appId: options.appId ?? name,
       clientId: storage.clientId,
-      WebSocketClass: options.WebSocketClass,
+      webSocketClass: options.webSocketClass,
       reconnectIntervalMs: options.reconnectIntervalMs,
       maxReconnectIntervalMs: options.maxReconnectIntervalMs,
       pingIntervalMs: options.pingIntervalMs,
@@ -213,7 +213,7 @@ export class TetherClient {
 
   private resolveHostHeader(options: TetherClientOptions): {
     host?: string;
-    isSecure: boolean;
+    secure: boolean;
   } {
     const isBrowser = typeof window !== 'undefined' && Boolean(window.location);
     const host =
@@ -224,35 +224,35 @@ export class TetherClient {
       (isBrowser && window.location.port
         ? Number.parseInt(window.location.port, 10)
         : undefined);
-    const isSecure =
-      options.isSecure ??
+    const secure =
+      options.secure ??
       (isBrowser ? window.location.protocol === 'https:' : false);
 
     if (!host) {
-      return { host: undefined, isSecure };
+      return { host: undefined, secure };
     }
 
     const hostHeader =
       port !== undefined && !host.includes(':') ? `${host}:${port}` : host;
-    return { host: hostHeader, isSecure };
+    return { host: hostHeader, secure };
   }
 
   private resolveBaseUrl(options: TetherClientOptions): string {
     const basePath = normalizeBasePath(options.basePath ?? '');
-    const { host, isSecure } = this.resolveHostHeader(options);
+    const { host, secure } = this.resolveHostHeader(options);
     if (!host) return basePath;
-    const proto = isSecure ? 'https' : 'http';
+    const proto = secure ? 'https' : 'http';
     return `${proto}://${host}${basePath}`;
   }
 
   private resolveWebSocketUrl(
     options: TetherClientOptions,
   ): string | undefined {
-    const { host, isSecure } = this.resolveHostHeader(options);
+    const { host, secure } = this.resolveHostHeader(options);
     if (!host) return undefined;
     const basePath = normalizeBasePath(options.basePath ?? '');
     const webSocketPath = options.webSocketPath ?? `${basePath}/sync`;
-    const proto = isSecure ? 'wss' : 'ws';
+    const proto = secure ? 'wss' : 'ws';
     return `${proto}://${host}${webSocketPath}`;
   }
 }

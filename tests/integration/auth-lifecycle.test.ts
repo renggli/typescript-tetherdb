@@ -42,7 +42,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
         appId: 'test-app',
         host: '127.0.0.1',
         port: serverPort,
-        WebSocketClass: WebSocket,
+        webSocketClass: WebSocket,
       },
     );
     clientsToClose.push(client);
@@ -59,7 +59,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
         appId: 'test-app',
         host: '127.0.0.1',
         port: serverPort,
-        WebSocketClass: WebSocket,
+        webSocketClass: WebSocket,
       },
     );
     clientsToClose.push(client);
@@ -89,7 +89,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
         appId: 'test-app',
         host: '127.0.0.1',
         port: serverPort,
-        WebSocketClass: WebSocket,
+        webSocketClass: WebSocket,
       },
     );
     clientsToClose.push(client);
@@ -127,7 +127,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
         appId: 'test-app',
         host: '127.0.0.1',
         port: serverPort,
-        WebSocketClass: WebSocket,
+        webSocketClass: WebSocket,
       },
     );
     clientsToClose.push(client);
@@ -154,7 +154,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
         appId: 'test-app',
         host: '127.0.0.1',
         port: serverPort,
-        WebSocketClass: WebSocket,
+        webSocketClass: WebSocket,
       },
     );
     clientsToClose.push(client);
@@ -172,7 +172,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
         appId: 'test-app',
         host: '127.0.0.1',
         port: serverPort,
-        WebSocketClass: WebSocket,
+        webSocketClass: WebSocket,
       },
     );
     clientsToClose.push(client2);
@@ -202,7 +202,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
         appId: 'test-app',
         host: '127.0.0.1',
         port: serverPort,
-        WebSocketClass: WebSocket,
+        webSocketClass: WebSocket,
       },
     );
     clientsToClose.push(clientA);
@@ -222,7 +222,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
         appId: 'test-app',
         host: '127.0.0.1',
         port: serverPort,
-        WebSocketClass: WebSocket,
+        webSocketClass: WebSocket,
       },
     );
     clientsToClose.push(clientB);
@@ -257,7 +257,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
         appId: 'test-app',
         host: '127.0.0.1',
         port: serverPort,
-        WebSocketClass: WebSocket,
+        webSocketClass: WebSocket,
       },
     );
     clientsToClose.push(clientA);
@@ -277,7 +277,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
         appId: 'test-app',
         host: '127.0.0.1',
         port: serverPort,
-        WebSocketClass: WebSocket,
+        webSocketClass: WebSocket,
       },
     );
     clientsToClose.push(clientB);
@@ -313,7 +313,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
       appId: 'test-app',
       host: '127.0.0.1',
       port: serverPort,
-      WebSocketClass: WebSocket,
+      webSocketClass: WebSocket,
     });
     clientsToClose.push(client1);
 
@@ -335,7 +335,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
       appId: 'test-app',
       host: '127.0.0.1',
       port: serverPort,
-      WebSocketClass: WebSocket,
+      webSocketClass: WebSocket,
     });
     clientsToClose.push(client2);
 
@@ -356,7 +356,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
       appId: 'test-app',
       host: '127.0.0.1',
       port: serverPort,
-      WebSocketClass: WebSocket,
+      webSocketClass: WebSocket,
     });
     clientsToClose.push(client);
 
@@ -398,7 +398,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
         appId: 'test-app',
         host: '127.0.0.1',
         port: serverPort,
-        WebSocketClass: WebSocket,
+        webSocketClass: WebSocket,
       },
     );
     clientsToClose.push(client);
@@ -437,7 +437,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
       appId: 'test-app',
       host: '127.0.0.1',
       port: serverPort,
-      WebSocketClass: WebSocket,
+      webSocketClass: WebSocket,
     });
     clientsToClose.push(client);
 
@@ -477,7 +477,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
       appId: 'test-app',
       host: '127.0.0.1',
       port: serverPort,
-      WebSocketClass: WebSocket,
+      webSocketClass: WebSocket,
     });
     clientsToClose.push(client);
 
@@ -502,7 +502,7 @@ describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
         appId: 'test-app',
         host: '127.0.0.1',
         port: serverPort,
-        WebSocketClass: WebSocket,
+        webSocketClass: WebSocket,
       },
     );
     clientsToClose.push(client);

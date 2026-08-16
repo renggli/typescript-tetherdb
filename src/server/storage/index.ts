@@ -4,10 +4,19 @@
  * @module tetherdb/server/storage
  */
 
-export * from './app.js';
-export * from './file/index.js';
-export * from './memory/index.js';
-export * from './sqlite/index.js';
-export * from './storage.js';
-export * from './table.js';
-export * from './user.js';
+export type { AppStorage } from './app.js';
+export {
+  FileStorage,
+  type FileStorageOptions,
+} from './file/storage.js';
+export {
+  MemoryStorage,
+  type MemoryStorageOptions,
+} from './memory/storage.js';
+export {
+  SqliteStorage,
+  type SqliteStorageOptions,
+} from './sqlite/storage.js';
+export type { Storage, StorageOptions } from './storage.js';
+export type { TableStorage } from './table.js';
+export type { UserStorage } from './user.js';

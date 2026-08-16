@@ -304,50 +304,6 @@ describe('Sync (src/server/sync.ts)', () => {
         expect(messages[1].snapshot).toHaveLength(55);
       }
     });
-
-    it('should handle InitSync for authenticated client', async () => {
-      const ws = new MockServerWebSocket();
-      sync.handleConnection(ws as unknown as WebSocket);
-
-      // 1. Auth
-      ws.emitClientMessage({
-        type: ClientMessageType.Auth,
-        token: validToken,
-        appId: 'todo-app',
-        clientId: 'client-1',
-        lastSyncSeq: 0,
-      });
-      await new Promise((r) => setTimeout(r, 20));
-
-      // 2. Explicit InitSync request
-      ws.emitClientMessage({
-        type: ClientMessageType.InitSync,
-        lastSyncSeq: 0,
-      });
-      await new Promise((r) => setTimeout(r, 20));
-
-      const messages = ws.getParsedMessages();
-      expect(messages).toHaveLength(3);
-      expect(messages[2].type).toBe(ServerMessageType.SyncSnapshot);
-    });
-
-    it('should reject InitSync when client is not authenticated', async () => {
-      const ws = new MockServerWebSocket();
-      sync.handleConnection(ws as unknown as WebSocket);
-
-      ws.emitClientMessage({
-        type: ClientMessageType.InitSync,
-        lastSyncSeq: 0,
-      });
-      await new Promise((r) => setTimeout(r, 20));
-
-      const messages = ws.getParsedMessages();
-      expect(messages).toHaveLength(1);
-      expect(messages[0]).toEqual({
-        type: ServerMessageType.AuthError,
-        message: 'Not authenticated.',
-      });
-    });
   });
 
   describe('Change Ingestion & Real-Time Broadcasting (ClientMessageType.ChangeBatch)', () => {

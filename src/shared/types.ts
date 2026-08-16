@@ -61,7 +61,7 @@ export interface StoredRecord<T = unknown> {
  *
  * @typeParam T - The data type of the record payload.
  */
-export interface RecordSnapshotItem<T = unknown> {
+export interface SnapshotRecord<T = unknown> {
   /** The table name. */
   table: string;
   /** The unique record identifier. */
@@ -86,8 +86,6 @@ export interface RecordSnapshotItem<T = unknown> {
 export enum ClientMessageType {
   /** Authenticate connection with user token and initial sync sequence. */
   Auth = 'auth',
-  /** Explicitly request synchronization data (snapshot or diff). */
-  InitSync = 'init_sync',
   /** Submit a batch of local pending changes to the server. */
   ChangeBatch = 'change_batch',
   /** Heartbeat ping message to verify connection liveness. */
@@ -108,13 +106,6 @@ export type ClientMessage =
       lastSyncSeq?: number;
       /** Application namespace identifier. */
       appId: string;
-    }
-  | {
-      type: ClientMessageType.InitSync;
-      /** Unique client instance identifier. */
-      clientId: string;
-      /** Last synchronized sequence number known to the client. */
-      lastSyncSeq?: number;
     }
   | {
       type: ClientMessageType.ChangeBatch;
@@ -174,7 +165,7 @@ export type ServerMessage =
       /** Sequence number corresponding to the snapshot state. */
       seq: number;
       /** All active records across tables. */
-      snapshot: RecordSnapshotItem[];
+      snapshot: SnapshotRecord[];
     }
   | {
       type: ServerMessageType.SyncDiff;

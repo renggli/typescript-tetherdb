@@ -1,6 +1,6 @@
 import type {
   ChangeRecord,
-  RecordSnapshotItem,
+  SnapshotRecord,
   StoredRecord,
 } from '../../shared/types.js';
 import type { AppStorage } from './app.js';
@@ -30,7 +30,7 @@ export interface TableStorage {
    * @param user - Target user handle.
    * @returns Array of snapshot items.
    */
-  getAllRecords(user: UserStorage): Promise<RecordSnapshotItem[]>;
+  getAllRecords(user: UserStorage): Promise<SnapshotRecord[]>;
 
   /**
    * Applies an array of mutation change operations to this table for a user.

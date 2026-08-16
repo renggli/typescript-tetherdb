@@ -64,7 +64,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
         appId: 'default',
         host: '127.0.0.1',
         port,
-        WebSocketClass: WebSocket,
+        webSocketClass: WebSocket,
         ...overrides,
       },
     );
@@ -176,7 +176,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
       appId: 'default',
       host: '127.0.0.1',
       port,
-      WebSocketClass: WebSocket,
+      webSocketClass: WebSocket,
     });
     await clientB.login({ username: 'testuser', password: 'password123' });
 
@@ -197,7 +197,7 @@ describe('End-to-End WebSocket Sync (src/client/)', () => {
       appId: 'default',
       host: '127.0.0.1',
       port,
-      WebSocketClass: WebSocket,
+      webSocketClass: WebSocket,
     });
     await clientB.login({ username: 'testuser', password: 'password123' });
 

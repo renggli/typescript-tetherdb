@@ -41,9 +41,9 @@ describe('TetherClient Facade (src/client/client.ts)', () => {
   });
 
   describe('Constructor & State', () => {
-    it('should initialize with default statuses and expose getters', () => {
+    it('should initialize with default states and empty credentials', () => {
       const client = new TetherClient(
-        `test-db-${Math.random().toString(36).substring(2, 8)}`,
+        `init-test-${Math.random().toString(36).substring(2, 8)}`,
       );
       clientsToClose.push(client);
 
@@ -68,7 +68,7 @@ describe('TetherClient Facade (src/client/client.ts)', () => {
         {
           host: 'api.example.com',
           port: 8443,
-          isSecure: true,
+          secure: true,
           basePath: '/api/v1/',
           webSocketPath: '/custom/sync',
         },
@@ -196,7 +196,7 @@ describe('TetherClient Facade (src/client/client.ts)', () => {
           host: '127.0.0.1',
           port: 8080,
           fetch: mockFetch as unknown as typeof fetch,
-          WebSocketClass: MockWebSocket as unknown as WebSocketConstructor,
+          webSocketClass: MockWebSocket as unknown as WebSocketConstructor,
         },
       );
       clientsToClose.push(client);

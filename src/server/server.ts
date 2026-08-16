@@ -59,10 +59,8 @@ export class TetherServer {
   readonly basePath: string;
   /** Path for WebSocket upgrade requests. */
   readonly webSocketPath: string;
-  /** Active Node.js HTTP server instance, or `null` if not listening. */
-  httpServer: http.Server | null = null;
-  /** Active WebSocketServer instance, or `null` if not listening. */
-  webSocketServer: WebSocketServer | null = null;
+  private _httpServer: http.Server | null = null;
+  private _webSocketServer: WebSocketServer | null = null;
 
   /**
    * Initializes a new TetherServer instance.
@@ -74,6 +72,20 @@ export class TetherServer {
     this.sync = new Sync(this.storage);
     this.basePath = normalizeBasePath(options.basePath ?? '');
     this.webSocketPath = options.webSocketPath ?? `${this.basePath}/sync`;
+  }
+
+  /**
+   * Active Node.js HTTP server instance, or `null` if not listening.
+   */
+  get httpServer(): http.Server | null {
+    return this._httpServer;
+  }
+
+  /**
+   * Active WebSocketServer instance, or `null` if not listening.
+   */
+  get webSocketServer(): WebSocketServer | null {
+    return this._webSocketServer;
   }
 
   /**
@@ -119,9 +131,9 @@ export class TetherServer {
    * @param server - The HTTP server instance to attach to.
    */
   attach(server: http.Server): void {
-    if (!this.webSocketServer) {
-      this.webSocketServer = new WebSocketServer({ noServer: true });
-      this.webSocketServer.on('connection', (ws) => {
+    if (!this._webSocketServer) {
+      this._webSocketServer = new WebSocketServer({ noServer: true });
+      this._webSocketServer.on('connection', (ws) => {
         this.sync.handleConnection(ws);
       });
     }
@@ -131,8 +143,8 @@ export class TetherServer {
         `http://${req.headers.host ?? 'localhost'}`,
       );
       if (url.pathname === this.webSocketPath) {
-        this.webSocketServer?.handleUpgrade(req, socket, head, (ws) => {
-          this.webSocketServer?.emit('connection', ws, req);
+        this._webSocketServer?.handleUpgrade(req, socket, head, (ws) => {
+          this._webSocketServer?.emit('connection', ws, req);
         });
       } else {
         socket.destroy();
@@ -149,16 +161,16 @@ export class TetherServer {
    */
   async listen(port = 8080, host = '0.0.0.0'): Promise<http.Server> {
     return new Promise<http.Server>((resolve) => {
-      this.httpServer = http.createServer(async (req, res) => {
+      this._httpServer = http.createServer(async (req, res) => {
         const handled = await this.handleHttpRequest(req, res);
         if (!handled) {
           this.sendJson(res, 404, { error: 'Not found' });
         }
       });
-      this.attach(this.httpServer);
-      this.httpServer.listen(port, host, () => {
-        if (this.httpServer) {
-          resolve(this.httpServer);
+      this.attach(this._httpServer);
+      this._httpServer.listen(port, host, () => {
+        if (this._httpServer) {
+          resolve(this._httpServer);
         }
       });
     });
@@ -169,13 +181,13 @@ export class TetherServer {
    */
   async close(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      if (this.webSocketServer) {
-        this.webSocketServer.close();
-        this.webSocketServer = null;
+      if (this._webSocketServer) {
+        this._webSocketServer.close();
+        this._webSocketServer = null;
       }
-      if (this.httpServer) {
-        this.httpServer.close((err) => {
-          this.httpServer = null;
+      if (this._httpServer) {
+        this._httpServer.close((err) => {
+          this._httpServer = null;
           if (err) reject(err);
           else resolve();
         });

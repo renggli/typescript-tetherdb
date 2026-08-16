@@ -4,9 +4,9 @@ import {
   type ClientMessage,
   ClientMessageType,
   OperationType,
-  type RecordSnapshotItem,
   type ServerMessage,
   ServerMessageType,
+  type SnapshotRecord,
 } from '../shared/types.js';
 import { TetherClientError, TetherClientErrorCode } from './errors.js';
 import type { Storage } from './storage.js';
@@ -52,7 +52,7 @@ export interface SyncOptions {
   /** Periodic keepalive ping interval in milliseconds (defaults to 30000). Set to 0 to disable. */
   pingIntervalMs?: number;
   /** Custom WebSocket constructor for Node.js environments. */
-  WebSocketClass?: WebSocketConstructor;
+  webSocketClass?: WebSocketConstructor;
   /** Callback invoked when the server provides a refreshed session token. */
   onTokenRefresh?: (token: string) => void;
   /** Callback invoked when the server rejects authentication. */
@@ -160,7 +160,7 @@ export class Sync {
 
     const wsUrl = this.url;
     const WebSocketImpl =
-      this.options.WebSocketClass ??
+      this.options.webSocketClass ??
       (typeof WebSocket !== 'undefined' ? WebSocket : null);
 
     if (!WebSocketImpl) {
@@ -422,7 +422,7 @@ export class Sync {
   }
 
   private async handleSnapshot(
-    records: RecordSnapshotItem[],
+    records: SnapshotRecord[],
     seq: number,
   ): Promise<void> {
     const tableEvents = new Map<

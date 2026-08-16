@@ -24,7 +24,6 @@ export {
   type WebSocketConstructor,
 } from './sync.js';
 export {
-  type ITable,
   Table,
   type TableChangeEvent,
   type TableChangeListener,

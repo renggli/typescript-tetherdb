@@ -2,9 +2,9 @@ import type { WebSocket } from 'ws';
 import {
   type ClientMessage,
   ClientMessageType,
-  type RecordSnapshotItem,
   type ServerMessage,
   ServerMessageType,
+  type SnapshotRecord,
 } from '../shared/types.js';
 import { TetherServerError, TetherServerErrorCode } from './errors.js';
 import type { Storage } from './storage/storage.js';
@@ -49,35 +49,36 @@ export class Sync {
     let messageQueue: Promise<void> = Promise.resolve();
 
     webSocket.on('message', (data) => {
+      const client = this.webSocketToClient.get(webSocket);
+      const userContext = client
+        ? ` (app: "${client.appId}", user: "${client.user.id}", client: "${client.clientId}")`
+        : '';
+
       messageQueue = messageQueue
         .then(async () => {
-          const client = this.webSocketToClient.get(webSocket);
-          const userContext = client
-            ? ` (app: "${client.appId}", user: "${client.user.id}", client: "${client.clientId}")`
-            : '';
-
           try {
             const raw = typeof data === 'string' ? data : data.toString();
-            const msg: ClientMessage = JSON.parse(raw);
+            const msg = JSON.parse(raw) as ClientMessage;
             await this.handleMessage(webSocket, msg);
           } catch (err) {
-            const errorMsg =
-              err instanceof Error ? err.message : 'Invalid message format.';
+            const message =
+              err instanceof Error ? err.message : 'Unknown server error.';
             console.error(
-              `[TetherServer] WebSocket message error${userContext}:`,
-              errorMsg,
+              `[TetherServer.Sync] Error processing WebSocket message${userContext}:`,
+              err,
             );
             this.send(webSocket, {
               type: ServerMessageType.Error,
-              message: errorMsg,
+              message,
             });
           }
         })
-        .catch(() => {});
-    });
-
-    webSocket.on('close', () => {
-      this.handleDisconnect(webSocket);
+        .catch((err) => {
+          console.error(
+            `[TetherServer.Sync] Unhandled error in message queue${userContext}:`,
+            err,
+          );
+        });
     });
 
     webSocket.on('error', (err) => {
@@ -86,19 +87,24 @@ export class Sync {
         ? ` (app: "${client.appId}", user: "${client.user.id}", client: "${client.clientId}")`
         : '';
       console.error(
-        `[TetherServer] WebSocket client error${userContext}:`,
+        `[TetherServer.Sync] WebSocket connection error${userContext}:`,
         err,
       );
-      this.handleDisconnect(webSocket);
+      this.cleanupConnection(webSocket);
+    });
+
+    webSocket.on('close', () => {
+      this.cleanupConnection(webSocket);
     });
   }
 
-  // -- Private Message Handlers ---------------------------------------------
-
-  private async handleMessage(
-    webSocket: WebSocket,
-    msg: ClientMessage,
-  ): Promise<void> {
+  /**
+   * Routes and executes incoming client protocol messages.
+   *
+   * @param webSocket - The connection that sent the message.
+   * @param msg - Parsed client protocol message.
+   */
+  async handleMessage(webSocket: WebSocket, msg: ClientMessage): Promise<void> {
     if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string') {
       throw new TetherServerError(
         TetherServerErrorCode.InvalidInput,
@@ -109,10 +115,6 @@ export class Sync {
     switch (msg.type) {
       case ClientMessageType.Auth:
         await this.handleAuthMessage(webSocket, msg);
-        break;
-
-      case ClientMessageType.InitSync:
-        await this.handleInitSyncMessage(webSocket, msg);
         break;
 
       case ClientMessageType.ChangeBatch:
@@ -130,6 +132,8 @@ export class Sync {
         );
     }
   }
+
+  // -- Private Message Handlers ---------------------------------------------
 
   private async handleAuthMessage(
     webSocket: WebSocket,
@@ -207,21 +211,6 @@ export class Sync {
     await this.performSync(client, msg.lastSyncSeq);
   }
 
-  private async handleInitSyncMessage(
-    webSocket: WebSocket,
-    msg: Extract<ClientMessage, { type: ClientMessageType.InitSync }>,
-  ): Promise<void> {
-    const client = this.webSocketToClient.get(webSocket);
-    if (!client) {
-      this.send(webSocket, {
-        type: ServerMessageType.AuthError,
-        message: 'Not authenticated.',
-      });
-      return;
-    }
-    await this.performSync(client, msg.lastSyncSeq);
-  }
-
   private async handleChangeBatchMessage(
     webSocket: WebSocket,
     msg: Extract<ClientMessage, { type: ClientMessageType.ChangeBatch }>,
@@ -293,7 +282,7 @@ export class Sync {
 
   // -- Private Helpers ------------------------------------------------------
 
-  private handleDisconnect(webSocket: WebSocket): void {
+  private cleanupConnection(webSocket: WebSocket): void {
     const client = this.webSocketToClient.get(webSocket);
     if (!client) return;
 
@@ -330,7 +319,7 @@ export class Sync {
     if (seq === 0) {
       // Client has no sync point: deliver full snapshot for this app
       const tables = await app.getTables();
-      const snapshot: RecordSnapshotItem[] = [];
+      const snapshot: SnapshotRecord[] = [];
       for (const table of tables) {
         const records = await table.getAllRecords(client.user);
         snapshot.push(...records);
@@ -349,7 +338,7 @@ export class Sync {
       // If changelog was pruned OR diff is large (> 50 changes), deliver full snapshot for maximum efficiency
       if (requiresSnapshot || changes.length > 50) {
         const tables = await app.getTables();
-        const snapshot: RecordSnapshotItem[] = [];
+        const snapshot: SnapshotRecord[] = [];
         for (const table of tables) {
           const records = await table.getAllRecords(client.user);
           snapshot.push(...records);

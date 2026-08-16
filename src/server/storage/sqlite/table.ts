@@ -1,6 +1,6 @@
 import type {
   ChangeRecord,
-  RecordSnapshotItem,
+  SnapshotRecord,
   StoredRecord,
 } from '../../../shared/types.js';
 import { validateRecordId, validateUserId } from '../../validate.js';
@@ -62,7 +62,7 @@ export class TableSqliteStorage implements TableStorage {
     };
   }
 
-  async getAllRecords(user: UserStorage): Promise<RecordSnapshotItem[]> {
+  async getAllRecords(user: UserStorage): Promise<SnapshotRecord[]> {
     const safeUserId = validateUserId(user.id);
     const handle = this.app.getUserDb(safeUserId);
     const rows = handle.stmtGetSnapshotByTable.all(

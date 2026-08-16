@@ -115,25 +115,25 @@ The standard server provides authentication and WebSocket sync endpoints:
 ## Architecture & Subpaths
 
 - **`tetherdb/client`**:
-  - `TetherClient`: Main reactive facade client with local-first storage, multi-app support, auto-session, and auth helpers.
-  - `Table`: Typed table wrapper around IndexedDB object stores supporting single and bulk CRUD (`put`, `putAll`, `delete`, `deleteAll`, `get`, `getAll`, `clear`).
-  - `Sync`: Real-time WebSocket sync coordinator with debounced outbox draining and exponential backoff.
-  - `Auth`: Internal authentication coordinator managing sessions and metadata persistence.
-  - `Database`: IndexedDB layer with outbox and metadata stores.
+  - `TetherClient`: Main reactive facade client with local-first storage, multi-app support, auto-session, and auth helpers (`authStatus`, `username`).
+  - `Table`: Typed table wrapper around IndexedDB object stores supporting single and bulk CRUD (`put`, `putAll`, `delete`, `deleteAll`, `get`, `getAll`, `clear`) and reactive subscriptions (`onChange`, `subscribeAll`).
+  - `SyncStatus`: Connection lifecycle states (`Disconnected`, `Connecting`, `Connected`, `Error`).
+  - `AuthStatus`: Session lifecycle states (`SignedOut`, `SigningIn`, `SignedIn`, `Error`).
+  - `DataMode`: Reconciliation strategy on auth transitions (`Remote`, `Local`, `Merge`, `Clear`).
 
 - **`tetherdb/server`**:
   - `startServer`: Zero-config server launcher with automatic port assignment and clean shutdown.
-  - `TetherServer`: Unified HTTP and WebSocket server with discovery endpoints.
-  - `AuthAdapter`: Pluggable authentication interface for custom identity providers.
-  - `MemoryAuthAdapter`: In-memory auth adapter for fast testing and ephemeral workloads.
-  - `FileAuthAdapter`: Filesystem-persisted auth adapter storing user credentials and secret keys.
+  - `TetherServer`: Unified HTTP and WebSocket server with discovery endpoints and programmatic provisioning (`declareApp`, `declareUser`).
+  - `MemoryStorage`: Ephemeral in-memory storage engine for fast testing and development.
+  - `FileStorage`: Persistent filesystem storage engine sharded by app and user.
+  - `SqliteStorage`: Persistent SQLite storage engine for production deployments.
   - `Sync`: WebSocket connection manager with app- and user-level change routing and broadcasting.
-  - `FileStorageAdapter`: Multi-app sharded filesystem storage (`<baseDir>/<appId>/<shard>/<userId>/stores/`).
-  - `MemoryStorageAdapter`: In-memory storage adapter for testing and ephemeral workloads.
+
 - **`tetherdb/shared`**:
-  - Shared types (`ChangeRecord`, `StoredRecord`, `ClientMessage`, `ServerMessage`).
-  - Security validators (`validateUserId`, `validateAppId`, `validateStoreName`, `validateRecordId`, `validateUsername`).
-  - Clock utilities (`shouldOverwrite`, `generateClientId`).
+  - Shared types (`ChangeRecord`, `StoredRecord`, `SnapshotRecord`, `ClientMessage`, `ServerMessage`).
+  - Clock and conflict resolution utilities (`shouldOverwrite`, `generateClientId`).
+  - Event utilities (`EventRegistry`, `EventListener`).
+  - Path normalization utilities (`normalizeBasePath`).
 
 ---
 

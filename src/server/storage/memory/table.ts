@@ -1,6 +1,6 @@
 import type {
   ChangeRecord,
-  RecordSnapshotItem,
+  SnapshotRecord,
   StoredRecord,
 } from '../../../shared/types.js';
 import { validateRecordId } from '../../validate.js';
@@ -39,10 +39,10 @@ export class TableMemoryStorage implements TableStorage {
     return record;
   }
 
-  async getAllRecords(user: UserStorage): Promise<RecordSnapshotItem[]> {
+  async getAllRecords(user: UserStorage): Promise<SnapshotRecord[]> {
     const userState = this.storage.getUserState(user.id, this.app.id);
     const tableMap = userState.tables.get(this.name);
-    const items: RecordSnapshotItem[] = [];
+    const items: SnapshotRecord[] = [];
 
     if (tableMap) {
       for (const rec of tableMap.values()) {

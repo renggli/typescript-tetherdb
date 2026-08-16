@@ -46,27 +46,13 @@ export type TableChangeListener<T = unknown> = (
 ) => void;
 
 /**
- * Abstract interface representing an object store table capable of ingesting remote sync records.
- */
-export interface ITable {
-  /** The unique name of the table. */
-  readonly name: string;
-  /**
-   * Notifies registered table subscribers of remote change events.
-   *
-   * @param events - The remote change events.
-   */
-  notifyRemoteChanges(events: TableChangeEvent<unknown>[]): void;
-}
-
-/**
  * Typed table wrapper providing local-first CRUD operations and reactive event subscriptions
  * against an underlying IndexedDB table.
  * Operations are batched by default for maximum performance.
  *
  * @typeParam T - The data type of records stored in this table.
  */
-export class Table<T = unknown> implements ITable {
+export class Table<T = unknown> {
   /** Reactive event registry triggered when records in this table are created, updated, or deleted. */
   readonly onChange = new EventRegistry<TableChangeEvent<T>[]>();
   private tableName: string;
@@ -101,11 +87,11 @@ export class Table<T = unknown> implements ITable {
    * Retrieves a single record by its identifier.
    *
    * @param id - The unique record identifier.
-   * @returns A promise resolving to the record data, or `null` if not found.
+   * @returns A promise resolving to the record data, or `undefined` if not found.
    */
-  async get(id: string): Promise<T | null> {
+  async get(id: string): Promise<T | undefined> {
     const record = await this.storage.getRecord<T>(this.tableName, id);
-    return record ? record.data : null;
+    return record?.data;
   }
 
   /**

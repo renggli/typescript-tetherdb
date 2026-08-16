@@ -68,7 +68,7 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
 
     // delete
     await tasks.delete('t1');
-    expect(await tasks.get('t1')).toBeNull();
+    expect(await tasks.get('t1')).toBeUndefined();
 
     // deleteAll
     await tasks.deleteAll(['t2', 't3']);
@@ -117,7 +117,7 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
       appId: 'default',
       host: '127.0.0.1',
       port: serverPort,
-      WebSocketClass: WebSocket,
+      webSocketClass: WebSocket,
     });
     clientsToClose.push(db);
 
@@ -177,7 +177,7 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
         appId: 'default',
         host: '127.0.0.1',
         port: serverPort,
-        WebSocketClass: WebSocket,
+        webSocketClass: WebSocket,
       },
     );
     clientsToClose.push(db);
@@ -202,7 +202,7 @@ describe('Developer Experience & Offline-to-Synced Onboarding (src/client/)', ()
       appId: 'default',
       host: '127.0.0.1',
       port: serverPort,
-      WebSocketClass: WebSocket,
+      webSocketClass: WebSocket,
     });
     clientsToClose.push(db);
 

@@ -63,7 +63,7 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
       appId: 'todo-app',
       host: '127.0.0.1',
       port,
-      WebSocketClass: NodeWebSocket,
+      webSocketClass: NodeWebSocket,
     });
     activeClients.push(db1);
 
@@ -84,7 +84,7 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
       appId: 'notes-app',
       host: '127.0.0.1',
       port,
-      WebSocketClass: NodeWebSocket,
+      webSocketClass: NodeWebSocket,
     });
     activeClients.push(db2);
 
@@ -136,7 +136,7 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
       appId: 'app-alpha',
       host: '127.0.0.1',
       port,
-      WebSocketClass: NodeWebSocket,
+      webSocketClass: NodeWebSocket,
     });
     activeClients.push(clientA1);
 
@@ -150,7 +150,7 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
       appId: 'app-alpha',
       host: '127.0.0.1',
       port,
-      WebSocketClass: NodeWebSocket,
+      webSocketClass: NodeWebSocket,
     });
     activeClients.push(clientA2);
     await clientA2.login({
@@ -163,7 +163,7 @@ describe('Multi-Application Support & Server Discovery (src/client/)', () => {
       appId: 'app-beta',
       host: '127.0.0.1',
       port,
-      WebSocketClass: NodeWebSocket,
+      webSocketClass: NodeWebSocket,
     });
     activeClients.push(clientB1);
     await clientB1.login({
