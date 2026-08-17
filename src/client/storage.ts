@@ -1,10 +1,10 @@
-import { generateClientId } from '../shared/clock.js';
-import { EventRegistry } from '../shared/event.js';
 import {
   type ChangeRecord,
   OperationType,
   type StoredRecord,
 } from '../shared/types.js';
+import { EventRegistry } from './shared/event.js';
+import { generateClientId } from './shared/id.js';
 import { Table } from './table.js';
 
 /** Internal IndexedDB object store name used for queuing pending outgoing mutations. */

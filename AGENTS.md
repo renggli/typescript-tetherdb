@@ -30,8 +30,7 @@ The codebase is organized into three decoupled layers with clear subpath exports
 
 - **Shared / Protocol (`src/shared/`)**:
   - Exported as `tetherdb/shared`.
-  - Single source of truth for message schemas, data structures, and conflict resolution logic.
-  - Contains deterministic conflict resolution algorithms (Last-Write-Wins with logical timestamps and client ID tie-breaking).
+  - Single source of truth for protocol message schemas, data structures, and path normalization shared across client and server.
   - Pure TypeScript with zero runtime dependencies.
 
 - **Client Layer (`src/client/`)**:

@@ -1,4 +1,3 @@
-import { EventRegistry } from '../shared/event.js';
 import { normalizeBasePath } from '../shared/path.js';
 import {
   Auth,
@@ -7,6 +6,7 @@ import {
   type LogoutOptions,
   type RegisterOptions,
 } from './auth.js';
+import { EventRegistry } from './shared/event.js';
 import { Storage } from './storage.js';
 import { Sync, type SyncStatus, type WebSocketConstructor } from './sync.js';
 import type { Table } from './table.js';

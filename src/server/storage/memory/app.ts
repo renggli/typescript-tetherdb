@@ -1,10 +1,10 @@
-import { shouldOverwrite } from '../../../shared/clock.js';
 import {
   type ChangeRecord,
   OperationType,
   type StoredRecord,
 } from '../../../shared/types.js';
 import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
+import { shouldOverwrite } from '../../shared/clock.js';
 import {
   calculateByteSize,
   validateRecordId,

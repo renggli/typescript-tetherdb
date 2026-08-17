@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { generateClientId, shouldOverwrite } from '../../src/shared/clock.js';
+import { shouldOverwrite } from '../../../src/server/shared/clock.js';
 
-describe('src/shared/clock.ts', () => {
+describe('src/server/shared/clock.ts', () => {
   describe('shouldOverwrite', () => {
     it('should overwrite when no existing record exists', () => {
       expect(
@@ -51,16 +51,6 @@ describe('src/shared/clock.ts', () => {
           { timestamp: 1000, version: 1, clientId: 'c1' },
         ),
       ).toBe(true);
-    });
-  });
-
-  describe('generateClientId', () => {
-    it('should produce distinct non-empty client identifiers', () => {
-      const id1 = generateClientId();
-      const id2 = generateClientId();
-      expect(typeof id1).toBe('string');
-      expect(id1.length).toBeGreaterThan(5);
-      expect(id1).not.toBe(id2);
     });
   });
 });

@@ -130,9 +130,7 @@ The standard server provides authentication and WebSocket sync endpoints:
   - `Sync`: WebSocket connection manager with app- and user-level change routing and broadcasting.
 
 - **`tetherdb/shared`**:
-  - Shared types (`ChangeRecord`, `StoredRecord`, `SnapshotRecord`, `ClientMessage`, `ServerMessage`).
-  - Clock and conflict resolution utilities (`shouldOverwrite`, `generateClientId`).
-  - Event utilities (`EventRegistry`, `EventListener`).
+  - Shared protocol schemas and data types (`ChangeRecord`, `StoredRecord`, `SnapshotRecord`, `ClientMessage`, `ServerMessage`, `OperationType`).
   - Path normalization utilities (`normalizeBasePath`).
 
 ---
