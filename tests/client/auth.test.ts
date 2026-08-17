@@ -296,9 +296,6 @@ describe('Auth (src/client/auth.ts)', () => {
     });
 
     it('should transition to AuthStatus.Error and return false when server returns error response', async () => {
-      const consoleSpy = vi
-        .spyOn(console, 'error')
-        .mockImplementation(() => {});
       mockFetch.mockResolvedValueOnce({
         ok: false,
         json: async () => ({ error: 'Username already taken' }),
@@ -320,11 +317,6 @@ describe('Auth (src/client/auth.ts)', () => {
       expect(success).toBe(false);
       expect(auth.status).toBe(AuthStatus.Error);
       expect(clearSpy).not.toHaveBeenCalled();
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('[Auth] Registration failed:'),
-        expect.any(Error),
-      );
-      consoleSpy.mockRestore();
     });
   });
 
@@ -383,9 +375,6 @@ describe('Auth (src/client/auth.ts)', () => {
     });
 
     it('should fail login if no credentials and no saved session exist', async () => {
-      const consoleSpy = vi
-        .spyOn(console, 'error')
-        .mockImplementation(() => {});
       const auth = new Auth({
         baseUrl: 'http://127.0.0.1:8080',
         storage,
@@ -395,7 +384,6 @@ describe('Auth (src/client/auth.ts)', () => {
       const success = await auth.login({});
       expect(success).toBe(false);
       expect(auth.status).toBe(AuthStatus.Error);
-      consoleSpy.mockRestore();
     });
 
     it('should default to DataMode.Remote on login and reset lastSyncSeq', async () => {
@@ -462,9 +450,6 @@ describe('Auth (src/client/auth.ts)', () => {
     });
 
     it('should handle HTTP failure during login', async () => {
-      const consoleSpy = vi
-        .spyOn(console, 'error')
-        .mockImplementation(() => {});
       mockFetch.mockResolvedValueOnce({
         ok: false,
         json: async () => ({ error: 'Invalid password' }),
@@ -479,7 +464,6 @@ describe('Auth (src/client/auth.ts)', () => {
       const success = await auth.login({ username: 'u', password: 'bad' });
       expect(success).toBe(false);
       expect(auth.status).toBe(AuthStatus.Error);
-      consoleSpy.mockRestore();
     });
   });
 

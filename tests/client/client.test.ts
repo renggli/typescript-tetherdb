@@ -4,6 +4,8 @@ import {
   DataMode,
   SyncStatus,
   TetherClient,
+  TetherClientError,
+  TetherClientErrorCode,
 } from '../../src/client/index.js';
 import type { WebSocketConstructor } from '../../src/client/sync.js';
 
@@ -244,6 +246,25 @@ describe('TetherClient Facade (src/client/client.ts)', () => {
         SyncStatus.Connecting,
         SyncStatus.Connected,
       ]);
+    });
+
+    it('should forward sync errors to onError', () => {
+      const client = new TetherClient(
+        `sync-error-test-${Math.random().toString(36).substring(2, 8)}`,
+      );
+      clientsToClose.push(client);
+
+      const errors: TetherClientError[] = [];
+      client.onError.register((err) => errors.push(err));
+
+      const testError = new TetherClientError(
+        TetherClientErrorCode.SyncError,
+        'Simulated error',
+      );
+      // @ts-expect-error - triggering sync error internally
+      client.sync.onError.publish(testError);
+
+      expect(errors).toEqual([testError]);
     });
 
     it('should delegate login, register, and logout to Auth', async () => {

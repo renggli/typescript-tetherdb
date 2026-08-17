@@ -240,8 +240,7 @@ export class Auth {
 
       this.setStatus(AuthStatus.SignedIn);
       return true;
-    } catch (err) {
-      console.error('[Auth] Registration failed:', err);
+    } catch {
       this.setStatus(AuthStatus.Error);
       return false;
     }
@@ -319,8 +318,7 @@ export class Auth {
 
       this.setStatus(AuthStatus.SignedIn);
       return true;
-    } catch (err) {
-      console.error('[Auth] Login failed:', err);
+    } catch {
       this.setStatus(AuthStatus.Error);
       return false;
     }

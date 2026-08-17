@@ -278,10 +278,7 @@ describe('Table (src/client/table.ts)', () => {
       expect(snapshots).toHaveLength(0);
     });
 
-    it('should catch and log error if getAll fails inside subscribeAll fetch', async () => {
-      const consoleSpy = vi
-        .spyOn(console, 'error')
-        .mockImplementation(() => {});
+    it('should silently handle error if getAll fails inside subscribeAll fetch without calling listener', async () => {
       const getAllSpy = vi
         .spyOn(table, 'getAll')
         .mockRejectedValue(new Error('Storage failure'));
@@ -291,12 +288,6 @@ describe('Table (src/client/table.ts)', () => {
 
       await new Promise((r) => setTimeout(r, 25));
       expect(listener).not.toHaveBeenCalled();
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('[TetherClient] Error in subscribeAll'),
-        expect.any(Error),
-      );
-
-      consoleSpy.mockRestore();
       getAllSpy.mockRestore();
     });
   });

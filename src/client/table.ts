@@ -294,11 +294,8 @@ export class Table<T = unknown> {
             listener(items);
           }
         })
-        .catch((err) => {
-          console.error(
-            `[TetherClient] Error in subscribeAll for ${this.tableName}:`,
-            err,
-          );
+        .catch(() => {
+          // Ignore fetch error during unmounted subscription initialization
         });
     };
 

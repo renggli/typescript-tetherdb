@@ -6,6 +6,7 @@ import {
   type LogoutOptions,
   type RegisterOptions,
 } from './auth.js';
+import type { TetherClientError } from './errors.js';
 import { EventRegistry } from './shared/event.js';
 import { Storage } from './storage.js';
 import { Sync, type SyncStatus, type WebSocketConstructor } from './sync.js';
@@ -18,6 +19,7 @@ export {
   type LogoutOptions,
   type RegisterOptions,
 } from './auth.js';
+export { TetherClientError, TetherClientErrorCode } from './errors.js';
 
 /**
  * Options for configuring a TetherClient database instance.
@@ -56,6 +58,8 @@ export class TetherClient {
   readonly onAuthStatusChange = new EventRegistry<AuthStatus>();
   /** Reactive event registry triggered whenever the synchronization status changes. */
   readonly onSyncStatusChange = new EventRegistry<SyncStatus>();
+  /** Reactive event registry triggered whenever background sync or network errors occur. */
+  readonly onError = new EventRegistry<TetherClientError>();
   private readonly storage: Storage;
   private readonly auth: Auth;
   private readonly sync: Sync;
@@ -88,6 +92,10 @@ export class TetherClient {
 
     this.sync.onStatusChange.register((status) => {
       this.onSyncStatusChange.publish(status);
+    });
+
+    this.sync.onError.register((err) => {
+      this.onError.publish(err);
     });
   }
 

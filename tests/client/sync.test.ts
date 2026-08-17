@@ -192,10 +192,6 @@ describe('Sync (src/client/sync.ts)', () => {
     });
 
     it('should transition to Error when no WebSocket implementation is available', () => {
-      const consoleSpy = vi
-        .spyOn(console, 'error')
-        .mockImplementation(() => {});
-
       const sync = new Sync(storage, {
         appId: 'test-app',
         clientId: 'client-xyz',
@@ -213,14 +209,10 @@ describe('Sync (src/client/sync.ts)', () => {
         expect(sync.status).toBe(SyncStatus.Error);
       } finally {
         globalThis.WebSocket = originalWS;
-        consoleSpy.mockRestore();
       }
     });
 
     it('should transition to Error and schedule reconnect when WebSocket constructor throws', () => {
-      const consoleSpy = vi
-        .spyOn(console, 'error')
-        .mockImplementation(() => {});
       const BrokenWebSocket = (() => {
         throw new Error('Failed to connect');
       }) as unknown as WebSocketConstructor;
@@ -232,7 +224,6 @@ describe('Sync (src/client/sync.ts)', () => {
 
       sync.connect('token', 'ws://bad-url');
       expect(sync.status).toBe(SyncStatus.Error);
-      consoleSpy.mockRestore();
     });
 
     it('should return early from connect when url is missing', () => {
@@ -283,10 +274,6 @@ describe('Sync (src/client/sync.ts)', () => {
     });
 
     it('should handle ServerMessageType.AuthError, disconnect, and call onAuthError', () => {
-      const consoleSpy = vi
-        .spyOn(console, 'error')
-        .mockImplementation(() => {});
-
       ws.triggerMessage({
         type: ServerMessageType.AuthError,
         message: 'Invalid signature',
@@ -294,7 +281,6 @@ describe('Sync (src/client/sync.ts)', () => {
 
       expect(sync.status).toBe(SyncStatus.Disconnected);
       expect(authErrorCallback).toHaveBeenCalledWith('Invalid signature');
-      consoleSpy.mockRestore();
     });
 
     it('should handle ServerMessageType.SyncSnapshot and notify table subscribers', async () => {
@@ -436,10 +422,9 @@ describe('Sync (src/client/sync.ts)', () => {
       }
     });
 
-    it('should handle Pong, Server Error, and Malformed JSON without crashing', () => {
-      const consoleSpy = vi
-        .spyOn(console, 'error')
-        .mockImplementation(() => {});
+    it('should publish TetherClientError on onError for ServerMessageType.Error and Malformed JSON', () => {
+      const errors: TetherClientError[] = [];
+      sync.onError.register((err) => errors.push(err));
 
       // Pong
       ws.triggerMessage({ type: ServerMessageType.Pong });
@@ -447,23 +432,21 @@ describe('Sync (src/client/sync.ts)', () => {
       // Server error message
       ws.triggerMessage({
         type: ServerMessageType.Error,
-        message: 'Something went wrong',
+        message: 'Something went wrong on server',
       });
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('[Sync] Server error:'),
-        'Something went wrong',
-      );
+      expect(errors).toHaveLength(1);
+      expect(errors[0].code).toBe(TetherClientErrorCode.SyncError);
+      expect(errors[0].message).toBe('Something went wrong on server');
 
       // Malformed JSON string
       ws.onmessage?.({ data: '{ not valid json' });
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining(
-          '[Sync] Failed to parse incoming WebSocket message:',
-        ),
-        expect.any(Error),
-      );
+      expect(errors).toHaveLength(2);
+      expect(errors[1].code).toBe(TetherClientErrorCode.SyncError);
 
-      consoleSpy.mockRestore();
+      // WebSocket onerror
+      ws.onerror?.(new Event('error') as unknown as ErrorEvent);
+      expect(errors).toHaveLength(3);
+      expect(errors[2].code).toBe(TetherClientErrorCode.NetworkError);
     });
   });
 
@@ -554,6 +537,107 @@ describe('Sync (src/client/sync.ts)', () => {
       // Closing the socket after destroy should not schedule reconnect
       ws.close(1006);
       expect(MockWebSocket.instances).toHaveLength(1);
+    });
+  });
+
+  describe('Online/Offline Status Tracking', () => {
+    it('should not schedule reconnect when navigator.onLine is false', async () => {
+      const originalDescriptor = Object.getOwnPropertyDescriptor(
+        globalThis.navigator,
+        'onLine',
+      );
+      Object.defineProperty(globalThis.navigator, 'onLine', {
+        value: false,
+        configurable: true,
+        writable: true,
+      });
+
+      try {
+        createSync({
+          token: 'token-1',
+          reconnectIntervalMs: 20,
+        });
+
+        const ws = MockWebSocket.instances[0];
+        ws.triggerOpen();
+        await new Promise((r) => setTimeout(r, 20));
+
+        // Abnormal close
+        ws.close(1006);
+
+        await new Promise((r) => setTimeout(r, 45));
+        // Should not have created a new connection attempt
+        expect(MockWebSocket.instances).toHaveLength(1);
+      } finally {
+        if (originalDescriptor) {
+          Object.defineProperty(
+            globalThis.navigator,
+            'onLine',
+            originalDescriptor,
+          );
+        } else {
+          Object.defineProperty(globalThis.navigator, 'onLine', {
+            value: true,
+            configurable: true,
+            writable: true,
+          });
+        }
+      }
+    });
+
+    it('should immediately reconnect when online window event fires', async () => {
+      const mockWindow = new EventTarget();
+      const originalWindow = (globalThis as unknown as { window?: unknown })
+        .window;
+      (globalThis as unknown as { window: unknown }).window = mockWindow;
+
+      try {
+        const sync = createSync({
+          token: 'token-1',
+          reconnectIntervalMs: 10000,
+        });
+
+        const ws = MockWebSocket.instances[0];
+        ws.triggerOpen();
+        await new Promise((r) => setTimeout(r, 20));
+
+        // Disconnect socket
+        ws.close(1006);
+        expect(MockWebSocket.instances).toHaveLength(1);
+
+        // Trigger online event on mockWindow
+        mockWindow.dispatchEvent(new Event('online'));
+        await new Promise((r) => setTimeout(r, 20));
+
+        expect(MockWebSocket.instances).toHaveLength(2);
+        expect(sync.status).toBe(SyncStatus.Connecting);
+      } finally {
+        (globalThis as unknown as { window?: unknown }).window = originalWindow;
+      }
+    });
+
+    it('should disconnect active socket when offline window event fires', async () => {
+      const mockWindow = new EventTarget();
+      const originalWindow = (globalThis as unknown as { window?: unknown })
+        .window;
+      (globalThis as unknown as { window: unknown }).window = mockWindow;
+
+      try {
+        const sync = createSync({
+          token: 'token-1',
+        });
+
+        const ws = MockWebSocket.instances[0];
+        ws.triggerOpen();
+        await new Promise((r) => setTimeout(r, 20));
+        expect(sync.status).toBe(SyncStatus.Connecting);
+
+        // Trigger offline event
+        mockWindow.dispatchEvent(new Event('offline'));
+        expect(sync.status).toBe(SyncStatus.Disconnected);
+      } finally {
+        (globalThis as unknown as { window?: unknown }).window = originalWindow;
+      }
     });
   });
 });

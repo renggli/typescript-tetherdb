@@ -72,6 +72,8 @@ export class Sync {
   readonly clientId: string;
   /** Reactive event registry triggered whenever synchronization status transitions. */
   readonly onStatusChange = new EventRegistry<SyncStatus>();
+  /** Reactive event registry triggered whenever background sync or network errors occur. */
+  readonly onError = new EventRegistry<TetherClientError>();
 
   private token?: string;
   private storage: Storage;
@@ -116,6 +118,14 @@ export class Sync {
       pingIntervalMs: 30000,
       ...options,
     };
+
+    if (
+      typeof window !== 'undefined' &&
+      typeof window.addEventListener === 'function'
+    ) {
+      window.addEventListener('online', this.handleOnline);
+      window.addEventListener('offline', this.handleOffline);
+    }
 
     if (this.token && this.url) {
       this.connect();
@@ -165,8 +175,11 @@ export class Sync {
 
     if (!WebSocketImpl) {
       this.setStatus(SyncStatus.Error);
-      console.error(
-        '[Sync] No WebSocket implementation available in this environment.',
+      this.onError.publish(
+        new TetherClientError(
+          TetherClientErrorCode.MissingConfiguration,
+          'No WebSocket implementation available in this environment.',
+        ),
       );
       return;
     }
@@ -175,7 +188,14 @@ export class Sync {
       this.webSocket = new WebSocketImpl(wsUrl);
     } catch (err) {
       this.setStatus(SyncStatus.Error);
-      console.error('[Sync] Failed to construct WebSocket:', err);
+      this.onError.publish(
+        new TetherClientError(
+          TetherClientErrorCode.NetworkError,
+          err instanceof Error
+            ? err.message
+            : 'Failed to construct WebSocket connection.',
+        ),
+      );
       this.scheduleReconnect();
       return;
     }
@@ -195,15 +215,24 @@ export class Sync {
         const msg: ServerMessage = JSON.parse(raw);
         this.handleServerMessage(msg);
       } catch (err) {
-        console.error(
-          '[Sync] Failed to parse incoming WebSocket message:',
-          err,
+        this.onError.publish(
+          new TetherClientError(
+            TetherClientErrorCode.SyncError,
+            err instanceof Error
+              ? err.message
+              : 'Failed to parse incoming WebSocket message.',
+          ),
         );
       }
     };
 
-    this.webSocket.onerror = (err) => {
-      console.error('[Sync] WebSocket error:', err);
+    this.webSocket.onerror = () => {
+      this.onError.publish(
+        new TetherClientError(
+          TetherClientErrorCode.NetworkError,
+          'WebSocket connection encountered an error.',
+        ),
+      );
     };
 
     this.webSocket.onclose = (event) => {
@@ -248,6 +277,13 @@ export class Sync {
    */
   destroy(): void {
     this.isDestroyed = true;
+    if (
+      typeof window !== 'undefined' &&
+      typeof window.removeEventListener === 'function'
+    ) {
+      window.removeEventListener('online', this.handleOnline);
+      window.removeEventListener('offline', this.handleOffline);
+    }
     this.disconnect();
   }
 
@@ -302,7 +338,14 @@ export class Sync {
         changes,
       });
     } catch (err) {
-      console.error('[Sync] Failed to push outbox batch:', err);
+      this.onError.publish(
+        new TetherClientError(
+          TetherClientErrorCode.SyncError,
+          err instanceof Error
+            ? err.message
+            : 'Failed to push outbox batch to server.',
+        ),
+      );
     } finally {
       this.isPushing = false;
     }
@@ -333,8 +376,39 @@ export class Sync {
     }
   }
 
+  private isOnline(): boolean {
+    if (
+      typeof navigator !== 'undefined' &&
+      typeof navigator.onLine === 'boolean'
+    ) {
+      return navigator.onLine;
+    }
+    return true;
+  }
+
+  private handleOnline = () => {
+    if (this.isDestroyed || !this.token || !this.url) return;
+    this.reconnectAttempts = 0;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.connect();
+  };
+
+  private handleOffline = () => {
+    if (this.isDestroyed) return;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.webSocket) {
+      this.disconnect();
+    }
+  };
+
   private scheduleReconnect() {
-    if (this.reconnectTimer || this.isDestroyed) return;
+    if (this.reconnectTimer || this.isDestroyed || !this.isOnline()) return;
     const base = this.options.reconnectIntervalMs ?? 1000;
     const max = this.options.maxReconnectIntervalMs ?? 30000;
     const delay = Math.min(base * 2 ** this.reconnectAttempts, max);
@@ -381,10 +455,15 @@ export class Sync {
         break;
       }
       case ServerMessageType.AuthError: {
-        console.error('[Sync] Authentication failed:', msg.message);
         this.setStatus(SyncStatus.Error);
         this.disconnect();
         this.options.onAuthError?.(msg.message);
+        this.onError.publish(
+          new TetherClientError(
+            TetherClientErrorCode.AuthenticationFailed,
+            msg.message,
+          ),
+        );
         break;
       }
       case ServerMessageType.SyncSnapshot: {
@@ -416,7 +495,9 @@ export class Sync {
       case ServerMessageType.Pong:
         break;
       case ServerMessageType.Error:
-        console.error('[Sync] Server error:', msg.message);
+        this.onError.publish(
+          new TetherClientError(TetherClientErrorCode.SyncError, msg.message),
+        );
         break;
     }
   }
