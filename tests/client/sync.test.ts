@@ -358,7 +358,6 @@ describe('Sync (src/client/sync.ts)', () => {
             timestamp: 201,
             clientId: 'remote',
             version: 1,
-            deleted: true,
           },
         ],
       });

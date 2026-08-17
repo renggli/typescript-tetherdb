@@ -64,13 +64,8 @@ export class TableFileStorage implements TableStorage {
     for (const rec of map.values()) {
       if (!rec.deleted) {
         items.push({
-          appId: this.app.id,
+          ...rec,
           table: this.name,
-          id: rec.id,
-          data: rec.data,
-          version: rec.version,
-          timestamp: rec.timestamp,
-          clientId: rec.clientId,
         });
       }
     }

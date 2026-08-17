@@ -1,5 +1,7 @@
 import type { WebSocket } from 'ws';
 import {
+  type AuthClientMessage,
+  type ChangeBatchClientMessage,
   type ClientMessage,
   ClientMessageType,
   type ServerMessage,
@@ -137,7 +139,7 @@ export class Sync {
 
   private async handleAuthMessage(
     webSocket: WebSocket,
-    msg: Extract<ClientMessage, { type: ClientMessageType.Auth }>,
+    msg: AuthClientMessage,
   ): Promise<void> {
     if (typeof msg.token !== 'string' || !msg.token) {
       this.send(webSocket, {
@@ -213,7 +215,7 @@ export class Sync {
 
   private async handleChangeBatchMessage(
     webSocket: WebSocket,
-    msg: Extract<ClientMessage, { type: ClientMessageType.ChangeBatch }>,
+    msg: ChangeBatchClientMessage,
   ): Promise<void> {
     const client = this.webSocketToClient.get(webSocket);
     if (!client) {

@@ -70,7 +70,6 @@ export class TableSqliteStorage implements TableStorage {
     ) as unknown as RawRecordRow[];
 
     return rows.map((row) => ({
-      appId: this.app.id,
       table: row.table_name,
       id: row.id,
       version: row.version,

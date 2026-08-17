@@ -463,8 +463,7 @@ export class Sync {
       if (!tableEvents.has(change.table)) {
         tableEvents.set(change.table, []);
       }
-      const isDelete =
-        change.op === OperationType.Delete || Boolean(change.deleted);
+      const isDelete = change.op === OperationType.Delete;
       tableEvents.get(change.table)?.push({
         op: isDelete ? OperationType.Delete : OperationType.Put,
         id: change.id,

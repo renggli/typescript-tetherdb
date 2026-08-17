@@ -260,7 +260,6 @@ describe('Storage (src/client/storage.ts)', () => {
             op: OperationType.Delete,
             timestamp: 1002,
             clientId: storage.clientId,
-            deleted: true,
           },
         },
       ]);

@@ -124,7 +124,6 @@ export class AppMemoryStorage implements AppStorage {
         tableMap.set(recordId, updatedRecord);
 
         const appliedChange: ChangeRecord & { seq: number } = {
-          appId: this.id,
           seq: assignedSeq,
           table: tableName,
           id: recordId,
@@ -132,8 +131,7 @@ export class AppMemoryStorage implements AppStorage {
           version: nextVersion,
           timestamp: change.timestamp,
           clientId: change.clientId,
-          deleted: isDeleted,
-          data: isDeleted ? null : change.data,
+          data: isDeleted ? undefined : change.data,
         };
 
         applied.push(appliedChange);

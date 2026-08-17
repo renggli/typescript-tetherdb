@@ -430,8 +430,7 @@ export class Storage {
       for (const change of changes) {
         const objStore = tableObjects.get(change.table);
         if (objStore) {
-          const isDelete =
-            change.op === OperationType.Delete || Boolean(change.deleted);
+          const isDelete = change.op === OperationType.Delete;
           if (isDelete) {
             objStore.delete(change.id);
           } else {

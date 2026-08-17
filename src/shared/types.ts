@@ -30,10 +30,6 @@ export interface ChangeRecord<T = unknown> {
   version?: number;
   /** Server-assigned global sequential index. */
   seq?: number;
-  /** Flag indicating whether this record represents a tombstone/deletion. */
-  deleted?: boolean;
-  /** Application namespace identifier. */
-  appId?: string;
 }
 
 /**
@@ -50,7 +46,7 @@ export interface StoredRecord<T = unknown> {
   timestamp: number;
   /** Record revision version. */
   version: number;
-  /** Flag indicating whether the record is marked as deleted. */
+  /** Flag indicating whether the record is marked as deleted (tombstone). */
   deleted?: boolean;
   /** Identifier of client that performed the write. */
   clientId?: string;
@@ -61,23 +57,9 @@ export interface StoredRecord<T = unknown> {
  *
  * @typeParam T - The data type of the record payload.
  */
-export interface SnapshotRecord<T = unknown> {
+export interface SnapshotRecord<T = unknown> extends StoredRecord<T> {
   /** The table name. */
   table: string;
-  /** The unique record identifier. */
-  id: string;
-  /** The record payload value. */
-  data: T;
-  /** Epoch timestamp of the last write. */
-  timestamp: number;
-  /** Record revision version. */
-  version: number;
-  /** Flag indicating whether the record is marked as deleted. */
-  deleted?: boolean;
-  /** Optional application namespace identifier. */
-  appId?: string;
-  /** Identifier of client that performed the write. */
-  clientId?: string;
 }
 
 /**
@@ -93,32 +75,47 @@ export enum ClientMessageType {
 }
 
 /**
+ * Client authentication handshake message.
+ */
+export interface AuthClientMessage {
+  type: ClientMessageType.Auth;
+  /** Signed authentication session token. */
+  token: string;
+  /** Unique client instance identifier. */
+  clientId: string;
+  /** Last synchronized sequence number known to the client. */
+  lastSyncSeq?: number;
+  /** Application namespace identifier. */
+  appId: string;
+}
+
+/**
+ * Client mutation batch message.
+ */
+export interface ChangeBatchClientMessage {
+  type: ClientMessageType.ChangeBatch;
+  /** Unique client instance identifier. */
+  clientId: string;
+  /** Unique batch correlation identifier. */
+  batchId: string;
+  /** Array of change operations to apply. */
+  changes: ChangeRecord[];
+}
+
+/**
+ * Client heartbeat ping message.
+ */
+export interface PingClientMessage {
+  type: ClientMessageType.Ping;
+}
+
+/**
  * Discriminated union of all messages sent from client to server.
  */
 export type ClientMessage =
-  | {
-      type: ClientMessageType.Auth;
-      /** Signed authentication session token. */
-      token: string;
-      /** Unique client instance identifier. */
-      clientId: string;
-      /** Last synchronized sequence number known to the client. */
-      lastSyncSeq?: number;
-      /** Application namespace identifier. */
-      appId: string;
-    }
-  | {
-      type: ClientMessageType.ChangeBatch;
-      /** Unique client instance identifier. */
-      clientId: string;
-      /** Unique batch correlation identifier. */
-      batchId: string;
-      /** Array of change operations to apply. */
-      changes: ChangeRecord[];
-    }
-  | {
-      type: ClientMessageType.Ping;
-    };
+  | AuthClientMessage
+  | ChangeBatchClientMessage
+  | PingClientMessage;
 
 /**
  * Types of messages sent from the server to the client over the WebSocket sync connection.
@@ -143,63 +140,103 @@ export enum ServerMessageType {
 }
 
 /**
+ * Server authentication success response message.
+ */
+export interface AuthSuccessServerMessage {
+  type: ServerMessageType.AuthSuccess;
+  /** Authenticated user account identifier. */
+  userId: string;
+  /** Current global sequence number of the user's data on the server. */
+  currentSeq: number;
+  /** Refreshed session token for sliding session validity. */
+  token?: string;
+}
+
+/**
+ * Server authentication failure response message.
+ */
+export interface AuthErrorServerMessage {
+  type: ServerMessageType.AuthError;
+  /** Error description message. */
+  message: string;
+}
+
+/**
+ * Server full dataset snapshot message.
+ */
+export interface SyncSnapshotServerMessage {
+  type: ServerMessageType.SyncSnapshot;
+  /** Sequence number corresponding to the snapshot state. */
+  seq: number;
+  /** All active records across tables. */
+  snapshot: SnapshotRecord[];
+}
+
+/**
+ * Server incremental delta diff message.
+ */
+export interface SyncDiffServerMessage {
+  type: ServerMessageType.SyncDiff;
+  /** Starting sequence number (exclusive). */
+  fromSeq: number;
+  /** Ending sequence number (inclusive). */
+  toSeq: number;
+  /** Array of applied changes in sequential order. */
+  changes: ChangeRecord[];
+}
+
+/**
+ * Server batch acknowledgement message.
+ */
+export interface ChangeAckServerMessage {
+  type: ServerMessageType.ChangeAck;
+  /** The correlation identifier of the acknowledged batch. */
+  batchId: string;
+  /** The new global sequence number after applying the batch. */
+  appliedSeq: number;
+}
+
+/**
+ * Server real-time changes broadcast message.
+ */
+export interface BroadcastChangesServerMessage {
+  type: ServerMessageType.BroadcastChanges;
+  /** Client ID that originated the change. */
+  fromClientId: string;
+  /** Global sequence number assigned to these changes. */
+  seq: number;
+  /** Array of applied changes. */
+  changes: ChangeRecord[];
+}
+
+/**
+ * Server heartbeat pong response message.
+ */
+export interface PongServerMessage {
+  type: ServerMessageType.Pong;
+}
+
+/**
+ * Server error notification message.
+ */
+export interface ErrorServerMessage {
+  type: ServerMessageType.Error;
+  /** Error description message. */
+  message: string;
+}
+
+/**
  * Discriminated union of all messages sent from server to client.
  */
 export type ServerMessage =
-  | {
-      type: ServerMessageType.AuthSuccess;
-      /** Authenticated user account identifier. */
-      userId: string;
-      /** Current global sequence number of the user's data on the server. */
-      currentSeq: number;
-      /** Refreshed session token for sliding session validity. */
-      token?: string;
-    }
-  | {
-      type: ServerMessageType.AuthError;
-      /** Error description message. */
-      message: string;
-    }
-  | {
-      type: ServerMessageType.SyncSnapshot;
-      /** Sequence number corresponding to the snapshot state. */
-      seq: number;
-      /** All active records across tables. */
-      snapshot: SnapshotRecord[];
-    }
-  | {
-      type: ServerMessageType.SyncDiff;
-      /** Starting sequence number (exclusive). */
-      fromSeq: number;
-      /** Ending sequence number (inclusive). */
-      toSeq: number;
-      /** Array of applied changes in sequential order. */
-      changes: ChangeRecord[];
-    }
-  | {
-      type: ServerMessageType.ChangeAck;
-      /** The correlation identifier of the acknowledged batch. */
-      batchId: string;
-      /** The new global sequence number after applying the batch. */
-      appliedSeq: number;
-    }
-  | {
-      type: ServerMessageType.BroadcastChanges;
-      /** Client ID that originated the change. */
-      fromClientId: string;
-      /** Global sequence number assigned to these changes. */
-      seq: number;
-      /** Array of applied changes. */
-      changes: ChangeRecord[];
-    }
-  | {
-      type: ServerMessageType.Pong;
-    }
-  | {
-      type: ServerMessageType.Error;
-      /** Error description message. */
-      message: string;
-    };
+  | AuthSuccessServerMessage
+  | AuthErrorServerMessage
+  | SyncSnapshotServerMessage
+  | SyncDiffServerMessage
+  | ChangeAckServerMessage
+  | BroadcastChangesServerMessage
+  | PongServerMessage
+  | ErrorServerMessage;
 
 /**
  * Metadata stored locally tracking synchronization progress.

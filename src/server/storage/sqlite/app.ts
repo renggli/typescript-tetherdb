@@ -222,7 +222,6 @@ export class AppSqliteStorage implements AppStorage {
           );
 
           applied.push({
-            appId: this.id,
             seq: assignedSeq,
             table: tableName,
             id: recordId,
@@ -230,8 +229,7 @@ export class AppSqliteStorage implements AppStorage {
             version: nextVersion,
             timestamp: change.timestamp,
             clientId: change.clientId,
-            deleted: isDeleted,
-            data: isDeleted ? null : change.data,
+            data: isDeleted ? undefined : change.data,
           });
         }
       }
@@ -277,7 +275,6 @@ export class AppSqliteStorage implements AppStorage {
     ) as unknown as RawChangelogRow[];
 
     const changes: ChangeRecord[] = rows.map((row) => ({
-      appId: this.id,
       seq: row.seq,
       table: row.table_name,
       id: row.id,
@@ -288,8 +285,8 @@ export class AppSqliteStorage implements AppStorage {
       version: row.version,
       timestamp: row.timestamp,
       clientId: row.client_id ?? '',
-      deleted: Boolean(row.deleted),
-      data: this.parseData(row.data),
+      data:
+        row.op === OperationType.Delete ? undefined : this.parseData(row.data),
     }));
 
     return { changes, currentSeq, requiresSnapshot: false };

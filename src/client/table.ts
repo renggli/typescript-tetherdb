@@ -254,7 +254,6 @@ export class Table<T = unknown> {
         timestamp: now,
         clientId,
         version,
-        deleted: true,
       };
 
       mutations.push({
