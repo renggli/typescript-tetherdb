@@ -38,10 +38,7 @@ export class EventRegistry<T = void> {
       try {
         listener(event);
       } catch (err) {
-        console.error(
-          '[EventRegistry] Unhandled error in listener callback:',
-          err,
-        );
+        console.error('Unhandled error:', err);
       }
     }
   }

@@ -4,7 +4,7 @@ import {
   type StoredRecord,
 } from '../shared/types.js';
 import { EventRegistry } from './shared/event.js';
-import { generateClientId } from './shared/id.js';
+import { randomUUID } from './shared/id.js';
 import { Table } from './table.js';
 
 /** Internal IndexedDB object store name used for queuing pending outgoing mutations. */
@@ -62,7 +62,7 @@ export class Storage {
    */
   constructor(name: string) {
     this.name = name;
-    this.clientId = generateClientId();
+    this.clientId = randomUUID();
   }
 
   /**
