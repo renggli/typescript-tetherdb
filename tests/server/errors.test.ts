@@ -4,7 +4,7 @@ import {
   TetherServerErrorCode,
 } from '../../src/server/errors.js';
 
-describe('src/server/errors.ts', () => {
+describe('TetherServerError', () => {
   it('should initialize with code and default message', () => {
     const err = new TetherServerError(TetherServerErrorCode.InvalidInput);
     expect(err).toBeInstanceOf(Error);

@@ -1,13 +1,9 @@
-import * as fs from 'node:fs/promises';
 import type * as http from 'node:http';
-import * as os from 'node:os';
-import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { TetherServer } from '../../src/server/server.js';
-import { FileStorage } from '../../src/server/storage/file/index.js';
-import { SqliteStorage } from '../../src/server/storage/sqlite/index.js';
+import { fileStorage, sqliteStorage } from './storage/matrix.js';
 
-describe('TetherServer (src/server/server.ts)', () => {
+describe('TetherServer', () => {
   let server: TetherServer;
 
   beforeEach(() => {
@@ -82,12 +78,8 @@ describe('TetherServer (src/server/server.ts)', () => {
     });
 
     it('should work with FileStorage backend', async () => {
-      const tmpDir = path.join(
-        os.tmpdir(),
-        `tetherdb-file-server-${Math.random().toString(36).substring(2, 10)}`,
-      );
-      const fileStorage = new FileStorage({ baseDir: tmpDir });
-      const fileServer = new TetherServer({ storage: fileStorage });
+      const { backend, cleanup } = await fileStorage.createBackend();
+      const fileServer = new TetherServer({ storage: backend });
 
       try {
         const u1 = await fileServer.declareUser('carol', 'pass_one');
@@ -100,18 +92,13 @@ describe('TetherServer (src/server/server.ts)', () => {
         expect(await u2.verifyPassword('pass_two')).toBe(true);
       } finally {
         await fileServer.close();
-        await fileStorage.close();
-        await fs.rm(tmpDir, { recursive: true, force: true });
+        await cleanup();
       }
     });
 
     it('should work with SqliteStorage backend', async () => {
-      const tmpDir = path.join(
-        os.tmpdir(),
-        `tetherdb-sqlite-server-${Math.random().toString(36).substring(2, 10)}`,
-      );
-      const sqliteStorage = new SqliteStorage({ baseDir: tmpDir });
-      const sqliteServer = new TetherServer({ storage: sqliteStorage });
+      const { backend, cleanup } = await sqliteStorage.createBackend();
+      const sqliteServer = new TetherServer({ storage: backend });
 
       try {
         const u1 = await sqliteServer.declareUser('dave', 'pass_alpha');
@@ -124,8 +111,7 @@ describe('TetherServer (src/server/server.ts)', () => {
         expect(await u2.verifyPassword('pass_beta')).toBe(true);
       } finally {
         await sqliteServer.close();
-        await sqliteStorage.close();
-        await fs.rm(tmpDir, { recursive: true, force: true });
+        await cleanup();
       }
     });
 

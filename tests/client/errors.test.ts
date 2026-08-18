@@ -4,7 +4,7 @@ import {
   TetherClientErrorCode,
 } from '../../src/client/errors.js';
 
-describe('src/client/errors.ts', () => {
+describe('TetherClientError', () => {
   it('should initialize with code and default message', () => {
     const err = new TetherClientError(
       TetherClientErrorCode.MissingConfiguration,

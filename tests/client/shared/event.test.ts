@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { EventRegistry } from '../../../src/client/shared/event.js';
 
-describe('EventRegistry (src/client/shared/event.ts)', () => {
+describe('EventRegistry', () => {
   it('should register listeners and dispatch events', () => {
     interface TestEvent {
       id: string;

@@ -31,7 +31,7 @@ class MockWebSocket {
   }
 }
 
-describe('TetherClient Facade (src/client/client.ts)', () => {
+describe('TetherClient', () => {
   const clientsToClose: TetherClient[] = [];
 
   afterEach(async () => {
@@ -54,7 +54,7 @@ describe('TetherClient Facade (src/client/client.ts)', () => {
       expect(client.syncStatus).toBe(SyncStatus.Disconnected);
     });
 
-    it('should export AuthStatus and DataMode enums from client.ts', () => {
+    it('should export AuthStatus and DataMode enums', () => {
       expect(AuthStatus.SignedIn).toBe(2);
       expect(DataMode.Remote).toBe(0);
       expect(DataMode.Local).toBe(1);

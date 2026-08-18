@@ -57,7 +57,7 @@ class MockWebSocket {
   }
 }
 
-describe('Sync (src/client/sync.ts)', () => {
+describe('Sync', () => {
   let storage: Storage;
   const syncInstances: Sync[] = [];
 

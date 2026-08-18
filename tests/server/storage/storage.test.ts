@@ -1,190 +1,24 @@
-import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
-import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   TetherServerError,
   TetherServerErrorCode,
 } from '../../../src/server/errors.js';
-import {
-  FileStorage,
-  MemoryStorage,
-  SqliteStorage,
-  type Storage,
-} from '../../../src/server/storage/index.js';
+import type { Storage } from '../../../src/server/storage/index.js';
 import { type ChangeRecord, OperationType } from '../../../src/shared/types.js';
+import { type StorageContext, storageDescriptors } from './matrix.js';
 
-describe('Storage (src/server/storage/)', () => {
-  describe('MemoryStorage', () => {
-    runStorageTestSuite(() => new MemoryStorage());
+describe.each(storageDescriptors)('$name', (descriptor) => {
+  let context: StorageContext;
+
+  beforeEach(async () => {
+    context = await descriptor.createBackend();
   });
 
-  describe('SqliteStorage (in-memory)', () => {
-    runStorageTestSuite(() => new SqliteStorage({ inMemory: true }));
+  afterEach(async () => {
+    await context.cleanup();
   });
 
-  describe('SqliteStorage (file-based)', () => {
-    let tmpDir: string;
-    let storage: SqliteStorage;
-
-    beforeEach(async () => {
-      tmpDir = path.join(
-        os.tmpdir(),
-        `tetherdb-sqlite-suite-${Math.random().toString(36).substring(2, 10)}`,
-      );
-      await fs.mkdir(tmpDir, { recursive: true });
-      storage = new SqliteStorage({ baseDir: tmpDir });
-    });
-
-    afterEach(async () => {
-      await storage.close();
-      await fs.rm(tmpDir, { recursive: true, force: true });
-    });
-
-    runStorageTestSuite(() => storage);
-  });
-
-  describe('FileStorage', () => {
-    let tmpDir: string;
-    let storage: FileStorage;
-
-    beforeEach(async () => {
-      tmpDir = path.join(
-        os.tmpdir(),
-        `tetherdb-test-${Math.random().toString(36).substring(2, 10)}`,
-      );
-      await fs.mkdir(tmpDir, { recursive: true });
-      storage = new FileStorage({ baseDir: tmpDir });
-    });
-
-    afterEach(async () => {
-      await storage.close();
-      await fs.rm(tmpDir, { recursive: true, force: true });
-    });
-
-    runStorageTestSuite(() => storage);
-
-    it('should write data in $basePath/<appId>/users/<bucket>/<userId>/tables/<tableName>.json on filesystem', async () => {
-      const app = await storage.getApp('default');
-      expect(app).toBeDefined();
-      if (!app) return;
-      const table = await app.createTable('settings');
-      const user = await storage.createUser('user_42', 'pass');
-
-      const change: ChangeRecord = {
-        table: 'settings',
-        id: 'theme',
-        op: OperationType.Put,
-        data: { dark: true },
-        timestamp: Date.now(),
-        clientId: 'client-1',
-      };
-
-      await app.applyChanges(user, [change]);
-
-      // Direct layout: tmpDir / default / users / bucket / userId / tables / settings.json
-      const bucket = user.id.slice(0, 2);
-      const userDir = path.join(tmpDir, 'default', 'users', bucket, user.id);
-      const tableFile = path.join(userDir, 'tables', 'settings.json');
-      const metaFile = path.join(userDir, 'meta.json');
-      const syncFile = path.join(userDir, 'sync.jsonl');
-      const manifestFile = path.join(tmpDir, 'default', 'manifest.json');
-      const appsFile = path.join(tmpDir, 'apps.json');
-      const usersFile = path.join(tmpDir, 'users.json');
-
-      expect(await fs.stat(appsFile)).toBeDefined();
-      expect(await fs.stat(usersFile)).toBeDefined();
-      expect(await fs.stat(manifestFile)).toBeDefined();
-      expect(await fs.stat(syncFile)).toBeDefined();
-
-      const manifestContent = JSON.parse(
-        await fs.readFile(manifestFile, 'utf-8'),
-      );
-      expect(manifestContent.tables).toContain('settings');
-
-      const fileContent = await fs.readFile(tableFile, 'utf-8');
-      const tableRecords = JSON.parse(fileContent);
-      expect(tableRecords[0].data).toEqual({ dark: true });
-
-      const metaContent = await fs.readFile(metaFile, 'utf-8');
-      const metaObj = JSON.parse(metaContent);
-      expect(metaObj.currentSeq).toBe(1);
-
-      const syncContent = await fs.readFile(syncFile, 'utf-8');
-      const syncLines = syncContent
-        .trim()
-        .split('\n')
-        .map((l) => JSON.parse(l));
-      expect(syncLines[0].data).toEqual({ dark: true });
-
-      const record = await table.getRecord(user, 'theme');
-      expect(record?.data).toEqual({ dark: true });
-    });
-
-    it('should compact changelog beyond maxChangelogEntries and flag requiresSnapshot', async () => {
-      const compactingStorage = new FileStorage({
-        baseDir: tmpDir,
-        maxChangelogEntries: 5,
-      });
-      const app = await compactingStorage.getApp('default');
-      expect(app).toBeDefined();
-      if (!app) return;
-      await app.createTable('events');
-      const user = await compactingStorage.createUser(
-        'user_compaction',
-        'pass',
-      );
-
-      // Apply 10 changes sequentially
-      for (let i = 1; i <= 10; i++) {
-        await app.applyChanges(user, [
-          {
-            table: 'events',
-            id: `e-${i}`,
-            op: OperationType.Put,
-            data: `event-${i}`,
-            timestamp: 1000 + i,
-            clientId: 'client-1',
-          },
-        ]);
-      }
-
-      // Asking for seq 1 (which was pruned) should return requiresSnapshot: true
-      const oldDiff = await app.getChangesSince(user, 1);
-      expect(oldDiff.requiresSnapshot).toBe(true);
-
-      // Asking for recent seq 7 (retained in window) should return delta diff
-      const recentDiff = await app.getChangesSince(user, 7);
-      expect(recentDiff.requiresSnapshot).toBe(false);
-      expect(recentDiff.changes).toHaveLength(3);
-    });
-
-    it('should reject changes to undeclared tables or applications', async () => {
-      const strictStorage = new FileStorage({ baseDir: tmpDir });
-      const app = await strictStorage.createApp('myapp');
-      await app.createTable('allowed_table');
-      const user = await strictStorage.createUser('user_limits', 'pass');
-
-      // Disallowed table
-      await expect(
-        app.applyChanges(user, [
-          {
-            table: 'undeclared_table',
-            id: '1',
-            op: OperationType.Put,
-            data: 'hello',
-            timestamp: 100,
-            clientId: 'client-1',
-          },
-        ]),
-      ).rejects.toMatchObject({
-        code: TetherServerErrorCode.NotFound,
-      });
-
-      // Nonexistent app
-      expect(await strictStorage.getApp('nonexistent_app')).toBeUndefined();
-    });
-  });
+  runStorageTestSuite(() => context.backend);
 });
 
 function runStorageTestSuite(createStorage: () => Storage) {

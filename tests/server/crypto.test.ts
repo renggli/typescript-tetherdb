@@ -6,7 +6,7 @@ import {
   verifySessionToken,
 } from '../../src/server/crypto.js';
 
-describe('src/server/crypto.ts', () => {
+describe('Crypto', () => {
   it('should hash and verify passwords using scrypt', async () => {
     const password = 'mySecretPassword123!';
     const hash = await hashPassword(password);

@@ -8,7 +8,7 @@ interface TestItem {
   count?: number;
 }
 
-describe('Table (src/client/table.ts)', () => {
+describe('Table', () => {
   let storage: Storage;
   let table: Table<TestItem>;
 

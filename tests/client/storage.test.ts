@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { META_STORE, OUTBOX_STORE, Storage } from '../../src/client/storage.js';
 import { type ChangeRecord, OperationType } from '../../src/shared/types.js';
 
-describe('Storage (src/client/storage.ts)', () => {
+describe('Storage', () => {
   let storage: Storage;
   let dbName: string;
 

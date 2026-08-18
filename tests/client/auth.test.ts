@@ -11,7 +11,7 @@ import {
 } from '../../src/client/errors.js';
 import { Storage } from '../../src/client/storage.js';
 
-describe('Auth (src/client/auth.ts)', () => {
+describe('Auth', () => {
   let storage: Storage;
   let mockFetch: ReturnType<typeof vi.fn>;
 

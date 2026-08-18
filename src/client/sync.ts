@@ -29,8 +29,8 @@ export enum SyncStatus {
  * Constructor signature for WebSocket implementations (native browser WebSocket or 'ws' package).
  */
 export type WebSocketConstructor = new (
-  url: string,
-  protocols?: string | string[],
+  url: string | URL,
+  protocols?: string | string[] | WebSocketInit,
 ) => WebSocket;
 
 /**
@@ -237,6 +237,7 @@ export class Sync {
 
     this.webSocket.onclose = (event) => {
       this.stopPing();
+      this.pendingBatches.clear();
       this.webSocket = null;
       if (!this.isDestroyed) {
         this.setStatus(SyncStatus.Disconnected);
@@ -252,6 +253,7 @@ export class Sync {
    */
   disconnect(): void {
     this.stopPing();
+    this.pendingBatches.clear();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -306,6 +308,7 @@ export class Sync {
   async pushOutbox(): Promise<void> {
     if (
       this.isPushing ||
+      this.pendingBatches.size > 0 ||
       this.currentStatus !== SyncStatus.Connected ||
       !this.webSocket ||
       this.webSocket.readyState !== (this.webSocket.OPEN ?? 1)

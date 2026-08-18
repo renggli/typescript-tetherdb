@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebSocket } from 'ws';
-import { MemoryStorage } from '../../src/server/storage/memory/index.js';
+import type { MemoryStorage } from '../../src/server/storage/memory/index.js';
 import { Sync } from '../../src/server/sync.js';
 import {
   ClientMessageType,
@@ -9,6 +9,7 @@ import {
   type ServerMessage,
   ServerMessageType,
 } from '../../src/shared/types.js';
+import { memoryStorage, type StorageContext } from './storage/matrix.js';
 
 class MockServerWebSocket extends EventEmitter {
   readonly OPEN = 1;
@@ -37,14 +38,16 @@ class MockServerWebSocket extends EventEmitter {
   }
 }
 
-describe('Sync (src/server/sync.ts)', () => {
+describe('Sync', () => {
+  let context: StorageContext<MemoryStorage>;
   let storage: MemoryStorage;
   let sync: Sync;
   let validToken: string;
   let testUserId: string;
 
   beforeEach(async () => {
-    storage = new MemoryStorage();
+    context = await memoryStorage.createBackend();
+    storage = context.backend;
     sync = new Sync(storage);
 
     const app = await storage.createApp('todo-app');
@@ -54,6 +57,10 @@ describe('Sync (src/server/sync.ts)', () => {
     const user = await storage.createUser('alice', 'password123');
     testUserId = user.id;
     validToken = await user.createToken();
+  });
+
+  afterEach(async () => {
+    await context.cleanup();
   });
 
   describe('Authentication Handshake (ClientMessageType.Auth)', () => {

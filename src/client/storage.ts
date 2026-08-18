@@ -443,15 +443,6 @@ export class Storage {
     ).filter(Boolean);
     await this.ensureTables(tableNames);
 
-    // Read existing records across all affected tables
-    const existingRecords = new Map<string, Map<string, StoredRecord>>();
-    for (const name of tableNames) {
-      const tableItems = records.filter((r) => r.table === name);
-      const ids = tableItems.map((r) => r.id);
-      const map = await this.getRecords(name, ids);
-      existingRecords.set(name, map);
-    }
-
     await this.withDatabase(async (database) => {
       const tx = database.transaction([...tableNames, META_STORE], 'readwrite');
       const tableStores = new Map<string, IDBObjectStore>();
@@ -460,21 +451,26 @@ export class Storage {
       }
       for (const item of records) {
         const store = tableStores.get(item.table);
-        const existing = existingRecords.get(item.table)?.get(item.id);
-        if (store && (!existing || shouldOverwrite(item, existing))) {
-          if (item.deleted) {
-            store.delete(item.id);
-          } else {
-            const record: StoredRecord = {
-              id: item.id,
-              data: item.data,
-              timestamp: item.timestamp,
-              version: item.version ?? 1,
-              clientId: item.clientId,
-            };
-            store.put(record);
+        if (!store) continue;
+
+        const getReq = store.get(item.id);
+        getReq.onsuccess = () => {
+          const existing = getReq.result as StoredRecord | undefined;
+          if (!existing || shouldOverwrite(item, existing)) {
+            if (item.deleted) {
+              store.delete(item.id);
+            } else {
+              const record: StoredRecord = {
+                id: item.id,
+                data: item.data,
+                timestamp: item.timestamp,
+                version: item.version ?? 1,
+                clientId: item.clientId,
+              };
+              store.put(record);
+            }
           }
-        }
+        };
       }
       const metaStore = tx.objectStore(META_STORE);
       metaStore.put({ key: 'lastSyncSeq', value: seq });

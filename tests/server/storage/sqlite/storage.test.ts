@@ -1,32 +1,25 @@
 import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { SqliteStorage } from '../../../../src/server/storage/sqlite/index.js';
+import type { SqliteStorage } from '../../../../src/server/storage/sqlite/index.js';
 import { getUserBucket } from '../../../../src/server/validate.js';
 import { OperationType } from '../../../../src/shared/types.js';
+import { type FileBasedStorageContext, sqliteStorage } from '../matrix.js';
 
-describe('src/server/storage/sqlite/ (SqliteStorage)', () => {
-  let tmpDir: string;
-  let storage: SqliteStorage;
+describe('SqliteStorage', () => {
+  let context: FileBasedStorageContext<SqliteStorage>;
 
   beforeEach(async () => {
-    tmpDir = path.join(
-      os.tmpdir(),
-      `tetherdb-sqlitestorage-${Math.random().toString(36).substring(2, 10)}`,
-    );
-    await fs.mkdir(tmpDir, { recursive: true });
-    storage = new SqliteStorage({ baseDir: tmpDir });
+    context = await sqliteStorage.createBackend();
   });
 
   afterEach(async () => {
-    await storage.close();
-    await fs.rm(tmpDir, { recursive: true, force: true });
+    await context.cleanup();
   });
 
-  it('should store users in users.sqlite, apps in apps.sqlite, and user data in bucketed user SQLite files', async () => {
-    const user = await storage.createUser('dave', 'davePass');
-    const app = await storage.createApp('todo_app');
+  it('should store users, apps, and user data in bucketed SQLite files', async () => {
+    const user = await context.backend.createUser('dave', 'davePass');
+    const app = await context.backend.createApp('todo_app');
     const table = await app.createTable('tasks');
 
     await table.applyChanges(user, [
@@ -40,11 +33,11 @@ describe('src/server/storage/sqlite/ (SqliteStorage)', () => {
       },
     ]);
 
-    const usersFile = path.join(tmpDir, 'users.sqlite');
-    const appsFile = path.join(tmpDir, 'apps.sqlite');
+    const usersFile = path.join(context.dir, 'users.sqlite');
+    const appsFile = path.join(context.dir, 'apps.sqlite');
     const bucket = getUserBucket(user.id);
     const userDbFile = path.join(
-      tmpDir,
+      context.dir,
       'todo_app',
       bucket,
       `${user.id}.sqlite`,
@@ -59,8 +52,8 @@ describe('src/server/storage/sqlite/ (SqliteStorage)', () => {
   });
 
   it('should delete applications and their SQLite files cleanly', async () => {
-    const user = await storage.createUser('evelyn', 'evePass');
-    const app = await storage.createApp('temp_app');
+    const user = await context.backend.createUser('evelyn', 'evePass');
+    const app = await context.backend.createApp('temp_app');
 
     const table = await app.createTable('items');
 
@@ -75,12 +68,12 @@ describe('src/server/storage/sqlite/ (SqliteStorage)', () => {
       },
     ]);
 
-    expect(await storage.getApp('temp_app')).toBeDefined();
+    expect(await context.backend.getApp('temp_app')).toBeDefined();
 
     await app.delete();
-    expect(await storage.getApp('temp_app')).toBeUndefined();
+    expect(await context.backend.getApp('temp_app')).toBeUndefined();
 
-    const appDir = path.join(tmpDir, 'temp_app');
+    const appDir = path.join(context.dir, 'temp_app');
     let exists = true;
     try {
       await fs.stat(appDir);

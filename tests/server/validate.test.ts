@@ -20,7 +20,7 @@ import {
   validateUsername,
 } from '../../src/server/validate.js';
 
-describe('src/server/validate.ts', () => {
+describe('Validation', () => {
   describe('validateUserId', () => {
     it('should accept valid user identifiers', () => {
       expect(validateUserId('213872ac-54f2-4cd6-924e-204050bf7396')).toBe(

@@ -9,562 +9,580 @@ import {
 import { Storage } from '../../src/client/storage.js';
 import { type RunningServer, startServer } from '../../src/server/index.js';
 
+import {
+  type StorageContext,
+  storageDescriptors,
+} from '../server/storage/matrix.js';
+
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-describe('TetherClient Authentication & Data Reconciliation Lifecycle', () => {
-  let server: RunningServer;
-  let serverPort: number;
-  const clientsToClose: TetherClient[] = [];
+describe.each(storageDescriptors)(
+  'TetherClient Authentication & Data Reconciliation Lifecycle ($name)',
+  ({ createBackend }) => {
+    let storageContext: StorageContext;
+    let server: RunningServer;
+    let serverPort: number;
+    const clientsToClose: TetherClient[] = [];
 
-  beforeEach(async () => {
-    server = await startServer({
-      port: 0,
-      host: '127.0.0.1',
+    beforeEach(async () => {
+      storageContext = await createBackend();
+      server = await startServer({
+        port: 0,
+        host: '127.0.0.1',
+        storage: storageContext.storage,
+      });
+      serverPort = (server.httpServer.address() as { port: number }).port;
+      await server.server.storage.createApp('test-app');
+      const app = await server.server.storage.getApp('test-app');
+      await app?.createTable('todos');
     });
-    serverPort = (server.httpServer.address() as { port: number }).port;
-    await server.server.storage.createApp('test-app');
-    const app = await server.server.storage.getApp('test-app');
-    await app?.createTable('todos');
-  });
 
-  afterEach(async () => {
-    for (const client of clientsToClose) {
-      await client.close();
-    }
-    clientsToClose.length = 0;
-    await server.close();
-  });
+    afterEach(async () => {
+      for (const client of clientsToClose) {
+        await client.close();
+      }
+      clientsToClose.length = 0;
+      await server.close();
+      await storageContext.cleanup();
+    });
 
-  it('should start with SignedOut authStatus and Disconnected syncStatus', () => {
-    const client = new TetherClient(
-      `db-${Math.random().toString(36).substring(2, 8)}`,
-      {
+    it('should start with SignedOut authStatus and Disconnected syncStatus', () => {
+      const client = new TetherClient(
+        `db-${Math.random().toString(36).substring(2, 8)}`,
+        {
+          appId: 'test-app',
+          host: '127.0.0.1',
+          port: serverPort,
+          webSocketClass: WebSocket,
+        },
+      );
+      clientsToClose.push(client);
+
+      expect(client.authStatus).toBe(AuthStatus.SignedOut);
+      expect(client.username).toBeUndefined();
+      expect(client.syncStatus).toBe(SyncStatus.Disconnected);
+    });
+
+    it('should register a new account and automatically connect sync', async () => {
+      const client = new TetherClient(
+        `db-reg-${Math.random().toString(36).substring(2, 8)}`,
+        {
+          appId: 'test-app',
+          host: '127.0.0.1',
+          port: serverPort,
+          webSocketClass: WebSocket,
+        },
+      );
+      clientsToClose.push(client);
+
+      const authStatuses: AuthStatus[] = [];
+      client.onAuthStatusChange.register((status) => authStatuses.push(status));
+
+      const success = await client.register({
+        username: 'alice',
+        password: 'password123',
+      });
+
+      expect(success).toBe(true);
+      expect(client.authStatus).toBe(AuthStatus.SignedIn);
+      expect(client.username).toBe('alice');
+      expect(authStatuses).toContain(AuthStatus.SigningIn);
+      expect(authStatuses).toContain(AuthStatus.SignedIn);
+
+      await delay(200);
+      expect(client.syncStatus).toBe(SyncStatus.Connected);
+    });
+
+    it('should preserve local data by default on register (DataMode.Local)', async () => {
+      const client = new TetherClient(
+        `db-local-${Math.random().toString(36).substring(2, 8)}`,
+        {
+          appId: 'test-app',
+          host: '127.0.0.1',
+          port: serverPort,
+          webSocketClass: WebSocket,
+        },
+      );
+      clientsToClose.push(client);
+
+      const todos = client.table<{ title: string }>('todos');
+      await todos.put('t1', { title: 'Local offline todo' });
+
+      const success = await client.register({
+        username: 'bobby',
+        password: 'password123',
+        dataMode: DataMode.Local,
+      });
+      expect(success).toBe(true);
+
+      // Local item still exists
+      expect(await todos.get('t1')).toEqual({ title: 'Local offline todo' });
+
+      await delay(250);
+      // Server should have received the synced item
+      const user = await server.server.storage.getUserByUsername('bobby');
+      expect(user).toBeDefined();
+      if (!user) return;
+
+      const app = await server.server.storage.getApp('test-app');
+      const table = await app?.getTable('todos');
+      const serverRecords = (await table?.getAllRecords(user)) ?? [];
+      expect(serverRecords).toHaveLength(1);
+      expect(serverRecords[0].data).toEqual({ title: 'Local offline todo' });
+    });
+
+    it('should clear local data on register when DataMode.Clear is specified', async () => {
+      const client = new TetherClient(
+        `db-clear-${Math.random().toString(36).substring(2, 8)}`,
+        {
+          appId: 'test-app',
+          host: '127.0.0.1',
+          port: serverPort,
+          webSocketClass: WebSocket,
+        },
+      );
+      clientsToClose.push(client);
+
+      const todos = client.table<{ title: string }>('todos');
+      await todos.put('t1', { title: 'To be cleared' });
+      expect((await todos.getAll()).length).toBe(1);
+
+      const success = await client.register({
+        username: 'charlie',
+        password: 'password123',
+        dataMode: DataMode.Clear,
+      });
+      expect(success).toBe(true);
+
+      // Local items should be wiped
+      expect(await todos.getAll()).toHaveLength(0);
+    });
+
+    it('should transition to AuthStatus.Error when register fails', async () => {
+      const client = new TetherClient(
+        `db-err-${Math.random().toString(36).substring(2, 8)}`,
+        {
+          appId: 'test-app',
+          host: '127.0.0.1',
+          port: serverPort,
+          webSocketClass: WebSocket,
+        },
+      );
+      clientsToClose.push(client);
+
+      // First register user
+      await client.register({
+        username: 'duplicate_user',
+        password: 'password123',
+      });
+
+      // Attempt to register same username while having local data
+      const client2 = new TetherClient(
+        `db-err2-${Math.random().toString(36).substring(2, 8)}`,
+        {
+          appId: 'test-app',
+          host: '127.0.0.1',
+          port: serverPort,
+          webSocketClass: WebSocket,
+        },
+      );
+      clientsToClose.push(client2);
+
+      const todos2 = client2.table<{ title: string }>('todos');
+      await todos2.put('local-preserved', { title: 'Do Not Delete' });
+
+      const success = await client2.register({
+        username: 'duplicate_user',
+        password: 'password123',
+        dataMode: DataMode.Clear,
+      });
+      expect(success).toBe(false);
+      expect(client2.authStatus).toBe(AuthStatus.Error);
+
+      // Verify local data was NOT wiped because register failed
+      const records = await todos2.getAll();
+      expect(records).toHaveLength(1);
+      expect(records[0].title).toBe('Do Not Delete');
+    });
+
+    it('should support login and merge local/remote data with DataMode.Merge', async () => {
+      // 1. Register User 1 on Client A and put remote items
+      const clientA = new TetherClient(
+        `db-a-${Math.random().toString(36).substring(2, 8)}`,
+        {
+          appId: 'test-app',
+          host: '127.0.0.1',
+          port: serverPort,
+          webSocketClass: WebSocket,
+        },
+      );
+      clientsToClose.push(clientA);
+
+      await clientA.register({
+        username: 'diana',
+        password: 'password123',
+      });
+      const todosA = clientA.table<{ title: string }>('todos');
+      await todosA.put('r1', { title: 'Remote Item 1' });
+      await delay(200);
+
+      // 2. Register Client B locally before login, add local items
+      const clientB = new TetherClient(
+        `db-b-${Math.random().toString(36).substring(2, 8)}`,
+        {
+          appId: 'test-app',
+          host: '127.0.0.1',
+          port: serverPort,
+          webSocketClass: WebSocket,
+        },
+      );
+      clientsToClose.push(clientB);
+
+      const todosB = clientB.table<{ title: string }>('todos');
+      await todosB.put('l1', { title: 'Local Item 1' });
+
+      // 3. Client B logs in with DataMode.Merge
+      const success = await clientB.login({
+        username: 'diana',
+        password: 'password123',
+        dataMode: DataMode.Merge,
+      });
+      expect(success).toBe(true);
+
+      await delay(300);
+
+      // Both items should be present on Client B
+      const allB = await todosB.getAll();
+      expect(allB).toHaveLength(2);
+      expect(allB.map((t) => t.title).sort()).toEqual([
+        'Local Item 1',
+        'Remote Item 1',
+      ]);
+    });
+
+    it('should support login with DataMode.Remote discarding local data', async () => {
+      // 1. Create remote item
+      const clientA = new TetherClient(
+        `db-ra-${Math.random().toString(36).substring(2, 8)}`,
+        {
+          appId: 'test-app',
+          host: '127.0.0.1',
+          port: serverPort,
+          webSocketClass: WebSocket,
+        },
+      );
+      clientsToClose.push(clientA);
+
+      await clientA.register({
+        username: 'evelyn',
+        password: 'password123',
+      });
+      const todosA = clientA.table<{ title: string }>('todos');
+      await todosA.put('r1', { title: 'Remote Item' });
+      await delay(200);
+
+      // 2. Client B creates local item then logs in with DataMode.Remote
+      const clientB = new TetherClient(
+        `db-rb-${Math.random().toString(36).substring(2, 8)}`,
+        {
+          appId: 'test-app',
+          host: '127.0.0.1',
+          port: serverPort,
+          webSocketClass: WebSocket,
+        },
+      );
+      clientsToClose.push(clientB);
+
+      const todosB = clientB.table<{ title: string }>('todos');
+      await todosB.put('l1', { title: 'Local To Discard' });
+
+      const success = await clientB.login({
+        username: 'evelyn',
+        password: 'password123',
+        dataMode: DataMode.Remote,
+      });
+      expect(success).toBe(true);
+
+      await delay(300);
+
+      // Local item was wiped, only remote item received
+      const allB = await todosB.getAll();
+      expect(allB).toHaveLength(1);
+      expect(allB[0].title).toBe('Remote Item');
+
+      // Verify Client A never received the discarded local item
+      const allA = await todosA.getAll();
+      expect(allA).toHaveLength(1);
+      expect(allA[0].title).toBe('Remote Item');
+    });
+
+    it('should auto-restore session across client re-instantiations when remember: true is set', async () => {
+      const dbName = `db-rem-${Math.random().toString(36).substring(2, 8)}`;
+
+      // Session 1: Register with remember: true
+      const client1 = new TetherClient(dbName, {
         appId: 'test-app',
         host: '127.0.0.1',
         port: serverPort,
         webSocketClass: WebSocket,
-      },
-    );
-    clientsToClose.push(client);
+      });
+      clientsToClose.push(client1);
 
-    expect(client.authStatus).toBe(AuthStatus.SignedOut);
-    expect(client.username).toBeUndefined();
-    expect(client.syncStatus).toBe(SyncStatus.Disconnected);
-  });
+      await client1.register({
+        username: 'frank',
+        password: 'password123',
+        remember: true,
+      });
 
-  it('should register a new account and automatically connect sync', async () => {
-    const client = new TetherClient(
-      `db-reg-${Math.random().toString(36).substring(2, 8)}`,
-      {
+      const todos1 = client1.table<{ title: string }>('todos');
+      await todos1.put('f1', { title: 'Frank task' });
+      await delay(200);
+
+      // Close Session 1
+      await client1.close();
+
+      // Session 2: Open same DB instance without credentials
+      const client2 = new TetherClient(dbName, {
         appId: 'test-app',
         host: '127.0.0.1',
         port: serverPort,
         webSocketClass: WebSocket,
-      },
-    );
-    clientsToClose.push(client);
+      });
+      clientsToClose.push(client2);
 
-    const authStatuses: AuthStatus[] = [];
-    client.onAuthStatusChange.register((status) => authStatuses.push(status));
+      // Wait for auto-restore
+      await delay(150);
 
-    const success = await client.register({
-      username: 'alice',
-      password: 'password123',
+      expect(client2.authStatus).toBe(AuthStatus.SignedIn);
+      expect(client2.username).toBe('frank');
+      expect(client2.syncStatus).toBe(SyncStatus.Connected);
+
+      const todos2 = client2.table<{ title: string }>('todos');
+      expect((await todos2.getAll()).length).toBe(1);
     });
 
-    expect(success).toBe(true);
-    expect(client.authStatus).toBe(AuthStatus.SignedIn);
-    expect(client.username).toBe('alice');
-    expect(authStatuses).toContain(AuthStatus.SigningIn);
-    expect(authStatuses).toContain(AuthStatus.SignedIn);
-
-    await delay(200);
-    expect(client.syncStatus).toBe(SyncStatus.Connected);
-  });
-
-  it('should preserve local data by default on register (DataMode.Local)', async () => {
-    const client = new TetherClient(
-      `db-local-${Math.random().toString(36).substring(2, 8)}`,
-      {
+    it('should handle logout with default DataMode.Clear wiping data and DataMode.Local preserving data', async () => {
+      const dbName = `db-logout-${Math.random().toString(36).substring(2, 8)}`;
+      const client = new TetherClient(dbName, {
         appId: 'test-app',
         host: '127.0.0.1',
         port: serverPort,
         webSocketClass: WebSocket,
-      },
-    );
-    clientsToClose.push(client);
+      });
+      clientsToClose.push(client);
 
-    const todos = client.table<{ title: string }>('todos');
-    await todos.put('t1', { title: 'Local offline todo' });
+      await client.register({
+        username: 'grace',
+        password: 'password123',
+        remember: true,
+      });
 
-    const success = await client.register({
-      username: 'bobby',
-      password: 'password123',
-      dataMode: DataMode.Local,
+      const todos = client.table<{ title: string }>('todos');
+      await todos.put('g1', { title: 'Grace todo' });
+      await delay(200);
+
+      // 1. Logout with DataMode.Local preserves data
+      await client.logout({ dataMode: DataMode.Local });
+
+      expect(client.authStatus).toBe(AuthStatus.SignedOut);
+      expect(client.syncStatus).toBe(SyncStatus.Disconnected);
+      expect(await todos.get('g1')).toEqual({ title: 'Grace todo' });
+
+      // 2. Log back in
+      await client.login({
+        username: 'grace',
+        password: 'password123',
+      });
+      expect(client.authStatus).toBe(AuthStatus.SignedIn);
+      await delay(200);
+
+      // 3. Logout with default (DataMode.Clear) wipes local data
+      await client.logout();
+      expect(client.authStatus).toBe(AuthStatus.SignedOut);
+      expect(await todos.getAll()).toHaveLength(0);
     });
-    expect(success).toBe(true);
 
-    // Local item still exists
-    expect(await todos.get('t1')).toEqual({ title: 'Local offline todo' });
+    it('should clear previous user data when registering a new account while already signed in', async () => {
+      const client = new TetherClient(
+        `db-reg-switch-${Math.random().toString(36).substring(2, 8)}`,
+        {
+          appId: 'test-app',
+          host: '127.0.0.1',
+          port: serverPort,
+          webSocketClass: WebSocket,
+        },
+      );
+      clientsToClose.push(client);
 
-    await delay(250);
-    // Server should have received the synced item
-    const user = await server.server.storage.getUserByUsername('bobby');
-    expect(user).toBeDefined();
-    if (!user) return;
+      // Register User 1 while SignedOut (keeps local data)
+      const todos = client.table<{ title: string }>('todos');
+      await todos.put('u1-item', { title: 'User 1 Todo' });
 
-    const app = await server.server.storage.getApp('test-app');
-    const table = await app?.getTable('todos');
-    const serverRecords = (await table?.getAllRecords(user)) ?? [];
-    expect(serverRecords).toHaveLength(1);
-    expect(serverRecords[0].data).toEqual({ title: 'Local offline todo' });
-  });
+      await client.register({
+        username: 'user_first',
+        password: 'password123',
+      });
+      expect(client.authStatus).toBe(AuthStatus.SignedIn);
+      expect(client.username).toBe('user_first');
 
-  it('should clear local data on register when DataMode.Clear is specified', async () => {
-    const client = new TetherClient(
-      `db-clear-${Math.random().toString(36).substring(2, 8)}`,
-      {
+      await delay(200);
+      expect((await todos.getAll()).length).toBe(1);
+
+      // Register User 2 while already SignedIn (defaults to clearing previous user data)
+      await client.register({
+        username: 'user_second',
+        password: 'password123',
+      });
+      expect(client.authStatus).toBe(AuthStatus.SignedIn);
+      expect(client.username).toBe('user_second');
+
+      await delay(200);
+
+      // New user should start with clean local state
+      expect(await todos.getAll()).toHaveLength(0);
+    });
+
+    it('should automatically refresh sliding session token on sync connection', async () => {
+      const dbName = `db-sliding-${Math.random().toString(36).substring(2, 8)}`;
+      const client = new TetherClient(dbName, {
         appId: 'test-app',
         host: '127.0.0.1',
         port: serverPort,
         webSocketClass: WebSocket,
-      },
-    );
-    clientsToClose.push(client);
+      });
+      clientsToClose.push(client);
 
-    const todos = client.table<{ title: string }>('todos');
-    await todos.put('t1', { title: 'To be cleared' });
-    expect((await todos.getAll()).length).toBe(1);
+      await client.register({
+        username: 'sliding_user',
+        password: 'password123',
+        remember: true,
+      });
 
-    const success = await client.register({
-      username: 'charlie',
-      password: 'password123',
-      dataMode: DataMode.Clear,
+      const rawStorage = new Storage(dbName);
+      const initialSession = await rawStorage.getMeta<{ token: string }>(
+        'auth',
+      );
+      expect(initialSession?.token).toBeDefined();
+
+      // Wait for WebSocket sync to connect and receive AuthSuccess with refreshed sliding token
+      await delay(200);
+
+      expect(client.syncStatus).toBe(SyncStatus.Connected);
+
+      // Token stored in IndexedDB metadata should be updated
+      const updatedSession = await rawStorage.getMeta<{ token: string }>(
+        'auth',
+      );
+      expect(updatedSession?.token).toBeDefined();
+      await rawStorage.close();
     });
-    expect(success).toBe(true);
 
-    // Local items should be wiped
-    expect(await todos.getAll()).toHaveLength(0);
-  });
+    it('should transition to SignedOut and clear stored session when server rejects expired/invalid token', async () => {
+      const dbName = `db-stale-${Math.random().toString(36).substring(2, 8)}`;
+      const rawStorage = new Storage(dbName);
+      // Simulate restoring an expired / invalid token
+      await rawStorage.setMeta('auth', {
+        userId: 'stale_user_id',
+        username: 'stale_user',
+        token: 'invalid_or_expired_token_signature',
+      });
+      await rawStorage.close();
 
-  it('should transition to AuthStatus.Error when register fails', async () => {
-    const client = new TetherClient(
-      `db-err-${Math.random().toString(36).substring(2, 8)}`,
-      {
+      const client = new TetherClient(dbName, {
         appId: 'test-app',
         host: '127.0.0.1',
         port: serverPort,
         webSocketClass: WebSocket,
-      },
-    );
-    clientsToClose.push(client);
+      });
+      clientsToClose.push(client);
 
-    // First register user
-    await client.register({
-      username: 'duplicate_user',
-      password: 'password123',
+      // Wait for auto session restore and WebSocket sync rejection
+      await delay(200);
+
+      expect(client.authStatus).toBe(AuthStatus.SignedOut);
+      expect(client.username).toBeUndefined();
+
+      // Stored auth meta should have been cleaned up
+      const checkStorage = new Storage(dbName);
+      const storedAuth = await checkStorage.getMeta('auth');
+      expect(storedAuth).toBeUndefined();
+      await checkStorage.close();
     });
 
-    // Attempt to register same username while having local data
-    const client2 = new TetherClient(
-      `db-err2-${Math.random().toString(36).substring(2, 8)}`,
-      {
-        appId: 'test-app',
-        host: '127.0.0.1',
-        port: serverPort,
-        webSocketClass: WebSocket,
-      },
-    );
-    clientsToClose.push(client2);
+    it('should fetch remote data when switching between user accounts with default DataMode.Remote', async () => {
+      // 1. Create client and register User A
+      const client = new TetherClient(
+        `db-switch-${Math.random().toString(36).substring(2, 8)}`,
+        {
+          appId: 'test-app',
+          host: '127.0.0.1',
+          port: serverPort,
+          webSocketClass: WebSocket,
+        },
+      );
+      clientsToClose.push(client);
 
-    const todos2 = client2.table<{ title: string }>('todos');
-    await todos2.put('local-preserved', { title: 'Do Not Delete' });
+      await client.register({
+        username: 'user_a',
+        password: 'password123',
+        remember: true,
+      });
 
-    const success = await client2.register({
-      username: 'duplicate_user',
-      password: 'password123',
-      dataMode: DataMode.Clear,
+      const todos = client.table<{ title: string }>('todos');
+      await todos.put('a1', { title: 'User A Todo' });
+      await delay(250);
+
+      expect((await todos.getAll()).map((t) => t.title)).toEqual([
+        'User A Todo',
+      ]);
+
+      // 2. Pre-create User B with their own data directly on server
+      const userB = await server.server.storage.createUser(
+        'user_b',
+        'password123',
+      );
+      const app = await server.server.storage.getApp('test-app');
+      await app?.applyChanges(userB, [
+        {
+          table: 'todos',
+          id: 'b1',
+          op: 1, // Put
+          data: { title: 'User B Remote Todo' },
+          timestamp: Date.now(),
+          clientId: 'server-seed',
+        },
+      ]);
+
+      // 3. Switch account by logging in as User B (uses default DataMode.Remote)
+      const successB = await client.login({
+        username: 'user_b',
+        password: 'password123',
+        remember: true,
+      });
+      expect(successB).toBe(true);
+      expect(client.username).toBe('user_b');
+
+      // Wait for snapshot sync
+      await delay(350);
+
+      // Client should now have User B's remote data and none of User A's data
+      const todosUserB = await todos.getAll();
+      expect(todosUserB.map((t) => t.title)).toEqual(['User B Remote Todo']);
+
+      // 4. Switch back to User A
+      const successA = await client.login({
+        username: 'user_a',
+        password: 'password123',
+        remember: true,
+      });
+      expect(successA).toBe(true);
+      expect(client.username).toBe('user_a');
+
+      await delay(350);
+
+      // Client should now have User A's data restored from server snapshot
+      const todosUserA = await todos.getAll();
+      expect(todosUserA.map((t) => t.title)).toEqual(['User A Todo']);
     });
-    expect(success).toBe(false);
-    expect(client2.authStatus).toBe(AuthStatus.Error);
-
-    // Verify local data was NOT wiped because register failed
-    const records = await todos2.getAll();
-    expect(records).toHaveLength(1);
-    expect(records[0].title).toBe('Do Not Delete');
-  });
-
-  it('should support login and merge local/remote data with DataMode.Merge', async () => {
-    // 1. Register User 1 on Client A and put remote items
-    const clientA = new TetherClient(
-      `db-a-${Math.random().toString(36).substring(2, 8)}`,
-      {
-        appId: 'test-app',
-        host: '127.0.0.1',
-        port: serverPort,
-        webSocketClass: WebSocket,
-      },
-    );
-    clientsToClose.push(clientA);
-
-    await clientA.register({
-      username: 'diana',
-      password: 'password123',
-    });
-    const todosA = clientA.table<{ title: string }>('todos');
-    await todosA.put('r1', { title: 'Remote Item 1' });
-    await delay(200);
-
-    // 2. Register Client B locally before login, add local items
-    const clientB = new TetherClient(
-      `db-b-${Math.random().toString(36).substring(2, 8)}`,
-      {
-        appId: 'test-app',
-        host: '127.0.0.1',
-        port: serverPort,
-        webSocketClass: WebSocket,
-      },
-    );
-    clientsToClose.push(clientB);
-
-    const todosB = clientB.table<{ title: string }>('todos');
-    await todosB.put('l1', { title: 'Local Item 1' });
-
-    // 3. Client B logs in with DataMode.Merge
-    const success = await clientB.login({
-      username: 'diana',
-      password: 'password123',
-      dataMode: DataMode.Merge,
-    });
-    expect(success).toBe(true);
-
-    await delay(300);
-
-    // Both items should be present on Client B
-    const allB = await todosB.getAll();
-    expect(allB).toHaveLength(2);
-    expect(allB.map((t) => t.title).sort()).toEqual([
-      'Local Item 1',
-      'Remote Item 1',
-    ]);
-  });
-
-  it('should support login with DataMode.Remote discarding local data', async () => {
-    // 1. Create remote item
-    const clientA = new TetherClient(
-      `db-ra-${Math.random().toString(36).substring(2, 8)}`,
-      {
-        appId: 'test-app',
-        host: '127.0.0.1',
-        port: serverPort,
-        webSocketClass: WebSocket,
-      },
-    );
-    clientsToClose.push(clientA);
-
-    await clientA.register({
-      username: 'evelyn',
-      password: 'password123',
-    });
-    const todosA = clientA.table<{ title: string }>('todos');
-    await todosA.put('r1', { title: 'Remote Item' });
-    await delay(200);
-
-    // 2. Client B creates local item then logs in with DataMode.Remote
-    const clientB = new TetherClient(
-      `db-rb-${Math.random().toString(36).substring(2, 8)}`,
-      {
-        appId: 'test-app',
-        host: '127.0.0.1',
-        port: serverPort,
-        webSocketClass: WebSocket,
-      },
-    );
-    clientsToClose.push(clientB);
-
-    const todosB = clientB.table<{ title: string }>('todos');
-    await todosB.put('l1', { title: 'Local To Discard' });
-
-    const success = await clientB.login({
-      username: 'evelyn',
-      password: 'password123',
-      dataMode: DataMode.Remote,
-    });
-    expect(success).toBe(true);
-
-    await delay(300);
-
-    // Local item was wiped, only remote item received
-    const allB = await todosB.getAll();
-    expect(allB).toHaveLength(1);
-    expect(allB[0].title).toBe('Remote Item');
-
-    // Verify Client A never received the discarded local item
-    const allA = await todosA.getAll();
-    expect(allA).toHaveLength(1);
-    expect(allA[0].title).toBe('Remote Item');
-  });
-
-  it('should auto-restore session across client re-instantiations when remember: true is set', async () => {
-    const dbName = `db-rem-${Math.random().toString(36).substring(2, 8)}`;
-
-    // Session 1: Register with remember: true
-    const client1 = new TetherClient(dbName, {
-      appId: 'test-app',
-      host: '127.0.0.1',
-      port: serverPort,
-      webSocketClass: WebSocket,
-    });
-    clientsToClose.push(client1);
-
-    await client1.register({
-      username: 'frank',
-      password: 'password123',
-      remember: true,
-    });
-
-    const todos1 = client1.table<{ title: string }>('todos');
-    await todos1.put('f1', { title: 'Frank task' });
-    await delay(200);
-
-    // Close Session 1
-    await client1.close();
-
-    // Session 2: Open same DB instance without credentials
-    const client2 = new TetherClient(dbName, {
-      appId: 'test-app',
-      host: '127.0.0.1',
-      port: serverPort,
-      webSocketClass: WebSocket,
-    });
-    clientsToClose.push(client2);
-
-    // Wait for auto-restore
-    await delay(150);
-
-    expect(client2.authStatus).toBe(AuthStatus.SignedIn);
-    expect(client2.username).toBe('frank');
-    expect(client2.syncStatus).toBe(SyncStatus.Connected);
-
-    const todos2 = client2.table<{ title: string }>('todos');
-    expect((await todos2.getAll()).length).toBe(1);
-  });
-
-  it('should handle logout with default DataMode.Clear wiping data and DataMode.Local preserving data', async () => {
-    const dbName = `db-logout-${Math.random().toString(36).substring(2, 8)}`;
-    const client = new TetherClient(dbName, {
-      appId: 'test-app',
-      host: '127.0.0.1',
-      port: serverPort,
-      webSocketClass: WebSocket,
-    });
-    clientsToClose.push(client);
-
-    await client.register({
-      username: 'grace',
-      password: 'password123',
-      remember: true,
-    });
-
-    const todos = client.table<{ title: string }>('todos');
-    await todos.put('g1', { title: 'Grace todo' });
-    await delay(200);
-
-    // 1. Logout with DataMode.Local preserves data
-    await client.logout({ dataMode: DataMode.Local });
-
-    expect(client.authStatus).toBe(AuthStatus.SignedOut);
-    expect(client.syncStatus).toBe(SyncStatus.Disconnected);
-    expect(await todos.get('g1')).toEqual({ title: 'Grace todo' });
-
-    // 2. Log back in
-    await client.login({
-      username: 'grace',
-      password: 'password123',
-    });
-    expect(client.authStatus).toBe(AuthStatus.SignedIn);
-    await delay(200);
-
-    // 3. Logout with default (DataMode.Clear) wipes local data
-    await client.logout();
-    expect(client.authStatus).toBe(AuthStatus.SignedOut);
-    expect(await todos.getAll()).toHaveLength(0);
-  });
-
-  it('should clear previous user data when registering a new account while already signed in', async () => {
-    const client = new TetherClient(
-      `db-reg-switch-${Math.random().toString(36).substring(2, 8)}`,
-      {
-        appId: 'test-app',
-        host: '127.0.0.1',
-        port: serverPort,
-        webSocketClass: WebSocket,
-      },
-    );
-    clientsToClose.push(client);
-
-    // Register User 1 while SignedOut (keeps local data)
-    const todos = client.table<{ title: string }>('todos');
-    await todos.put('u1-item', { title: 'User 1 Todo' });
-
-    await client.register({
-      username: 'user_first',
-      password: 'password123',
-    });
-    expect(client.authStatus).toBe(AuthStatus.SignedIn);
-    expect(client.username).toBe('user_first');
-
-    await delay(200);
-    expect((await todos.getAll()).length).toBe(1);
-
-    // Register User 2 while already SignedIn (defaults to clearing previous user data)
-    await client.register({
-      username: 'user_second',
-      password: 'password123',
-    });
-    expect(client.authStatus).toBe(AuthStatus.SignedIn);
-    expect(client.username).toBe('user_second');
-
-    await delay(200);
-
-    // New user should start with clean local state
-    expect(await todos.getAll()).toHaveLength(0);
-  });
-
-  it('should automatically refresh sliding session token on sync connection', async () => {
-    const dbName = `db-sliding-${Math.random().toString(36).substring(2, 8)}`;
-    const client = new TetherClient(dbName, {
-      appId: 'test-app',
-      host: '127.0.0.1',
-      port: serverPort,
-      webSocketClass: WebSocket,
-    });
-    clientsToClose.push(client);
-
-    await client.register({
-      username: 'sliding_user',
-      password: 'password123',
-      remember: true,
-    });
-
-    const rawStorage = new Storage(dbName);
-    const initialSession = await rawStorage.getMeta<{ token: string }>('auth');
-    expect(initialSession?.token).toBeDefined();
-
-    // Wait for WebSocket sync to connect and receive AuthSuccess with refreshed sliding token
-    await delay(200);
-
-    expect(client.syncStatus).toBe(SyncStatus.Connected);
-
-    // Token stored in IndexedDB metadata should be updated
-    const updatedSession = await rawStorage.getMeta<{ token: string }>('auth');
-    expect(updatedSession?.token).toBeDefined();
-    await rawStorage.close();
-  });
-
-  it('should transition to SignedOut and clear stored session when server rejects expired/invalid token', async () => {
-    const dbName = `db-stale-${Math.random().toString(36).substring(2, 8)}`;
-    const rawStorage = new Storage(dbName);
-    // Simulate restoring an expired / invalid token
-    await rawStorage.setMeta('auth', {
-      userId: 'stale_user_id',
-      username: 'stale_user',
-      token: 'invalid_or_expired_token_signature',
-    });
-    await rawStorage.close();
-
-    const client = new TetherClient(dbName, {
-      appId: 'test-app',
-      host: '127.0.0.1',
-      port: serverPort,
-      webSocketClass: WebSocket,
-    });
-    clientsToClose.push(client);
-
-    // Wait for auto session restore and WebSocket sync rejection
-    await delay(200);
-
-    expect(client.authStatus).toBe(AuthStatus.SignedOut);
-    expect(client.username).toBeUndefined();
-
-    // Stored auth meta should have been cleaned up
-    const checkStorage = new Storage(dbName);
-    const storedAuth = await checkStorage.getMeta('auth');
-    expect(storedAuth).toBeUndefined();
-    await checkStorage.close();
-  });
-
-  it('should fetch remote data when switching between user accounts with default DataMode.Remote', async () => {
-    // 1. Create client and register User A
-    const client = new TetherClient(
-      `db-switch-${Math.random().toString(36).substring(2, 8)}`,
-      {
-        appId: 'test-app',
-        host: '127.0.0.1',
-        port: serverPort,
-        webSocketClass: WebSocket,
-      },
-    );
-    clientsToClose.push(client);
-
-    await client.register({
-      username: 'user_a',
-      password: 'password123',
-      remember: true,
-    });
-
-    const todos = client.table<{ title: string }>('todos');
-    await todos.put('a1', { title: 'User A Todo' });
-    await delay(250);
-
-    expect((await todos.getAll()).map((t) => t.title)).toEqual(['User A Todo']);
-
-    // 2. Pre-create User B with their own data directly on server
-    const userB = await server.server.storage.createUser(
-      'user_b',
-      'password123',
-    );
-    const app = await server.server.storage.getApp('test-app');
-    await app?.applyChanges(userB, [
-      {
-        table: 'todos',
-        id: 'b1',
-        op: 1, // Put
-        data: { title: 'User B Remote Todo' },
-        timestamp: Date.now(),
-        clientId: 'server-seed',
-      },
-    ]);
-
-    // 3. Switch account by logging in as User B (uses default DataMode.Remote)
-    const successB = await client.login({
-      username: 'user_b',
-      password: 'password123',
-      remember: true,
-    });
-    expect(successB).toBe(true);
-    expect(client.username).toBe('user_b');
-
-    // Wait for snapshot sync
-    await delay(350);
-
-    // Client should now have User B's remote data and none of User A's data
-    const todosUserB = await todos.getAll();
-    expect(todosUserB.map((t) => t.title)).toEqual(['User B Remote Todo']);
-
-    // 4. Switch back to User A
-    const successA = await client.login({
-      username: 'user_a',
-      password: 'password123',
-      remember: true,
-    });
-    expect(successA).toBe(true);
-    expect(client.username).toBe('user_a');
-
-    await delay(350);
-
-    // Client should now have User A's data restored from server snapshot
-    const todosUserA = await todos.getAll();
-    expect(todosUserA.map((t) => t.title)).toEqual(['User A Todo']);
-  });
-});
+  },
+);

@@ -18,7 +18,7 @@ import {
   SqliteStorage,
 } from '../../src/server/storage/index.js';
 
-describe('src/server/cli.ts (CLI commands and backends)', () => {
+describe('CLI', () => {
   let tmpDir: string;
 
   beforeEach(async () => {

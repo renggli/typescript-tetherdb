@@ -181,13 +181,14 @@ export class Table<T = unknown> {
     for (const entry of entries) {
       const existing = existingMap.get(entry.id);
       const version = (existing?.version ?? 0) + 1;
+      const timestamp = Math.max(now, (existing?.timestamp ?? 0) + 1);
 
       const change: ChangeRecord<T> = {
         table: this.tableName,
         id: entry.id,
         op: OperationType.Put,
         data: entry.data,
-        timestamp: now,
+        timestamp,
         clientId,
         version,
       };
@@ -247,11 +248,12 @@ export class Table<T = unknown> {
       if (!existing || existing.deleted) continue;
 
       const version = (existing.version ?? 0) + 1;
+      const timestamp = Math.max(now, (existing.timestamp ?? 0) + 1);
       const change: ChangeRecord<T> = {
         table: this.tableName,
         id,
         op: OperationType.Delete,
-        timestamp: now,
+        timestamp,
         clientId,
         version,
       };
