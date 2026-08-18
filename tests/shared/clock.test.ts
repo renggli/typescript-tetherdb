@@ -50,5 +50,24 @@ describe('shouldOverwrite', () => {
         { timestamp: 1000, version: 1, clientId: 'c1' },
       ),
     ).toBe(true);
+
+    // undefined clientId handling
+    expect(
+      shouldOverwrite(
+        { timestamp: 1000 },
+        { timestamp: 1000, version: 1, clientId: 'c1' },
+      ),
+    ).toBe(false);
+
+    expect(
+      shouldOverwrite(
+        { timestamp: 1000, clientId: 'c1' },
+        { timestamp: 1000, version: 1 },
+      ),
+    ).toBe(true);
+
+    expect(
+      shouldOverwrite({ timestamp: 1000 }, { timestamp: 1000, version: 1 }),
+    ).toBe(true);
   });
 });

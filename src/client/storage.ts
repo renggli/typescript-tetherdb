@@ -504,9 +504,12 @@ export class Storage {
           !database.objectStoreNames.contains(META_STORE)
         ) {
           const nextVersion = database.version + 1;
-          this.upgradeDatabase(database, nextVersion, [])
-            .then(resolve)
-            .catch(reject);
+          this.databasePromise = this.upgradeDatabase(
+            database,
+            nextVersion,
+            [],
+          );
+          this.databasePromise.then(resolve).catch(reject);
         } else {
           resolve(database);
         }

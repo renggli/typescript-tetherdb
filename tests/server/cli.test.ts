@@ -106,6 +106,32 @@ describe('CLI', () => {
       await storage.close?.();
       logSpy.mockRestore();
     });
+
+    it('should invoke runCli with serve command and handle shutdown signal', async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const exitSpy = vi
+        .spyOn(process, 'exit')
+        .mockImplementation((() => {}) as unknown as (
+          code?: string | number | null | undefined,
+        ) => never);
+
+      await runCli([
+        'serve',
+        '--port=0',
+        '--host=127.0.0.1',
+        `--sqlite=${tmpDir}`,
+      ]);
+
+      // Emit shutdown signal
+      process.emit('SIGINT');
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(logSpy).toHaveBeenCalledWith('Stopping TetherDB server...');
+      expect(exitSpy).toHaveBeenCalledWith(0);
+
+      logSpy.mockRestore();
+      exitSpy.mockRestore();
+    });
   });
 
   describe('CLI Subcommands', () => {
@@ -295,6 +321,72 @@ describe('CLI', () => {
 
       exitSpy.mockRestore();
       errorSpy.mockRestore();
+    });
+
+    it('should support users command error handling and unknown subcommands', async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const exitSpy = vi
+        .spyOn(process, 'exit')
+        .mockImplementation((() => {}) as unknown as (
+          code?: string | number | null | undefined,
+        ) => never);
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      // Missing username on users add
+      await runCli(['users', 'add', `--sqlite=${tmpDir}`]);
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Command failed:',
+        'Missing username.',
+      );
+
+      // Missing user ID on users rm
+      await runCli(['users', 'rm', `--sqlite=${tmpDir}`]);
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Command failed:',
+        'Missing user ID.',
+      );
+
+      // Removing non-existent user
+      await runCli(['users', 'rm', 'nonexistent_id', `--sqlite=${tmpDir}`]);
+      expect(logSpy).toHaveBeenCalledWith('User not found: nonexistent_id');
+
+      // Unknown users action
+      await runCli(['users', 'invalid_action', `--sqlite=${tmpDir}`]);
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Command failed:',
+        'Unknown users action: "invalid_action".',
+      );
+
+      // Unknown apps action
+      await runCli(['apps', 'invalid_apps_action', `--sqlite=${tmpDir}`]);
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Command failed:',
+        'Unknown apps action: "invalid_apps_action".',
+      );
+
+      // Unknown tables action
+      await runCli(['tables', 'add', 'app1', `--sqlite=${tmpDir}`]);
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Command failed:',
+        'Missing table name.',
+      );
+
+      // Unknown root command
+      await runCli(['unknown_cmd']);
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Command failed:',
+        'Unknown command: "unknown_cmd".',
+      );
+
+      // Help alias -h
+      await runCli(['-h']);
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('TetherDB CLI'),
+      );
+
+      exitSpy.mockRestore();
+      errorSpy.mockRestore();
+      logSpy.mockRestore();
     });
   });
 });

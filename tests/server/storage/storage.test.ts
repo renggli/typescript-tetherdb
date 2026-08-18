@@ -91,6 +91,8 @@ function runStorageTestSuite(createStorage: () => Storage) {
 
     const all = await todosTable?.getAllRecords(user);
     expect(all).toHaveLength(2);
+
+    expect(await app?.getCurrentSeq(user)).toBe(2);
   });
 
   it('should isolate data between different users', async () => {
@@ -159,6 +161,27 @@ function runStorageTestSuite(createStorage: () => Storage) {
     expect(diff?.changes).toHaveLength(2);
     expect(diff?.changes.map((c) => c.id)).toEqual(['2', '3']);
     expect(diff?.currentSeq).toBe(3);
+
+    // Apply Delete operation and verify in changelog
+    await app?.applyChanges(user, [
+      {
+        table: 'items',
+        id: '2',
+        op: OperationType.Delete,
+        timestamp: 40,
+        clientId: 'c',
+      },
+    ]);
+
+    const diffWithDelete = await app?.getChangesSince(user, 3);
+    expect(diffWithDelete?.changes).toHaveLength(1);
+    expect(diffWithDelete?.changes[0].op).toBe(OperationType.Delete);
+    expect(diffWithDelete?.changes[0].data).toBeUndefined();
+
+    // fromSeq > currentSeq requires snapshot
+    const invalidFutureSeq = await app?.getChangesSince(user, 9999);
+    expect(invalidFutureSeq?.requiresSnapshot).toBe(true);
+    expect(invalidFutureSeq?.changes).toHaveLength(0);
   });
 
   it('should throw an error when createApp is called with an existing appId', async () => {
@@ -267,5 +290,64 @@ function runStorageTestSuite(createStorage: () => Storage) {
     const deleted = await app.delete();
     expect(deleted).toBe(true);
     expect(await storage.getApp('temporary_app')).toBeUndefined();
+  });
+
+  it('should delete a table via app.deleteTable and table.delete and clean up all data', async () => {
+    const app = await storage.getApp('default');
+    expect(app).toBeDefined();
+    if (!app) return;
+
+    const user = await storage.createUser('table_del_user', 'pass');
+    const table = await app.createTable('to_be_deleted');
+
+    // Put records into the table
+    await table.applyChanges(user, [
+      {
+        table: 'to_be_deleted',
+        id: 'del_1',
+        op: OperationType.Put,
+        data: { text: 'To delete' },
+        timestamp: 1000,
+        clientId: 'c1',
+      },
+    ]);
+
+    expect(await table.getRecord(user, 'del_1')).toBeDefined();
+    expect(
+      (await app.getTables()).some((t) => t.name === 'to_be_deleted'),
+    ).toBe(true);
+
+    // Delete table via table.delete()
+    const deleted = await table.delete();
+    expect(deleted).toBe(true);
+
+    // Verify it is no longer in getTables()
+    expect(
+      (await app.getTables()).some((t) => t.name === 'to_be_deleted'),
+    ).toBe(false);
+    expect(await app.getTable('to_be_deleted')).toBeUndefined();
+
+    // Deleting again should return false
+    expect(await app.deleteTable('to_be_deleted')).toBe(false);
+
+    // Create another table and delete via app.deleteTable
+    const table2 = await app.createTable('another_table');
+    await table2.applyChanges(user, [
+      {
+        table: 'another_table',
+        id: 'del_2',
+        op: OperationType.Put,
+        data: { text: 'Another' },
+        timestamp: 1000,
+        clientId: 'c1',
+      },
+    ]);
+    expect(await app.deleteTable('another_table')).toBe(true);
+    expect(await app.getTable('another_table')).toBeUndefined();
+
+    // Recreate deleted table and verify fresh empty state
+    const recreated = await app.createTable('to_be_deleted');
+    expect(await recreated.getRecord(user, 'del_1')).toBeUndefined();
+    expect(await recreated.getAllRecords(user)).toHaveLength(0);
   });
 }

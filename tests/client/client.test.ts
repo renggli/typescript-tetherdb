@@ -313,4 +313,46 @@ describe('TetherClient', () => {
       expect(closeStorageSpy).toHaveBeenCalled();
     });
   });
+
+  describe('Browser location resolution and sync callbacks', () => {
+    it('should resolve host, port, and protocol from window.location if present', () => {
+      // @ts-expect-error - simulating browser environment
+      globalThis.window = {
+        location: {
+          hostname: 'app.mycompany.internal',
+          port: '3000',
+          protocol: 'https:',
+        },
+      };
+
+      try {
+        const client = new TetherClient('browser-loc-test');
+        clientsToClose.push(client);
+
+        // @ts-expect-error - inspecting internal auth
+        expect(client.auth.baseUrl).toBe('https://app.mycompany.internal:3000');
+      } finally {
+        // @ts-expect-error - cleanup browser simulation
+        delete globalThis.window;
+      }
+    });
+
+    it('should wire sync onTokenRefresh and onAuthError callbacks to auth coordinator', () => {
+      const client = new TetherClient('callbacks-test');
+      clientsToClose.push(client);
+
+      // @ts-expect-error - inspecting internal auth
+      const refreshSpy = vi.spyOn(client.auth, 'handleTokenRefresh');
+      // @ts-expect-error - inspecting internal auth
+      const authErrorSpy = vi.spyOn(client.auth, 'handleAuthError');
+
+      // @ts-expect-error - inspecting internal sync
+      client.sync.options.onTokenRefresh?.('new-jwt');
+      expect(refreshSpy).toHaveBeenCalledWith('new-jwt');
+
+      // @ts-expect-error - inspecting internal sync
+      client.sync.options.onAuthError?.('Session revoked');
+      expect(authErrorSpy).toHaveBeenCalledWith('Session revoked');
+    });
+  });
 });

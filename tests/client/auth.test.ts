@@ -584,5 +584,55 @@ describe('Auth', () => {
       expect(auth.token).toBeUndefined();
       expect(await storage.getMeta('auth')).toBeUndefined();
     });
+
+    it('should login using stored metadata session when no credentials are provided', async () => {
+      await storage.setMeta('auth', {
+        token: 'stored-valid-token',
+        userId: 'u-saved',
+        username: 'saved_user',
+      });
+
+      const auth = new Auth({
+        baseUrl: 'http://127.0.0.1:8080',
+        storage,
+        fetchFn: mockFetch as unknown as typeof fetch,
+      });
+
+      const result = await auth.login();
+      expect(result).toBe(true);
+      expect(auth.status).toBe(AuthStatus.SignedIn);
+      expect(auth.token).toBe('stored-valid-token');
+      expect(auth.username).toBe('saved_user');
+      expect(auth.userId).toBe('u-saved');
+    });
+
+    it('should return false when login() is called without credentials or stored session', async () => {
+      const auth = new Auth({
+        baseUrl: 'http://127.0.0.1:8080',
+        storage,
+        fetchFn: mockFetch as unknown as typeof fetch,
+      });
+
+      const result = await auth.login();
+      expect(result).toBe(false);
+      expect(auth.status).toBe(AuthStatus.Error);
+    });
+
+    it('should return false when stored metadata has no token', async () => {
+      await storage.setMeta('auth', {
+        userId: 'u-no-token',
+        username: 'no_token_user',
+      });
+
+      const auth = new Auth({
+        baseUrl: 'http://127.0.0.1:8080',
+        storage,
+        fetchFn: mockFetch as unknown as typeof fetch,
+      });
+
+      const result = await auth.login();
+      expect(result).toBe(false);
+      expect(auth.status).toBe(AuthStatus.Error);
+    });
   });
 });

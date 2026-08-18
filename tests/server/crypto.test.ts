@@ -48,5 +48,10 @@ describe('Crypto', () => {
     expect(verifySessionToken(validToken, 'wrong-secret')).toBeNull();
     expect(verifySessionToken('tampered.token', secret)).toBeNull();
     expect(verifySessionToken('', secret)).toBeNull();
+    expect(verifySessionToken('nodotstoken', secret)).toBeNull();
+    expect(verifySessionToken('a.b.c', secret)).toBeNull();
+    expect(
+      verifySessionToken('invalid_base64%.invalid_sig%', secret),
+    ).toBeNull();
   });
 });

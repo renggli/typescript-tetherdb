@@ -61,6 +61,7 @@
   "scripts": {
     "build": "tsup && tsc --emitDeclarationOnly --outDir dist",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "check": "biome check --write .",
     "format": "biome format --write .",
@@ -74,6 +75,7 @@
     "@biomejs/biome": "^2.5.7",
     "@types/node": "^22.10.2",
     "@types/ws": "^8.5.13",
+    "@vitest/coverage-v8": "^2.1.9",
     "fake-indexeddb": "^6.0.0",
     "tsup": "^8.3.5",
     "typescript": "^7.0.2",

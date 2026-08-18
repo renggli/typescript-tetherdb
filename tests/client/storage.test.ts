@@ -491,4 +491,37 @@ describe('Storage', () => {
       expect(await storage.getMeta('user')).toBeUndefined();
     });
   });
+
+  describe('upgrade & transaction edge cases', () => {
+    it('should auto-upgrade database if internal stores are missing', async () => {
+      const dbName = 'tetherdb_no_internal_stores';
+      // Create a DB manually with version 1 and NO internal stores
+      await new Promise<void>((resolve, reject) => {
+        const req = indexedDB.open(dbName, 1);
+        req.onupgradeneeded = () => {
+          req.result.createObjectStore('custom');
+        };
+        req.onsuccess = () => {
+          req.result.close();
+          resolve();
+        };
+        req.onerror = () => reject(req.error);
+      });
+
+      const store = new Storage(dbName);
+      const db = await store.getDatabase();
+      expect(db.objectStoreNames.contains('__tether_outbox')).toBe(true);
+      expect(db.objectStoreNames.contains('__tether_meta')).toBe(true);
+      expect(db.objectStoreNames.contains('custom')).toBe(true);
+      await store.close();
+    });
+
+    it('should update lastSyncSeq when applySnapshotBatch or applyRemoteChangesBatch receives empty array', async () => {
+      await storage.applySnapshotBatch([], 42);
+      expect(await storage.getMeta('lastSyncSeq')).toBe(42);
+
+      await storage.applyRemoteChangesBatch([], 99);
+      expect(await storage.getMeta('lastSyncSeq')).toBe(99);
+    });
+  });
 });

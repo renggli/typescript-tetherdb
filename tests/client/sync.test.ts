@@ -639,5 +639,94 @@ describe('Sync', () => {
         (globalThis as unknown as { window?: unknown }).window = originalWindow;
       }
     });
+
+    it('should clear active reconnectTimer when offline event fires while waiting for reconnect', async () => {
+      const mockWindow = new EventTarget();
+      const originalWindow = (globalThis as unknown as { window?: unknown })
+        .window;
+      (globalThis as unknown as { window: unknown }).window = mockWindow;
+
+      try {
+        const sync = createSync({
+          token: 'token-1',
+          reconnectIntervalMs: 50000,
+        });
+
+        const ws = MockWebSocket.instances[0];
+        ws.triggerOpen();
+        ws.close(1006); // triggers scheduleReconnect
+
+        // Now fire offline while reconnectTimer is set
+        mockWindow.dispatchEvent(new Event('offline'));
+        expect(sync.status).toBe(SyncStatus.Disconnected);
+      } finally {
+        (globalThis as unknown as { window?: unknown }).window = originalWindow;
+      }
+    });
+
+    it('should emit onError when pushOutbox encounters an error', async () => {
+      const sync = createSync({ token: 'token-1' });
+      const errors: TetherClientError[] = [];
+      sync.onError.register((err) => errors.push(err));
+
+      const ws = MockWebSocket.instances[0];
+      ws.triggerOpen();
+
+      vi.spyOn(storage, 'getPendingOutbox').mockRejectedValue(
+        new Error('DB read error'),
+      );
+
+      ws.triggerMessage({
+        type: ServerMessageType.AuthSuccess,
+        userId: 'user-1',
+      });
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(errors).toHaveLength(1);
+      expect(errors[0].code).toBe(TetherClientErrorCode.SyncError);
+      expect(errors[0].message).toBe('DB read error');
+    });
+
+    it('should handle non-Error exceptions in pushOutbox catch block', async () => {
+      const sync = createSync({ token: 'token-1' });
+      const errors: TetherClientError[] = [];
+      sync.onError.register((err) => errors.push(err));
+
+      const ws = MockWebSocket.instances[0];
+      ws.triggerOpen();
+
+      vi.spyOn(storage, 'getPendingOutbox').mockRejectedValue(
+        'String error instead of Error instance',
+      );
+
+      ws.triggerMessage({
+        type: ServerMessageType.AuthSuccess,
+        userId: 'user-1',
+      });
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(errors).toHaveLength(1);
+      expect(errors[0].message).toBe('Failed to push outbox batch to server.');
+    });
+
+    it('should unregister window event listeners on destroy if window exists', () => {
+      const removeSpy = vi.fn();
+      const mockWindow = {
+        addEventListener: vi.fn(),
+        removeEventListener: removeSpy,
+      };
+      const originalWindow = (globalThis as unknown as { window?: unknown })
+        .window;
+      (globalThis as unknown as { window: unknown }).window = mockWindow;
+
+      try {
+        const sync = createSync({ token: 'token-1' });
+        sync.destroy();
+        expect(removeSpy).toHaveBeenCalledWith('online', expect.any(Function));
+        expect(removeSpy).toHaveBeenCalledWith('offline', expect.any(Function));
+      } finally {
+        (globalThis as unknown as { window?: unknown }).window = originalWindow;
+      }
+    });
   });
 });

@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebSocket } from 'ws';
-import type { MemoryStorage } from '../../src/server/storage/memory/index.js';
+import type { Storage } from '../../src/server/storage/index.js';
 import { Sync } from '../../src/server/sync.js';
 import {
   ClientMessageType,
@@ -9,7 +9,7 @@ import {
   type ServerMessage,
   ServerMessageType,
 } from '../../src/shared/types.js';
-import { memoryStorage, type StorageContext } from './storage/matrix.js';
+import { type StorageContext, storageDescriptors } from './storage/matrix.js';
 
 class MockServerWebSocket extends EventEmitter {
   readonly OPEN = 1;
@@ -38,16 +38,16 @@ class MockServerWebSocket extends EventEmitter {
   }
 }
 
-describe('Sync', () => {
-  let context: StorageContext<MemoryStorage>;
-  let storage: MemoryStorage;
+describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
+  let context: StorageContext;
+  let storage: Storage;
   let sync: Sync;
   let validToken: string;
   let testUserId: string;
 
   beforeEach(async () => {
-    context = await memoryStorage.createBackend();
-    storage = context.backend;
+    context = await createBackend();
+    storage = context.storage;
     sync = new Sync(storage);
 
     const app = await storage.createApp('todo-app');
@@ -499,6 +499,78 @@ describe('Sync', () => {
 
       // @ts-expect-error - inspecting internal map
       expect(sync.webSocketToClient.has(ws)).toBe(false);
+
+      consoleSpy.mockRestore();
+    });
+
+    it('should send error when appId does not exist during auth sync', async () => {
+      const consoleSpy = vi
+        .spyOn(console, 'error')
+        .mockImplementation(() => {});
+
+      const ws = new MockServerWebSocket();
+      sync.handleConnection(ws as unknown as WebSocket);
+
+      ws.emitClientMessage({
+        type: ClientMessageType.Auth,
+        token: validToken,
+        appId: 'nonexistent-app',
+        clientId: 'client-no-app',
+      });
+      await new Promise((r) => setTimeout(r, 20));
+
+      const messages = ws.getParsedMessages();
+      expect(messages).toHaveLength(1);
+      expect(messages[0].type).toBe(ServerMessageType.AuthError);
+      expect((messages[0] as { message: string }).message).toContain(
+        'Application not found',
+      );
+
+      consoleSpy.mockRestore();
+    });
+
+    it('should send error if app is deleted when client sends change batch', async () => {
+      const consoleSpy = vi
+        .spyOn(console, 'error')
+        .mockImplementation(() => {});
+
+      const ws = new MockServerWebSocket();
+      sync.handleConnection(ws as unknown as WebSocket);
+
+      ws.emitClientMessage({
+        type: ClientMessageType.Auth,
+        token: validToken,
+        appId: 'todo-app',
+        clientId: 'client-app-del',
+        lastSyncSeq: 0,
+      });
+      await new Promise((r) => setTimeout(r, 20));
+
+      // Now delete the app
+      await (await storage.getApp('todo-app'))?.delete();
+
+      // Send change batch
+      ws.emitClientMessage({
+        type: ClientMessageType.ChangeBatch,
+        batchId: 'b-del',
+        changes: [
+          {
+            table: 'todos',
+            id: 't-del',
+            op: OperationType.Put,
+            data: { test: 1 },
+            timestamp: 100,
+          },
+        ],
+      });
+      await new Promise((r) => setTimeout(r, 20));
+
+      const messages = ws.getParsedMessages();
+      const lastMsg = messages[messages.length - 1];
+      expect(lastMsg.type).toBe(ServerMessageType.Error);
+      expect((lastMsg as { message: string }).message).toContain(
+        'Application not found',
+      );
 
       consoleSpy.mockRestore();
     });

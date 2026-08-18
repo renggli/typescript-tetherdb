@@ -13,5 +13,6 @@ describe('normalizeBasePath', () => {
     expect(normalizeBasePath('/api/')).toBe('/api');
     expect(normalizeBasePath('api/v1/')).toBe('/api/v1');
     expect(normalizeBasePath('/api/v1')).toBe('/api/v1');
+    expect(normalizeBasePath('/api/v1/')).toBe('/api/v1');
   });
 });

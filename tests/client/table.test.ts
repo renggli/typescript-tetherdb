@@ -324,4 +324,30 @@ describe('Table', () => {
       ]);
     });
   });
+
+  describe('deleteAll edge cases', () => {
+    it('should handle deleteAll on records with missing version or timestamp metadata', async () => {
+      // Direct raw record without version
+      await storage.applySnapshotBatch([
+        {
+          table: 'items',
+          id: 'raw1',
+          data: { title: 'Raw item' },
+          timestamp: 100,
+          version: undefined as unknown as number,
+          clientId: 'c0',
+        },
+      ]);
+
+      const deletedCount = await table.deleteAll(['raw1', 'nonexistent']);
+      expect(deletedCount).toBe(1);
+
+      const record = await table.get('raw1');
+      expect(record).toBeUndefined();
+
+      // Deleting again should return 0
+      const secondDelete = await table.deleteAll(['raw1']);
+      expect(secondDelete).toBe(0);
+    });
+  });
 });
