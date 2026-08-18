@@ -1,6 +1,7 @@
 import {
   type ChangeRecord,
   OperationType,
+  type SnapshotRecord,
   type StoredRecord,
 } from '../shared/types.js';
 import { EventRegistry } from './shared/event.js';
@@ -74,12 +75,12 @@ export class Storage {
    * @returns A typed `Table<T>` instance.
    */
   table<T = unknown>(name: string): Table<T> {
-    let tbl = this.tables.get(name);
-    if (!tbl) {
-      tbl = new Table(name, this) as Table<unknown>;
-      this.tables.set(name, tbl);
+    let table = this.tables.get(name);
+    if (!table) {
+      table = new Table(name, this) as Table<unknown>;
+      this.tables.set(name, table);
     }
-    return tbl as unknown as Table<T>;
+    return table as unknown as Table<T>;
   }
 
   /**
@@ -99,12 +100,13 @@ export class Storage {
    * @param tableNames - Array of table names to ensure.
    */
   async ensureTables(tableNames: string[]): Promise<void> {
-    const db = await this.getDatabase();
-    const missing = tableNames.filter((s) => !db.objectStoreNames.contains(s));
+    const database = await this.getDatabase();
+    const missing = tableNames.filter(
+      (s) => !database.objectStoreNames.contains(s),
+    );
     if (missing.length === 0) return;
-
-    const nextVersion = db.version + 1;
-    this.databasePromise = this.upgradeDatabase(db, nextVersion, missing);
+    const nextVersion = database.version + 1;
+    this.databasePromise = this.upgradeDatabase(database, nextVersion, missing);
     await this.databasePromise;
   }
 
@@ -125,14 +127,14 @@ export class Storage {
    * @returns The stored metadata value, or `undefined` if not set.
    */
   async getMeta<T = unknown>(key: string): Promise<T | undefined> {
-    const db = await this.getDatabase();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(META_STORE, 'readonly');
-      const store = tx.objectStore(META_STORE);
-      const req = store.get(key);
-      req.onsuccess = () => resolve(req.result?.value);
-      req.onerror = () => reject(req.error);
-    });
+    const database = await this.getDatabase();
+    const entry = await promisifyRequest<{ key: string; value: T } | undefined>(
+      database
+        .transaction(META_STORE, 'readonly')
+        .objectStore(META_STORE)
+        .get(key),
+    );
+    return entry?.value;
   }
 
   /**
@@ -142,14 +144,13 @@ export class Storage {
    * @param value - The value to store.
    */
   async setMeta(key: string, value: unknown): Promise<void> {
-    const db = await this.getDatabase();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(META_STORE, 'readwrite');
-      const store = tx.objectStore(META_STORE);
-      const req = store.put({ key, value });
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
-    });
+    const database = await this.getDatabase();
+    await promisifyRequest(
+      database
+        .transaction(META_STORE, 'readwrite')
+        .objectStore(META_STORE)
+        .put({ key, value }),
+    );
   }
 
   /**
@@ -158,14 +159,13 @@ export class Storage {
    * @param key - The metadata key identifier.
    */
   async deleteMeta(key: string): Promise<void> {
-    const db = await this.getDatabase();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(META_STORE, 'readwrite');
-      const store = tx.objectStore(META_STORE);
-      const req = store.delete(key);
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
-    });
+    const database = await this.getDatabase();
+    await promisifyRequest(
+      database
+        .transaction(META_STORE, 'readwrite')
+        .objectStore(META_STORE)
+        .delete(key),
+    );
   }
 
   /**
@@ -181,14 +181,13 @@ export class Storage {
     id: string,
   ): Promise<StoredRecord<T> | undefined> {
     await this.ensureTable(tableName);
-    const db = await this.getDatabase();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(tableName, 'readonly');
-      const store = tx.objectStore(tableName);
-      const req = store.get(id);
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-    });
+    const database = await this.getDatabase();
+    return promisifyRequest<StoredRecord<T> | undefined>(
+      database
+        .transaction(tableName, 'readonly')
+        .objectStore(tableName)
+        .get(id),
+    );
   }
 
   /**
@@ -205,25 +204,20 @@ export class Storage {
   ): Promise<Map<string, StoredRecord<T>>> {
     if (ids.length === 0) return new Map();
     await this.ensureTable(tableName);
-    const db = await this.getDatabase();
-
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(tableName, 'readonly');
-      const store = tx.objectStore(tableName);
-      const results = new Map<string, StoredRecord<T>>();
-
-      for (const id of ids) {
-        const req = store.get(id);
-        req.onsuccess = () => {
-          if (req.result) {
-            results.set(id, req.result);
-          }
-        };
-      }
-
-      tx.oncomplete = () => resolve(results);
-      tx.onerror = () => reject(tx.error);
-    });
+    const database = await this.getDatabase();
+    const tx = database.transaction(tableName, 'readonly');
+    const store = tx.objectStore(tableName);
+    const results = new Map<string, StoredRecord<T>>();
+    for (const id of ids) {
+      const request = store.get(id);
+      request.onsuccess = () => {
+        if (request.result) {
+          results.set(id, request.result);
+        }
+      };
+    }
+    await promisifyTransaction(tx);
+    return results;
   }
 
   /**
@@ -237,14 +231,14 @@ export class Storage {
     tableName: string,
   ): Promise<StoredRecord<T>[]> {
     await this.ensureTable(tableName);
-    const db = await this.getDatabase();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(tableName, 'readonly');
-      const store = tx.objectStore(tableName);
-      const req = store.getAll();
-      req.onsuccess = () => resolve(req.result ?? []);
-      req.onerror = () => reject(req.error);
-    });
+    const database = await this.getDatabase();
+    const records = await promisifyRequest<StoredRecord<T>[]>(
+      database
+        .transaction(tableName, 'readonly')
+        .objectStore(tableName)
+        .getAll(),
+    );
+    return records ?? [];
   }
 
   /**
@@ -262,44 +256,35 @@ export class Storage {
   ): Promise<StoredRecord<T>[]> {
     if (mutations.length === 0) return [];
     await this.ensureTable(tableName);
-    const db = await this.getDatabase();
-
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction([tableName, OUTBOX_STORE], 'readwrite');
-      const dataStore = tx.objectStore(tableName);
-      const outboxStore = tx.objectStore(OUTBOX_STORE);
-      const records: StoredRecord<T>[] = [];
-      const now = Date.now();
-
-      for (const item of mutations) {
-        const isDelete = item.op === OperationType.Delete;
-        const record: StoredRecord<T> = {
-          id: item.id,
-          data: (item.data ?? null) as T,
-          timestamp: item.change.timestamp,
-          version: item.change.version ?? 1,
-          deleted: isDelete,
-        };
-
-        if (isDelete) {
-          dataStore.delete(item.id);
-        } else {
-          dataStore.put(record);
-        }
-
-        outboxStore.add({
-          change: item.change,
-          createdAt: now,
-        });
-        records.push(record);
-      }
-
-      tx.oncomplete = () => {
-        this.onLocalChange.publish();
-        resolve(records);
+    const database = await this.getDatabase();
+    const tx = database.transaction([tableName, OUTBOX_STORE], 'readwrite');
+    const dataStore = tx.objectStore(tableName);
+    const outboxStore = tx.objectStore(OUTBOX_STORE);
+    const records: StoredRecord<T>[] = [];
+    const now = Date.now();
+    for (const item of mutations) {
+      const isDelete = item.op === OperationType.Delete;
+      const record: StoredRecord<T> = {
+        id: item.id,
+        data: (item.data ?? null) as T,
+        timestamp: item.change.timestamp,
+        version: item.change.version ?? 1,
+        deleted: isDelete,
       };
-      tx.onerror = () => reject(tx.error);
-    });
+      if (isDelete) {
+        dataStore.delete(item.id);
+      } else {
+        dataStore.put(record);
+      }
+      outboxStore.add({
+        change: item.change,
+        createdAt: now,
+      });
+      records.push(record);
+    }
+    await promisifyTransaction(tx);
+    this.onLocalChange.publish();
+    return records;
   }
 
   /**
@@ -309,14 +294,13 @@ export class Storage {
    * @returns Array of pending outbox queue items.
    */
   async getPendingOutbox(limit?: number): Promise<OutboxEntry[]> {
-    const db = await this.getDatabase();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(OUTBOX_STORE, 'readonly');
-      const store = tx.objectStore(OUTBOX_STORE);
-      const req = limit ? store.getAll(null, limit) : store.getAll();
-      req.onsuccess = () => resolve(req.result ?? []);
-      req.onerror = () => reject(req.error);
-    });
+    const database = await this.getDatabase();
+    const store = database
+      .transaction(OUTBOX_STORE, 'readonly')
+      .objectStore(OUTBOX_STORE);
+    const req = limit ? store.getAll(null, limit) : store.getAll();
+    const results = await promisifyRequest<OutboxEntry[]>(req);
+    return results ?? [];
   }
 
   /**
@@ -326,16 +310,13 @@ export class Storage {
    */
   async removeOutboxEntries(localIds: number[]): Promise<void> {
     if (localIds.length === 0) return;
-    const db = await this.getDatabase();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(OUTBOX_STORE, 'readwrite');
-      const store = tx.objectStore(OUTBOX_STORE);
-      for (const id of localIds) {
-        store.delete(id);
-      }
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
+    const database = await this.getDatabase();
+    const tx = database.transaction(OUTBOX_STORE, 'readwrite');
+    const store = tx.objectStore(OUTBOX_STORE);
+    for (const id of localIds) {
+      store.delete(id);
+    }
+    await promisifyTransaction(tx);
   }
 
   /**
@@ -345,55 +326,10 @@ export class Storage {
    * @param seq - Global sequence number corresponding to this snapshot.
    */
   async applySnapshotBatch(
-    snapshot: Array<{
-      table: string;
-      id: string;
-      data: unknown;
-      timestamp: number;
-      version: number;
-      deleted?: boolean;
-    }>,
+    snapshot: SnapshotRecord[],
     seq: number,
   ): Promise<void> {
-    const tablesInSnapshot = Array.from(
-      new Set(snapshot.map((item) => item.table)),
-    ).filter(Boolean);
-    await this.ensureTables(tablesInSnapshot);
-    const db = await this.getDatabase();
-
-    return new Promise((resolve, reject) => {
-      const txStores = [...tablesInSnapshot, META_STORE];
-      const tx = db.transaction(txStores, 'readwrite');
-
-      const tableObjects = new Map<string, IDBObjectStore>();
-      for (const t of tablesInSnapshot) {
-        tableObjects.set(t, tx.objectStore(t));
-      }
-
-      for (const item of snapshot) {
-        const objStore = tableObjects.get(item.table);
-        if (objStore) {
-          if (item.deleted) {
-            objStore.delete(item.id);
-          } else {
-            const record: StoredRecord = {
-              id: item.id,
-              data: item.data,
-              timestamp: item.timestamp,
-              version: item.version,
-            };
-            objStore.put(record);
-          }
-        }
-      }
-
-      const metaStore = tx.objectStore(META_STORE);
-      metaStore.put({ key: 'lastSyncSeq', value: seq });
-      metaStore.put({ key: 'lastSyncTimestamp', value: Date.now() });
-
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
+    await this.applyBatchRecords(snapshot, seq);
   }
 
   /**
@@ -412,46 +348,17 @@ export class Storage {
       return;
     }
 
-    const tablesInChanges = Array.from(
-      new Set(changes.map((c) => c.table)),
-    ).filter(Boolean);
-    await this.ensureTables(tablesInChanges);
-    const db = await this.getDatabase();
+    const records: SnapshotRecord[] = changes.map((change) => ({
+      table: change.table,
+      id: change.id,
+      data: change.data,
+      timestamp: change.timestamp,
+      version: change.version ?? 1,
+      deleted: change.op === OperationType.Delete,
+      clientId: change.clientId,
+    }));
 
-    return new Promise((resolve, reject) => {
-      const txStores = [...tablesInChanges, META_STORE];
-      const tx = db.transaction(txStores, 'readwrite');
-
-      const tableObjects = new Map<string, IDBObjectStore>();
-      for (const t of tablesInChanges) {
-        tableObjects.set(t, tx.objectStore(t));
-      }
-
-      for (const change of changes) {
-        const objStore = tableObjects.get(change.table);
-        if (objStore) {
-          const isDelete = change.op === OperationType.Delete;
-          if (isDelete) {
-            objStore.delete(change.id);
-          } else {
-            const record: StoredRecord = {
-              id: change.id,
-              data: change.data,
-              timestamp: change.timestamp,
-              version: change.version ?? 1,
-            };
-            objStore.put(record);
-          }
-        }
-      }
-
-      const metaStore = tx.objectStore(META_STORE);
-      metaStore.put({ key: 'lastSyncSeq', value: seq });
-      metaStore.put({ key: 'lastSyncTimestamp', value: Date.now() });
-
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
+    await this.applyBatchRecords(records, seq);
   }
 
   /**
@@ -466,16 +373,7 @@ export class Storage {
       if (name === OUTBOX_STORE && !clearOutbox) return false;
       return true;
     });
-    if (storeNames.length === 0) return;
-
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(storeNames, 'readwrite');
-      for (const name of storeNames) {
-        tx.objectStore(name).clear();
-      }
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
+    await this.clearStores(db, storeNames);
   }
 
   /**
@@ -483,17 +381,7 @@ export class Storage {
    */
   async clearAllData(): Promise<void> {
     const db = await this.getDatabase();
-    const storeNames = Array.from(db.objectStoreNames);
-    if (storeNames.length === 0) return;
-
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(storeNames, 'readwrite');
-      for (const name of storeNames) {
-        tx.objectStore(name).clear();
-      }
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
+    await this.clearStores(db, Array.from(db.objectStoreNames));
   }
 
   /**
@@ -509,27 +397,74 @@ export class Storage {
 
   // -- Private Helpers ------------------------------------------------------
 
+  private async applyBatchRecords(
+    records: SnapshotRecord[],
+    seq: number,
+  ): Promise<void> {
+    const tableNames = Array.from(
+      new Set(records.map((item) => item.table)),
+    ).filter(Boolean);
+    await this.ensureTables(tableNames);
+    const database = await this.getDatabase();
+    const tx = database.transaction([...tableNames, META_STORE], 'readwrite');
+    const tableStores = new Map<string, IDBObjectStore>();
+    for (const name of tableNames) {
+      tableStores.set(name, tx.objectStore(name));
+    }
+    for (const item of records) {
+      const store = tableStores.get(item.table);
+      if (store) {
+        if (item.deleted) {
+          store.delete(item.id);
+        } else {
+          const record: StoredRecord = {
+            id: item.id,
+            data: item.data,
+            timestamp: item.timestamp,
+            version: item.version ?? 1,
+          };
+          store.put(record);
+        }
+      }
+    }
+    const metaStore = tx.objectStore(META_STORE);
+    metaStore.put({ key: 'lastSyncSeq', value: seq });
+    metaStore.put({ key: 'lastSyncTimestamp', value: Date.now() });
+    await promisifyTransaction(tx);
+  }
+
+  private async clearStores(
+    database: IDBDatabase,
+    storeNames: string[],
+  ): Promise<void> {
+    if (storeNames.length === 0) return;
+    const tx = database.transaction(storeNames, 'readwrite');
+    for (const name of storeNames) {
+      tx.objectStore(name).clear();
+    }
+    await promisifyTransaction(tx);
+  }
+
   private async openDatabase(): Promise<IDBDatabase> {
     return new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open(this.name);
-
       request.onupgradeneeded = () => {
         this.createInternalStores(request.result);
       };
-
       request.onsuccess = () => {
-        const db = request.result;
+        const database = request.result;
         if (
-          !db.objectStoreNames.contains(OUTBOX_STORE) ||
-          !db.objectStoreNames.contains(META_STORE)
+          !database.objectStoreNames.contains(OUTBOX_STORE) ||
+          !database.objectStoreNames.contains(META_STORE)
         ) {
-          const nextVersion = db.version + 1;
-          this.upgradeDatabase(db, nextVersion, []).then(resolve).catch(reject);
+          const nextVersion = database.version + 1;
+          this.upgradeDatabase(database, nextVersion, [])
+            .then(resolve)
+            .catch(reject);
         } else {
-          resolve(db);
+          resolve(database);
         }
       };
-
       request.onerror = () => reject(request.error);
     });
   }
@@ -542,17 +477,15 @@ export class Storage {
     currentDb.close();
     return new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open(this.name, nextVersion);
-
       request.onupgradeneeded = () => {
-        const db = request.result;
-        this.createInternalStores(db);
+        const database = request.result;
+        this.createInternalStores(database);
         for (const tableName of newTables) {
-          if (!db.objectStoreNames.contains(tableName)) {
-            db.createObjectStore(tableName, { keyPath: 'id' });
+          if (!database.objectStoreNames.contains(tableName)) {
+            database.createObjectStore(tableName, { keyPath: 'id' });
           }
         }
       };
-
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -569,4 +502,21 @@ export class Storage {
       db.createObjectStore(META_STORE, { keyPath: 'key' });
     }
   }
+}
+
+// -- Standalone Internal Utilities ------------------------------------------
+
+function promisifyRequest<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function promisifyTransaction(tx: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new Error('Transaction aborted'));
+  });
 }
