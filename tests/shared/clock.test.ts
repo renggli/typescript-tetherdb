@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { shouldOverwrite } from '../../../src/server/shared/clock.js';
+import { shouldOverwrite } from '../../src/shared/clock.js';
 
-describe('src/server/shared/clock.ts', () => {
+describe('src/shared/clock.ts', () => {
   describe('shouldOverwrite', () => {
     it('should overwrite when no existing record exists', () => {
       expect(

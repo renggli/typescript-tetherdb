@@ -1,3 +1,4 @@
+import { shouldOverwrite } from '../shared/clock.js';
 import {
   type ChangeRecord,
   OperationType,
@@ -54,6 +55,7 @@ export class Storage {
   /** Reactive event registry triggered when mutations are committed to the local database. */
   readonly onLocalChange = new EventRegistry<void>();
   private databasePromise: Promise<IDBDatabase> | null = null;
+  private schemaMutex: Promise<void> = Promise.resolve();
   private tables: Map<string, Table<unknown>> = new Map();
 
   /**
@@ -100,14 +102,21 @@ export class Storage {
    * @param tableNames - Array of table names to ensure.
    */
   async ensureTables(tableNames: string[]): Promise<void> {
-    const database = await this.getDatabase();
-    const missing = tableNames.filter(
-      (s) => !database.objectStoreNames.contains(s),
-    );
-    if (missing.length === 0) return;
-    const nextVersion = database.version + 1;
-    this.databasePromise = this.upgradeDatabase(database, nextVersion, missing);
-    await this.databasePromise;
+    this.schemaMutex = this.schemaMutex.then(async () => {
+      const database = await this.getDatabase();
+      const missing = tableNames.filter(
+        (s) => !database.objectStoreNames.contains(s),
+      );
+      if (missing.length === 0) return;
+      const nextVersion = database.version + 1;
+      this.databasePromise = this.upgradeDatabase(
+        database,
+        nextVersion,
+        missing,
+      );
+      await this.databasePromise;
+    });
+    return this.schemaMutex;
   }
 
   /**
@@ -127,14 +136,17 @@ export class Storage {
    * @returns The stored metadata value, or `undefined` if not set.
    */
   async getMeta<T = unknown>(key: string): Promise<T | undefined> {
-    const database = await this.getDatabase();
-    const entry = await promisifyRequest<{ key: string; value: T } | undefined>(
-      database
-        .transaction(META_STORE, 'readonly')
-        .objectStore(META_STORE)
-        .get(key),
-    );
-    return entry?.value;
+    return this.withDatabase(async (database) => {
+      const entry = await promisifyRequest<
+        { key: string; value: T } | undefined
+      >(
+        database
+          .transaction(META_STORE, 'readonly')
+          .objectStore(META_STORE)
+          .get(key),
+      );
+      return entry?.value;
+    });
   }
 
   /**
@@ -144,13 +156,14 @@ export class Storage {
    * @param value - The value to store.
    */
   async setMeta(key: string, value: unknown): Promise<void> {
-    const database = await this.getDatabase();
-    await promisifyRequest(
-      database
-        .transaction(META_STORE, 'readwrite')
-        .objectStore(META_STORE)
-        .put({ key, value }),
-    );
+    return this.withDatabase(async (database) => {
+      await promisifyRequest(
+        database
+          .transaction(META_STORE, 'readwrite')
+          .objectStore(META_STORE)
+          .put({ key, value }),
+      );
+    });
   }
 
   /**
@@ -159,13 +172,14 @@ export class Storage {
    * @param key - The metadata key identifier.
    */
   async deleteMeta(key: string): Promise<void> {
-    const database = await this.getDatabase();
-    await promisifyRequest(
-      database
-        .transaction(META_STORE, 'readwrite')
-        .objectStore(META_STORE)
-        .delete(key),
-    );
+    return this.withDatabase(async (database) => {
+      await promisifyRequest(
+        database
+          .transaction(META_STORE, 'readwrite')
+          .objectStore(META_STORE)
+          .delete(key),
+      );
+    });
   }
 
   /**
@@ -181,13 +195,14 @@ export class Storage {
     id: string,
   ): Promise<StoredRecord<T> | undefined> {
     await this.ensureTable(tableName);
-    const database = await this.getDatabase();
-    return promisifyRequest<StoredRecord<T> | undefined>(
-      database
-        .transaction(tableName, 'readonly')
-        .objectStore(tableName)
-        .get(id),
-    );
+    return this.withDatabase(async (database) => {
+      return promisifyRequest<StoredRecord<T> | undefined>(
+        database
+          .transaction(tableName, 'readonly')
+          .objectStore(tableName)
+          .get(id),
+      );
+    });
   }
 
   /**
@@ -204,20 +219,21 @@ export class Storage {
   ): Promise<Map<string, StoredRecord<T>>> {
     if (ids.length === 0) return new Map();
     await this.ensureTable(tableName);
-    const database = await this.getDatabase();
-    const tx = database.transaction(tableName, 'readonly');
-    const store = tx.objectStore(tableName);
-    const results = new Map<string, StoredRecord<T>>();
-    for (const id of ids) {
-      const request = store.get(id);
-      request.onsuccess = () => {
-        if (request.result) {
-          results.set(id, request.result);
-        }
-      };
-    }
-    await promisifyTransaction(tx);
-    return results;
+    return this.withDatabase(async (database) => {
+      const tx = database.transaction(tableName, 'readonly');
+      const store = tx.objectStore(tableName);
+      const results = new Map<string, StoredRecord<T>>();
+      for (const id of ids) {
+        const request = store.get(id);
+        request.onsuccess = () => {
+          if (request.result) {
+            results.set(id, request.result);
+          }
+        };
+      }
+      await promisifyTransaction(tx);
+      return results;
+    });
   }
 
   /**
@@ -231,14 +247,15 @@ export class Storage {
     tableName: string,
   ): Promise<StoredRecord<T>[]> {
     await this.ensureTable(tableName);
-    const database = await this.getDatabase();
-    const records = await promisifyRequest<StoredRecord<T>[]>(
-      database
-        .transaction(tableName, 'readonly')
-        .objectStore(tableName)
-        .getAll(),
-    );
-    return records ?? [];
+    return this.withDatabase(async (database) => {
+      const records = await promisifyRequest<StoredRecord<T>[]>(
+        database
+          .transaction(tableName, 'readonly')
+          .objectStore(tableName)
+          .getAll(),
+      );
+      return records ?? [];
+    });
   }
 
   /**
@@ -256,35 +273,37 @@ export class Storage {
   ): Promise<StoredRecord<T>[]> {
     if (mutations.length === 0) return [];
     await this.ensureTable(tableName);
-    const database = await this.getDatabase();
-    const tx = database.transaction([tableName, OUTBOX_STORE], 'readwrite');
-    const dataStore = tx.objectStore(tableName);
-    const outboxStore = tx.objectStore(OUTBOX_STORE);
-    const records: StoredRecord<T>[] = [];
-    const now = Date.now();
-    for (const item of mutations) {
-      const isDelete = item.op === OperationType.Delete;
-      const record: StoredRecord<T> = {
-        id: item.id,
-        data: (item.data ?? null) as T,
-        timestamp: item.change.timestamp,
-        version: item.change.version ?? 1,
-        deleted: isDelete,
-      };
-      if (isDelete) {
-        dataStore.delete(item.id);
-      } else {
-        dataStore.put(record);
+    return this.withDatabase(async (database) => {
+      const tx = database.transaction([tableName, OUTBOX_STORE], 'readwrite');
+      const dataStore = tx.objectStore(tableName);
+      const outboxStore = tx.objectStore(OUTBOX_STORE);
+      const records: StoredRecord<T>[] = [];
+      const now = Date.now();
+      for (const item of mutations) {
+        const isDelete = item.op === OperationType.Delete;
+        const record: StoredRecord<T> = {
+          id: item.id,
+          data: (item.data ?? null) as T,
+          timestamp: item.change.timestamp,
+          version: item.change.version ?? 1,
+          clientId: item.change.clientId,
+          deleted: isDelete,
+        };
+        if (isDelete) {
+          dataStore.delete(item.id);
+        } else {
+          dataStore.put(record);
+        }
+        outboxStore.add({
+          change: item.change,
+          createdAt: now,
+        });
+        records.push(record);
       }
-      outboxStore.add({
-        change: item.change,
-        createdAt: now,
-      });
-      records.push(record);
-    }
-    await promisifyTransaction(tx);
-    this.onLocalChange.publish();
-    return records;
+      await promisifyTransaction(tx);
+      this.onLocalChange.publish();
+      return records;
+    });
   }
 
   /**
@@ -294,13 +313,14 @@ export class Storage {
    * @returns Array of pending outbox queue items.
    */
   async getPendingOutbox(limit?: number): Promise<OutboxEntry[]> {
-    const database = await this.getDatabase();
-    const store = database
-      .transaction(OUTBOX_STORE, 'readonly')
-      .objectStore(OUTBOX_STORE);
-    const req = limit ? store.getAll(null, limit) : store.getAll();
-    const results = await promisifyRequest<OutboxEntry[]>(req);
-    return results ?? [];
+    return this.withDatabase(async (database) => {
+      const store = database
+        .transaction(OUTBOX_STORE, 'readonly')
+        .objectStore(OUTBOX_STORE);
+      const req = limit ? store.getAll(null, limit) : store.getAll();
+      const results = await promisifyRequest<OutboxEntry[]>(req);
+      return results ?? [];
+    });
   }
 
   /**
@@ -310,13 +330,14 @@ export class Storage {
    */
   async removeOutboxEntries(localIds: number[]): Promise<void> {
     if (localIds.length === 0) return;
-    const database = await this.getDatabase();
-    const tx = database.transaction(OUTBOX_STORE, 'readwrite');
-    const store = tx.objectStore(OUTBOX_STORE);
-    for (const id of localIds) {
-      store.delete(id);
-    }
-    await promisifyTransaction(tx);
+    return this.withDatabase(async (database) => {
+      const tx = database.transaction(OUTBOX_STORE, 'readwrite');
+      const store = tx.objectStore(OUTBOX_STORE);
+      for (const id of localIds) {
+        store.delete(id);
+      }
+      await promisifyTransaction(tx);
+    });
   }
 
   /**
@@ -367,21 +388,23 @@ export class Storage {
    * @param clearOutbox - Whether to clear the pending outbox queue as well (defaults to `true`).
    */
   async clearTables(clearOutbox = true): Promise<void> {
-    const db = await this.getDatabase();
-    const storeNames = Array.from(db.objectStoreNames).filter((name) => {
-      if (name === META_STORE) return false;
-      if (name === OUTBOX_STORE && !clearOutbox) return false;
-      return true;
+    return this.withDatabase(async (db) => {
+      const storeNames = Array.from(db.objectStoreNames).filter((name) => {
+        if (name === META_STORE) return false;
+        if (name === OUTBOX_STORE && !clearOutbox) return false;
+        return true;
+      });
+      await this.clearStores(db, storeNames);
     });
-    await this.clearStores(db, storeNames);
   }
 
   /**
    * Clears all local table stores, outbox changelog entries, and metadata.
    */
   async clearAllData(): Promise<void> {
-    const db = await this.getDatabase();
-    await this.clearStores(db, Array.from(db.objectStoreNames));
+    return this.withDatabase(async (db) => {
+      await this.clearStores(db, Array.from(db.objectStoreNames));
+    });
   }
 
   /**
@@ -397,40 +420,67 @@ export class Storage {
 
   // -- Private Helpers ------------------------------------------------------
 
+  private async withDatabase<R>(
+    fn: (db: IDBDatabase) => Promise<R>,
+  ): Promise<R> {
+    return this.schemaMutex.then(async () => {
+      const db = await this.getDatabase();
+      return fn(db);
+    });
+  }
+
   private async applyBatchRecords(
     records: SnapshotRecord[],
     seq: number,
   ): Promise<void> {
+    if (records.length === 0) {
+      await this.setMeta('lastSyncSeq', seq);
+      return;
+    }
+
     const tableNames = Array.from(
       new Set(records.map((item) => item.table)),
     ).filter(Boolean);
     await this.ensureTables(tableNames);
-    const database = await this.getDatabase();
-    const tx = database.transaction([...tableNames, META_STORE], 'readwrite');
-    const tableStores = new Map<string, IDBObjectStore>();
+
+    // Read existing records across all affected tables
+    const existingRecords = new Map<string, Map<string, StoredRecord>>();
     for (const name of tableNames) {
-      tableStores.set(name, tx.objectStore(name));
+      const tableItems = records.filter((r) => r.table === name);
+      const ids = tableItems.map((r) => r.id);
+      const map = await this.getRecords(name, ids);
+      existingRecords.set(name, map);
     }
-    for (const item of records) {
-      const store = tableStores.get(item.table);
-      if (store) {
-        if (item.deleted) {
-          store.delete(item.id);
-        } else {
-          const record: StoredRecord = {
-            id: item.id,
-            data: item.data,
-            timestamp: item.timestamp,
-            version: item.version ?? 1,
-          };
-          store.put(record);
+
+    await this.withDatabase(async (database) => {
+      const tx = database.transaction([...tableNames, META_STORE], 'readwrite');
+      const tableStores = new Map<string, IDBObjectStore>();
+      for (const name of tableNames) {
+        tableStores.set(name, tx.objectStore(name));
+      }
+      for (const item of records) {
+        const store = tableStores.get(item.table);
+        const existing = existingRecords.get(item.table)?.get(item.id);
+        if (store && (!existing || shouldOverwrite(item, existing))) {
+          if (item.deleted) {
+            store.delete(item.id);
+          } else {
+            const record: StoredRecord = {
+              id: item.id,
+              data: item.data,
+              timestamp: item.timestamp,
+              version: item.version ?? 1,
+              clientId: item.clientId,
+            };
+            store.put(record);
+          }
         }
       }
-    }
-    const metaStore = tx.objectStore(META_STORE);
-    metaStore.put({ key: 'lastSyncSeq', value: seq });
-    metaStore.put({ key: 'lastSyncTimestamp', value: Date.now() });
-    await promisifyTransaction(tx);
+      const metaStore = tx.objectStore(META_STORE);
+      metaStore.put({ key: 'lastSyncSeq', value: seq });
+      metaStore.put({ key: 'lastSyncTimestamp', value: Date.now() });
+      await promisifyTransaction(tx);
+    });
   }
 
   private async clearStores(
@@ -504,19 +554,18 @@ export class Storage {
   }
 }
 
-// -- Standalone Internal Utilities ------------------------------------------
-
 function promisifyRequest<T>(request: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
+  return new Promise<T>((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
 }
 
 function promisifyTransaction(tx: IDBTransaction): Promise<void> {
-  return new Promise((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error ?? new Error('Transaction aborted'));
+    tx.onabort = () =>
+      reject(tx.error ?? new Error('IndexedDB transaction aborted'));
   });
 }
