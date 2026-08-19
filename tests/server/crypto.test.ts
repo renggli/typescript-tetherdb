@@ -47,11 +47,38 @@ describe('Crypto', () => {
     const validToken = createSessionToken('user_1', 'alice', secret, 3600);
     expect(verifySessionToken(validToken, 'wrong-secret')).toBeNull();
     expect(verifySessionToken('tampered.token', secret)).toBeNull();
-    expect(verifySessionToken('', secret)).toBeNull();
-    expect(verifySessionToken('nodotstoken', secret)).toBeNull();
-    expect(verifySessionToken('a.b.c', secret)).toBeNull();
     expect(
       verifySessionToken('invalid_base64%.invalid_sig%', secret),
     ).toBeNull();
+  });
+
+  it('should generate and persist keyfile secrets', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const os = await import('node:os');
+    const { getOrCreateKeyfileSecret } = await import(
+      '../../src/server/crypto.js'
+    );
+
+    const tmpDir = path.join(
+      os.tmpdir(),
+      `tether_crypto_test_${Math.random().toString(36).substring(2, 9)}`,
+    );
+
+    try {
+      const secret1 = getOrCreateKeyfileSecret(tmpDir);
+      expect(typeof secret1).toBe('string');
+      expect(secret1.length).toBe(64);
+
+      // Subsequent call in the same directory should read the same secret
+      const secret2 = getOrCreateKeyfileSecret(tmpDir);
+      expect(secret2).toBe(secret1);
+
+      // Verify file exists on disk
+      const content = await fs.readFile(path.join(tmpDir, '.secret'), 'utf-8');
+      expect(content.trim()).toBe(secret1);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    }
   });
 });

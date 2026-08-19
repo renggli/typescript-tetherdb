@@ -536,5 +536,115 @@ describe.each(storageDescriptors)(
       const finalRecords = (await serverStream?.getAllRecords(user)) ?? [];
       expect(finalRecords).toHaveLength(totalWrites);
     }, 30000);
+
+    it('should handle many concurrent users registering, logging in, and performing table operations simultaneously', async () => {
+      const userCount = 20;
+      const recordsPerUser = 25;
+      const userCredentials = Array.from({ length: userCount }, (_, i) => ({
+        username: `stress_u_${i}_${Math.random().toString(36).substring(2, 6)}`,
+        password: `stress_pass_${i}`,
+      }));
+
+      // 1. Concurrent Account Creation
+      const userClients: TetherClient[] = [];
+      const registerPromises = userCredentials.map(async (cred, idx) => {
+        const client = createClient(`user-client-${idx}`);
+        userClients.push(client);
+        const registered = await client.register({
+          username: cred.username,
+          password: cred.password,
+          dataMode: DataMode.Local,
+        });
+        expect(registered).toBe(true);
+        expect(client.authStatus).toBe(client.authStatus);
+        return client;
+      });
+
+      await Promise.all(registerPromises);
+
+      // 2. Concurrent Table Writes across all users
+      const writePromises = userClients.map(async (client, userIdx) => {
+        const table = client.table<{
+          userIdx: number;
+          itemIdx: number;
+          note: string;
+        }>('records');
+        const entries = Array.from(
+          { length: recordsPerUser },
+          (_, itemIdx) => ({
+            id: `item-${itemIdx}`,
+            data: {
+              userIdx,
+              itemIdx,
+              note: `Secret note for user ${userIdx} item ${itemIdx}`,
+            },
+          }),
+        );
+        await table.putAll(entries);
+      });
+
+      await Promise.all(writePromises);
+
+      // 3. Verify Local Data Isolation and Immediate Reads
+      for (const [userIdx, client] of userClients.entries()) {
+        const table = client.table<{
+          userIdx: number;
+          itemIdx: number;
+          note: string;
+        }>('records');
+        const records = await table.getAll();
+        expect(records).toHaveLength(recordsPerUser);
+        for (const record of records) {
+          expect(record.userIdx).toBe(userIdx);
+        }
+      }
+
+      // 4. Verify Server-Side Sync Convergence for All Concurrent Users
+      const stressApp = await server.storage.getApp('stress-app');
+      const serverTable = await stressApp?.getTable('records');
+
+      await waitForCondition(async () => {
+        for (const cred of userCredentials) {
+          const serverUser = await server.storage.getUserByUsername(
+            cred.username,
+          );
+          if (!serverUser) return false;
+          const serverRecords =
+            (await serverTable?.getAllRecords(serverUser)) ?? [];
+          if (serverRecords.length !== recordsPerUser) return false;
+        }
+        return true;
+      }, 25000);
+
+      // 5. Concurrent Logout and Re-Login
+      const loginPromises = userClients.map(async (client, idx) => {
+        const cred = userCredentials[idx];
+        await client.logout({ dataMode: DataMode.Clear });
+        expect(client.authStatus).toBe(0 /* SignedOut */);
+
+        const loggedIn = await client.login({
+          username: cred.username,
+          password: cred.password,
+          dataMode: DataMode.Remote,
+        });
+        expect(loggedIn).toBe(true);
+      });
+
+      await Promise.all(loginPromises);
+
+      // 6. Verify Remote Snapshot Restoration after Re-login
+      await waitForCondition(async () => {
+        for (const client of userClients) {
+          const table = client.table<{
+            userIdx: number;
+            itemIdx: number;
+            note: string;
+          }>('records');
+          const records = await table.getAll();
+          if (records.length !== recordsPerUser) return false;
+        }
+        return true;
+      }, 25000);
+    }, 45000);
   },
 );

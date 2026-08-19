@@ -268,16 +268,18 @@ describe('Sync', () => {
         userId: 'u1',
         token: 'new-sliding-token',
       });
+      await new Promise((r) => setTimeout(r, 20));
 
       expect(sync.status).toBe(SyncStatus.Connected);
       expect(tokenRefreshCallback).toHaveBeenCalledWith('new-sliding-token');
     });
 
-    it('should handle ServerMessageType.AuthError, disconnect, and call onAuthError', () => {
+    it('should handle ServerMessageType.AuthError, disconnect, and call onAuthError', async () => {
       ws.triggerMessage({
         type: ServerMessageType.AuthError,
         message: 'Invalid signature',
       });
+      await new Promise((r) => setTimeout(r, 20));
 
       expect(sync.status).toBe(SyncStatus.Disconnected);
       expect(authErrorCallback).toHaveBeenCalledWith('Invalid signature');
@@ -422,24 +424,27 @@ describe('Sync', () => {
       }
     });
 
-    it('should publish TetherClientError on onError for ServerMessageType.Error and Malformed JSON', () => {
+    it('should publish TetherClientError on onError for ServerMessageType.Error and Malformed JSON', async () => {
       const errors: TetherClientError[] = [];
       sync.onError.register((err) => errors.push(err));
 
       // Pong
       ws.triggerMessage({ type: ServerMessageType.Pong });
+      await new Promise((r) => setTimeout(r, 10));
 
       // Server error message
       ws.triggerMessage({
         type: ServerMessageType.Error,
         message: 'Something went wrong on server',
       });
+      await new Promise((r) => setTimeout(r, 20));
       expect(errors).toHaveLength(1);
       expect(errors[0].code).toBe(TetherClientErrorCode.SyncError);
       expect(errors[0].message).toBe('Something went wrong on server');
 
       // Malformed JSON string
       ws.onmessage?.({ data: '{ not valid json' });
+      await new Promise((r) => setTimeout(r, 20));
       expect(errors).toHaveLength(2);
       expect(errors[1].code).toBe(TetherClientErrorCode.SyncError);
 
@@ -447,6 +452,62 @@ describe('Sync', () => {
       ws.onerror?.(new Event('error') as unknown as ErrorEvent);
       expect(errors).toHaveLength(3);
       expect(errors[2].code).toBe(TetherClientErrorCode.NetworkError);
+    });
+
+    it('should process consecutive incoming messages sequentially in arrival order', async () => {
+      const table = storage.table<{ count: number }>('counters');
+
+      // Fire 3 server messages synchronously in the same event loop tick
+      ws.triggerMessage({
+        type: ServerMessageType.BroadcastChanges,
+        seq: 1,
+        changes: [
+          {
+            table: 'counters',
+            id: 'c1',
+            op: OperationType.Put,
+            data: { count: 1 },
+            timestamp: 100,
+            clientId: 'server',
+          },
+        ],
+      });
+
+      ws.triggerMessage({
+        type: ServerMessageType.BroadcastChanges,
+        seq: 2,
+        changes: [
+          {
+            table: 'counters',
+            id: 'c1',
+            op: OperationType.Put,
+            data: { count: 2 },
+            timestamp: 200,
+            clientId: 'server',
+          },
+        ],
+      });
+
+      ws.triggerMessage({
+        type: ServerMessageType.BroadcastChanges,
+        seq: 3,
+        changes: [
+          {
+            table: 'counters',
+            id: 'c1',
+            op: OperationType.Put,
+            data: { count: 3 },
+            timestamp: 300,
+            clientId: 'server',
+          },
+        ],
+      });
+
+      await new Promise((r) => setTimeout(r, 40));
+
+      const finalRecord = await table.get('c1');
+      expect(finalRecord).toEqual({ count: 3 });
+      expect(await storage.getMeta('lastSyncSeq')).toBe(3);
     });
   });
 
@@ -460,6 +521,7 @@ describe('Sync', () => {
       ws.triggerOpen();
       await new Promise((r) => setTimeout(r, 20));
       ws.triggerMessage({ type: ServerMessageType.AuthSuccess, userId: 'u1' });
+      await new Promise((r) => setTimeout(r, 20));
 
       const pushSpy = vi.spyOn(sync, 'pushOutbox');
 

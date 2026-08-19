@@ -11,6 +11,12 @@ describe('printHelp', () => {
     expect(logSpy).toHaveBeenCalledWith(
       expect.stringContaining('serve (default)'),
     );
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('status [appid]'),
+    );
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('maintenance checkpoint'),
+    );
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('apps [list]'));
     expect(logSpy).toHaveBeenCalledWith(
       expect.stringContaining('tables [list]'),

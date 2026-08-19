@@ -87,6 +87,7 @@ export class Sync {
   private isPushing = false;
   private isDestroyed = false;
   private pendingBatches: Map<string, number[]> = new Map(); // batchId -> localIds
+  private messageQueue: Promise<void> = Promise.resolve();
 
   /**
    * Creates a new Sync instance.
@@ -213,7 +214,18 @@ export class Sync {
             ? event.data
             : event.data.toString('utf8');
         const msg: ServerMessage = JSON.parse(raw);
-        this.handleServerMessage(msg);
+        this.messageQueue = this.messageQueue
+          .then(() => this.handleServerMessage(msg))
+          .catch((err) => {
+            this.onError.publish(
+              new TetherClientError(
+                TetherClientErrorCode.SyncError,
+                err instanceof Error
+                  ? err.message
+                  : 'Failed to process incoming WebSocket message.',
+              ),
+            );
+          });
       } catch (err) {
         this.onError.publish(
           new TetherClientError(
@@ -238,6 +250,7 @@ export class Sync {
     this.webSocket.onclose = (event) => {
       this.stopPing();
       this.pendingBatches.clear();
+      this.messageQueue = Promise.resolve();
       this.webSocket = null;
       if (!this.isDestroyed) {
         this.setStatus(SyncStatus.Disconnected);
@@ -254,6 +267,7 @@ export class Sync {
   disconnect(): void {
     this.stopPing();
     this.pendingBatches.clear();
+    this.messageQueue = Promise.resolve();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

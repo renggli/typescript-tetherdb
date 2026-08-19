@@ -11,6 +11,10 @@ Usage:
 
 Commands:
   serve (default)                         Start HTTP and WebSocket synchronization server
+  status [appid]                          Display storage and database statistics
+  maintenance checkpoint [appid]          Truncate WAL files for SQLite databases
+  maintenance vacuum [appid]              Reclaim disk space and defragment database files
+  maintenance prune [appid] [keepCount]   Prune changelogs older than retention threshold
   apps [list]                             List all applications
   apps add <appid>                        Register a new application
   apps rm <appid>                         Delete an application and its data

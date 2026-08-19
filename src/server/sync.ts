@@ -43,6 +43,13 @@ export class Sync {
   }
 
   /**
+   * Total number of currently active authenticated WebSocket client connections.
+   */
+  get connectedClientsCount(): number {
+    return this.webSocketToClient.size;
+  }
+
+  /**
    * Handles an incoming WebSocket connection, binding message, error, and disconnection events.
    *
    * @param webSocket - Active WebSocket connection.
@@ -337,8 +344,8 @@ export class Sync {
       const { changes, currentSeq, requiresSnapshot } =
         await app.getChangesSince(client.user, seq);
 
-      // If changelog was pruned OR diff is large (> 50 changes), deliver full snapshot for maximum efficiency
-      if (requiresSnapshot || changes.length > 50) {
+      // If changelog was pruned or compacted, deliver full snapshot
+      if (requiresSnapshot) {
         const tables = await app.getTables();
         const snapshot: SnapshotRecord[] = [];
         for (const table of tables) {

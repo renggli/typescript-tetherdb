@@ -1,4 +1,6 @@
 import * as crypto from 'node:crypto';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 /** Default token expiration window in seconds (7 days). */
 export const DEFAULT_TOKEN_EXPIRES_IN = 7 * 24 * 60 * 60;
@@ -10,6 +12,39 @@ const SCRYPT_OPTIONS: crypto.ScryptOptions = {
   p: 1,
   maxmem: 32 * 1024 * 1024,
 };
+
+/**
+ * Loads a persistent HMAC signing secret from `<baseDir>/.secret`, or generates and saves one
+ * with restricted permissions (`0o600`) if it does not yet exist.
+ *
+ * @param baseDir - Directory path where `.secret` is stored.
+ * @returns 64-character hex secret string.
+ */
+export function getOrCreateKeyfileSecret(baseDir: string): string {
+  const secretPath = path.join(baseDir, '.secret');
+  try {
+    if (fs.existsSync(secretPath)) {
+      const existing = fs.readFileSync(secretPath, 'utf-8').trim();
+      if (existing.length >= 32) {
+        return existing;
+      }
+    }
+  } catch {
+    // Ignore read error and fallback to creation
+  }
+
+  const generated = crypto.randomBytes(32).toString('hex');
+  try {
+    fs.mkdirSync(baseDir, { recursive: true });
+    fs.writeFileSync(secretPath, generated, {
+      encoding: 'utf-8',
+      mode: 0o600,
+    });
+  } catch {
+    // If writing fails, return generated in-memory secret
+  }
+  return generated;
+}
 
 /**
  * Hashes a plaintext password using standard scrypt key derivation.

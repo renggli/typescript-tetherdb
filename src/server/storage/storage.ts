@@ -18,6 +18,41 @@ export interface StorageOptions {
 }
 
 /**
+ * Summary status information describing the storage engine and its contents.
+ */
+export interface StorageStatus {
+  /** Storage persistence type ('sqlite', 'file', or 'memory'). */
+  backend: string;
+  /** Storage base directory if disk-backed. */
+  baseDir?: string;
+  /** Number of registered user accounts. */
+  usersCount: number;
+  /** Number of registered applications. */
+  appsCount: number;
+  /** Detailed statistics per application if queried or available. */
+  apps?: Array<{
+    id: string;
+    tables: string[];
+  }>;
+}
+
+/**
+ * Result returned by a storage maintenance operation.
+ */
+export interface MaintenanceResult {
+  /** Maintenance action performed ('checkpoint', 'vacuum', 'prune'). */
+  action: 'checkpoint' | 'vacuum' | 'prune';
+  /** Target backend name. */
+  backend: string;
+  /** Optional target application ID. */
+  appId?: string;
+  /** Number of entries or database files affected, if applicable. */
+  affectedCount?: number;
+  /** Human-readable status message. */
+  message: string;
+}
+
+/**
  * Top-level storage coordinator managing application namespaces and user accounts.
  */
 export interface Storage {
@@ -90,6 +125,41 @@ export interface Storage {
    * @returns Array of UserStorage handles.
    */
   getUsers(): Promise<UserStorage[]>;
+
+  /**
+   * Retrieves summary operational status of the storage backend.
+   *
+   * @param appId - Optional application identifier filter.
+   * @returns StorageStatus object.
+   */
+  getStatus(appId?: string): Promise<StorageStatus>;
+
+  /**
+   * Performs a WAL checkpoint on SQLite databases to truncate WAL files.
+   *
+   * @param appId - Optional target application identifier.
+   * @returns MaintenanceResult describing checkpoint outcome.
+   * @throws TetherServerError if checkpoint is not supported by this backend.
+   */
+  checkpoint(appId?: string): Promise<MaintenanceResult>;
+
+  /**
+   * Performs database vacuuming to reclaim disk space and defragment storage.
+   *
+   * @param appId - Optional target application identifier.
+   * @returns MaintenanceResult describing vacuum outcome.
+   * @throws TetherServerError if vacuum is not supported by this backend.
+   */
+  vacuum(appId?: string): Promise<MaintenanceResult>;
+
+  /**
+   * Prunes changelog history entries older than the retention threshold.
+   *
+   * @param appId - Optional target application identifier.
+   * @param keepCount - Optional maximum entries to retain per table/user (defaults to configured limit).
+   * @returns MaintenanceResult describing prune outcome.
+   */
+  prune(appId?: string, keepCount?: number): Promise<MaintenanceResult>;
 
   /**
    * Optional cleanup callback invoked when shutting down the storage engine.

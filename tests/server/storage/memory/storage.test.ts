@@ -111,4 +111,45 @@ describe('MemoryStorage', () => {
       await cleanup();
     }
   });
+
+  it('should support getStatus, prune and reject checkpoint/vacuum with NotSupported in memory', async () => {
+    const { backend, cleanup } = await memoryStorage.createBackend();
+    try {
+      const app = await backend.createApp('mem_app');
+      await app.createTable('records');
+      const user = await backend.createUser('mem_user', 'pass');
+
+      for (let i = 1; i <= 6; i++) {
+        const table = await app.getTable('records');
+        await table?.applyChanges(user, [
+          {
+            table: 'records',
+            id: `k_${i}`,
+            op: OperationType.Put,
+            data: { val: i },
+            timestamp: 100 + i,
+            clientId: 'c1',
+          },
+        ]);
+      }
+
+      const status = await backend.getStatus('mem_app');
+      expect(status.backend).toBe('memory');
+      expect(status.appsCount).toBe(1);
+      expect(status.apps?.[0].tables).toEqual(['records']);
+
+      const pruneRes = await backend.prune('mem_app', 2);
+      expect(pruneRes.action).toBe('prune');
+      expect(pruneRes.affectedCount).toBe(4);
+
+      await expect(backend.checkpoint()).rejects.toMatchObject({
+        code: TetherServerErrorCode.NotSupported,
+      });
+      await expect(backend.vacuum()).rejects.toMatchObject({
+        code: TetherServerErrorCode.NotSupported,
+      });
+    } finally {
+      await cleanup();
+    }
+  });
 });

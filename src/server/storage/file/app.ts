@@ -17,7 +17,7 @@ import {
 import type { AppStorage } from '../app.js';
 import type { TableStorage } from '../table.js';
 import type { UserStorage } from '../user.js';
-import type { FileStorage } from './storage.js';
+import { type FileStorage, writeFileAtomic } from './storage.js';
 import { TableFileStorage } from './table.js';
 
 export interface AppManifest {
@@ -89,12 +89,7 @@ export class AppFileStorage implements AppStorage {
   }
 
   private async writeManifest(manifest: AppManifest): Promise<void> {
-    await fs.mkdir(this.appDir, { recursive: true });
-    await fs.writeFile(
-      this.manifestFile,
-      JSON.stringify(manifest, null, 2),
-      'utf-8',
-    );
+    await writeFileAtomic(this.manifestFile, JSON.stringify(manifest, null, 2));
   }
 
   private async readUserMeta(userId: string): Promise<UserMeta> {
@@ -107,11 +102,9 @@ export class AppFileStorage implements AppStorage {
   }
 
   private async writeUserMeta(userId: string, meta: UserMeta): Promise<void> {
-    await fs.mkdir(this.getUserDir(userId), { recursive: true });
-    await fs.writeFile(
+    await writeFileAtomic(
       this.getUserMetaFile(userId),
       JSON.stringify(meta, null, 2),
-      'utf-8',
     );
   }
 
@@ -148,12 +141,11 @@ export class AppFileStorage implements AppStorage {
     userId: string,
     changes: Array<ChangeRecord & { seq: number }>,
   ): Promise<void> {
-    await fs.mkdir(this.getUserDir(userId), { recursive: true });
     const content =
       changes.length > 0
         ? `${changes.map((c) => JSON.stringify(c)).join('\n')}\n`
         : '';
-    await fs.writeFile(this.getUserSyncFile(userId), content, 'utf-8');
+    await writeFileAtomic(this.getUserSyncFile(userId), content);
   }
 
   private async readTableRecords(
@@ -181,11 +173,9 @@ export class AppFileStorage implements AppStorage {
     tableName: string,
     records: Map<string, StoredRecord>,
   ): Promise<void> {
-    await fs.mkdir(this.getUserTablesDir(userId), { recursive: true });
-    await fs.writeFile(
+    await writeFileAtomic(
       this.getUserTableFile(userId, tableName),
       JSON.stringify(Array.from(records.values()), null, 2),
-      'utf-8',
     );
   }
 

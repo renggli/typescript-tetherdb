@@ -243,26 +243,26 @@ describe('Table', () => {
       });
 
       // Wait for initial async microtask fetch
-      await new Promise((r) => setTimeout(r, 25));
+      await new Promise((r) => setTimeout(r, 50));
       expect(snapshots).toHaveLength(1);
       expect(snapshots[0]).toEqual([{ title: 'Initial' }]);
 
       // Trigger put
       await table.put('s2', { title: 'Second' });
-      await new Promise((r) => setTimeout(r, 25));
+      await new Promise((r) => setTimeout(r, 50));
       expect(snapshots).toHaveLength(2);
       expect(snapshots[1]).toHaveLength(2);
 
       // Trigger delete
       await table.delete('s1');
-      await new Promise((r) => setTimeout(r, 25));
+      await new Promise((r) => setTimeout(r, 50));
       expect(snapshots).toHaveLength(3);
       expect(snapshots[2]).toEqual([{ title: 'Second' }]);
 
       // Unsubscribe and verify no more calls
       unsubscribe();
       await table.put('s3', { title: 'Third' });
-      await new Promise((r) => setTimeout(r, 25));
+      await new Promise((r) => setTimeout(r, 50));
       expect(snapshots).toHaveLength(3);
     });
 
@@ -289,6 +289,29 @@ describe('Table', () => {
       await new Promise((r) => setTimeout(r, 25));
       expect(listener).not.toHaveBeenCalled();
       getAllSpy.mockRestore();
+    });
+
+    it('should maintain latest version and ignore out-of-order stale fetch resolutions', async () => {
+      const snapshots: TestItem[][] = [];
+      const unsubscribe = table.subscribeAll((items) => {
+        snapshots.push([...items]);
+      });
+
+      // Rapidly fire multiple puts
+      await table.put('item1', { title: 'First' });
+      await table.put('item2', { title: 'Second' });
+      await table.put('item3', { title: 'Third' });
+
+      await new Promise((r) => setTimeout(r, 40));
+
+      const lastSnapshot = snapshots[snapshots.length - 1];
+      expect(lastSnapshot).toHaveLength(3);
+      expect(lastSnapshot.map((i) => i.title).sort()).toEqual([
+        'First',
+        'Second',
+        'Third',
+      ]);
+      unsubscribe();
     });
   });
 

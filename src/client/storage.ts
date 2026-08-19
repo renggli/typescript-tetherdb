@@ -92,7 +92,10 @@ export class Storage {
    */
   async getDatabase(): Promise<IDBDatabase> {
     if (this.databasePromise) return this.databasePromise;
-    this.databasePromise = this.openDatabase();
+    this.databasePromise = this.openDatabase().catch((err) => {
+      this.databasePromise = null;
+      throw err;
+    });
     return this.databasePromise;
   }
 
@@ -113,7 +116,10 @@ export class Storage {
         database,
         nextVersion,
         missing,
-      );
+      ).catch((err) => {
+        this.databasePromise = null;
+        throw err;
+      });
       await this.databasePromise;
     });
     return this.schemaMutex;

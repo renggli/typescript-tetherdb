@@ -9,7 +9,12 @@ import {
   validateUsername,
 } from '../../validate.js';
 import type { AppStorage } from '../app.js';
-import type { Storage, StorageOptions } from '../storage.js';
+import type {
+  MaintenanceResult,
+  Storage,
+  StorageOptions,
+  StorageStatus,
+} from '../storage.js';
 import type { UserStorage } from '../user.js';
 import { AppMemoryStorage } from './app.js';
 import { type MemoryUserData, UserMemoryStorage } from './user.js';
@@ -186,6 +191,90 @@ export class MemoryStorage implements Storage {
     const safeId = validateAppId(id);
     this.deleteAppUserStates(safeId);
     return this.apps.delete(safeId);
+  }
+
+  async getStatus(appId?: string): Promise<StorageStatus> {
+    const users = await this.getUsers();
+    const allApps = await this.getApps();
+    const targetApps = appId
+      ? allApps.filter((a) => a.id === validateAppId(appId))
+      : allApps;
+
+    if (appId && targetApps.length === 0) {
+      throw new TetherServerError(
+        TetherServerErrorCode.NotFound,
+        `Application "${appId}" not found.`,
+      );
+    }
+
+    const appSummaries: Array<{ id: string; tables: string[] }> = [];
+    for (const app of targetApps) {
+      const tables = await app.getTables();
+      appSummaries.push({
+        id: app.id,
+        tables: tables.map((t) => t.name),
+      });
+    }
+
+    return {
+      backend: 'memory',
+      usersCount: users.length,
+      appsCount: allApps.length,
+      apps: appSummaries,
+    };
+  }
+
+  async checkpoint(appId?: string): Promise<MaintenanceResult> {
+    throw new TetherServerError(
+      TetherServerErrorCode.NotSupported,
+      `Checkpoint operation is not supported by memory storage.${appId ? ` (app: ${appId})` : ''}`,
+    );
+  }
+
+  async vacuum(appId?: string): Promise<MaintenanceResult> {
+    throw new TetherServerError(
+      TetherServerErrorCode.NotSupported,
+      `Vacuum operation is not supported by memory storage.${appId ? ` (app: ${appId})` : ''}`,
+    );
+  }
+
+  async prune(appId?: string, keepCount?: number): Promise<MaintenanceResult> {
+    const keep = keepCount ?? this.options.maxChangelogEntries ?? 1000;
+    const allApps = await this.getApps();
+    const targetApps = appId
+      ? allApps.filter((a) => a.id === validateAppId(appId))
+      : allApps;
+
+    if (appId && targetApps.length === 0) {
+      throw new TetherServerError(
+        TetherServerErrorCode.NotFound,
+        `Application "${appId}" not found.`,
+      );
+    }
+
+    let totalPruned = 0;
+    for (const app of targetApps) {
+      for (const [key, state] of this.userStates.entries()) {
+        if (key.startsWith(`${app.id}:`)) {
+          if (state.changelog.length > keep) {
+            const pruneCount = state.changelog.length - keep;
+            state.changelog.splice(0, pruneCount);
+            if (state.changelog.length > 0) {
+              state.minSeq = state.changelog[0].seq;
+            }
+            totalPruned += pruneCount;
+          }
+        }
+      }
+    }
+
+    return {
+      action: 'prune',
+      backend: 'memory',
+      appId,
+      affectedCount: totalPruned,
+      message: `Prune completed successfully. Removed ${totalPruned} changelog record(s).`,
+    };
   }
 
   async close(): Promise<void> {

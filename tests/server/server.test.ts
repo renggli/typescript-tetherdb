@@ -433,6 +433,81 @@ describe.each(storageDescriptors)(
 
         createSpy.mockRestore();
       });
+
+      it('should handle /health, /ready, and /metrics endpoints', async () => {
+        const httpServer = await server.listen(0, '127.0.0.1');
+        const addr = httpServer.address() as { port: number };
+        const port = addr.port;
+
+        // Test /health
+        const healthRes = await fetch(`http://127.0.0.1:${port}/health`);
+        expect(healthRes.status).toBe(200);
+        const healthData = (await healthRes.json()) as {
+          status: string;
+          uptime: number;
+        };
+        expect(healthData.status).toBe('ok');
+        expect(typeof healthData.uptime).toBe('number');
+
+        // Test /ready
+        const readyRes = await fetch(`http://127.0.0.1:${port}/ready`);
+        expect(readyRes.status).toBe(200);
+        const readyData = (await readyRes.json()) as { status: string };
+        expect(readyData.status).toBe('ready');
+
+        // Test /metrics
+        const metricsRes = await fetch(`http://127.0.0.1:${port}/metrics`);
+        expect(metricsRes.status).toBe(200);
+        const metricsData = (await metricsRes.json()) as {
+          status?: string;
+          uptime: number;
+          connectedClients: number;
+          appsCount: number;
+          memoryUsage: { rss: number };
+        };
+        expect(metricsData.connectedClients).toBe(0);
+        expect(typeof metricsData.appsCount).toBe('number');
+        expect(metricsData.memoryUsage?.rss).toBeGreaterThan(0);
+      });
+
+      it('should handle unready storage on /ready and return 503', async () => {
+        const httpServer = await server.listen(0, '127.0.0.1');
+        const addr = httpServer.address() as { port: number };
+        const port = addr.port;
+
+        const getAppsSpy = vi
+          .spyOn(server.storage, 'getApps')
+          .mockRejectedValueOnce(new Error('Disk read failure'));
+
+        const res = await fetch(`http://127.0.0.1:${port}/ready`);
+        expect(res.status).toBe(503);
+        const data = (await res.json()) as { status: string; error: string };
+        expect(data.status).toBe('unready');
+        expect(data.error).toBe('Disk read failure');
+
+        getAppsSpy.mockRestore();
+      });
+
+      it('should return 404 for invalid HTTP methods on observability endpoints', async () => {
+        const httpServer = await server.listen(0, '127.0.0.1');
+        const addr = httpServer.address() as { port: number };
+        const port = addr.port;
+
+        const postHealth = await fetch(`http://127.0.0.1:${port}/health`, {
+          method: 'POST',
+        });
+        expect(postHealth.status).toBe(404);
+
+        const deleteReady = await fetch(`http://127.0.0.1:${port}/ready`, {
+          method: 'DELETE',
+        });
+        expect(deleteReady.status).toBe(404);
+
+        const putMetrics = await fetch(`http://127.0.0.1:${port}/metrics`, {
+          method: 'PUT',
+        });
+        expect(putMetrics.status).toBe(404);
+      });
     });
   },
 );

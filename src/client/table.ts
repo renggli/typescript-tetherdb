@@ -289,10 +289,12 @@ export class Table<T = unknown> {
    */
   subscribeAll(listener: (items: T[]) => void): () => void {
     let isActive = true;
+    let currentVersion = 0;
     const fetchAndNotify = () => {
+      const version = ++currentVersion;
       this.getAll()
         .then((items) => {
-          if (isActive) {
+          if (isActive && version === currentVersion) {
             listener(items);
           }
         })

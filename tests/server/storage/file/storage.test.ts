@@ -181,4 +181,138 @@ describe('FileStorage', () => {
       await strict.cleanup();
     }
   });
+
+  it('should support concurrent writes across multiple storage instances without data corruption', async () => {
+    const user = await context.backend.createUser('multi_user', 'pass123');
+    const app = await context.backend.createApp('multi_app');
+    const table = await app.createTable('shared_data');
+
+    // Create a second storage instance targeting the same directory
+    const storage2 = new FileStorage({ baseDir: context.dir });
+
+    try {
+      const user2 = await storage2.getUser(user.id);
+      expect(user2).toBeDefined();
+      const app2 = await storage2.getApp('multi_app');
+      expect(app2).toBeDefined();
+      const table2 = await app2?.getTable('shared_data');
+      expect(table2).toBeDefined();
+      if (!user2 || !table2) throw new Error('user2 or table2 not found');
+
+      // Apply changes from instance 1
+      await table.applyChanges(user, [
+        {
+          table: 'shared_data',
+          id: 'k1',
+          op: OperationType.Put,
+          data: { from: 'instance1' },
+          timestamp: 100,
+          clientId: 'c1',
+        },
+        {
+          table: 'shared_data',
+          id: 'k2',
+          op: OperationType.Put,
+          data: { from: 'instance1' },
+          timestamp: 101,
+          clientId: 'c1',
+        },
+      ]);
+
+      // Apply changes from instance 2
+      await table2.applyChanges(user2, [
+        {
+          table: 'shared_data',
+          id: 'k3',
+          op: OperationType.Put,
+          data: { from: 'instance2' },
+          timestamp: 102,
+          clientId: 'c2',
+        },
+        {
+          table: 'shared_data',
+          id: 'k4',
+          op: OperationType.Put,
+          data: { from: 'instance2' },
+          timestamp: 103,
+          clientId: 'c2',
+        },
+      ]);
+
+      // Verify records are intact and non-corrupted across both instances
+      const rec1 = await table2.getRecord(user2, 'k1');
+      const rec2 = await table2.getRecord(user2, 'k2');
+      const rec3 = await table.getRecord(user, 'k3');
+      const rec4 = await table.getRecord(user, 'k4');
+
+      expect(rec1?.data).toEqual({ from: 'instance1' });
+      expect(rec2?.data).toEqual({ from: 'instance1' });
+      expect(rec3?.data).toEqual({ from: 'instance2' });
+      expect(rec4?.data).toEqual({ from: 'instance2' });
+    } finally {
+      await storage2.close();
+    }
+  });
+
+  it('should create and preserve keyfile secret across restarts', async () => {
+    const storage1 = new FileStorage({ baseDir: context.dir });
+    const secret1 = storage1.secret;
+    expect(secret1).toBeDefined();
+    expect(secret1.length).toBe(64);
+
+    const secretFile = path.join(context.dir, '.secret');
+    const stat = await fs.stat(secretFile);
+    expect(stat.isFile()).toBe(true);
+
+    const storage2 = new FileStorage({ baseDir: context.dir });
+    expect(storage2.secret).toBe(secret1);
+
+    await storage1.close();
+    await storage2.close();
+  });
+
+  it('should reject checkpoint and vacuum with NotSupported code', async () => {
+    await expect(context.backend.checkpoint('app1')).rejects.toThrow(
+      /not supported/i,
+    );
+    await expect(context.backend.vacuum('app1')).rejects.toThrow(
+      /not supported/i,
+    );
+    try {
+      await context.backend.checkpoint();
+    } catch (err) {
+      expect((err as { code: TetherServerErrorCode }).code).toBe(
+        TetherServerErrorCode.NotSupported,
+      );
+    }
+  });
+
+  it('should prune file changelogs and update metadata', async () => {
+    const app = await context.backend.createApp('prune_file_app');
+    const table = await app.createTable('records');
+    const user = await context.backend.createUser('puser', 'pass');
+
+    for (let i = 1; i <= 8; i++) {
+      await table.applyChanges(user, [
+        {
+          table: 'records',
+          id: `rec-${i}`,
+          op: OperationType.Put,
+          data: { index: i },
+          timestamp: 2000 + i,
+          clientId: 'c1',
+        },
+      ]);
+    }
+
+    const pruneRes = await context.backend.prune('prune_file_app', 3);
+    expect(pruneRes.action).toBe('prune');
+    expect(pruneRes.backend).toBe('file');
+    expect(pruneRes.affectedCount).toBe(5);
+
+    // Prune on non-existent app should fail
+    await expect(context.backend.prune('missing_app')).rejects.toThrow(
+      /not found/i,
+    );
+  });
 });

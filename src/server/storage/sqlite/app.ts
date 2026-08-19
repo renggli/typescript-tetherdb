@@ -119,17 +119,21 @@ export class AppSqliteStorage implements AppStorage {
       const metaRow = handle.stmtGetMeta.get() as RawMetaRow | undefined;
       let currentSeq = metaRow?.current_seq ?? 0;
       let minSeq = metaRow?.min_seq ?? 0;
+      const checkedTables = new Set<string>();
 
       for (const change of changes) {
         const tableName = validateTableName(change.table);
         const recordId = validateRecordId(change.id);
 
-        const tableExists = appsDb.stmtFindTable.get(this.id, tableName);
-        if (!tableExists) {
-          throw new TetherServerError(
-            TetherServerErrorCode.NotFound,
-            'Table not found.',
-          );
+        if (!checkedTables.has(tableName)) {
+          const tableExists = appsDb.stmtFindTable.get(this.id, tableName);
+          if (!tableExists) {
+            throw new TetherServerError(
+              TetherServerErrorCode.NotFound,
+              'Table not found.',
+            );
+          }
+          checkedTables.add(tableName);
         }
 
         const existingRecord = handle.stmtGetRecordForUpdate.get(

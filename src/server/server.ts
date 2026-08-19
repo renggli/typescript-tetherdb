@@ -132,7 +132,18 @@ export class TetherServer {
    */
   attach(server: http.Server): void {
     if (!this._webSocketServer) {
-      this._webSocketServer = new WebSocketServer({ noServer: true });
+      this._webSocketServer = new WebSocketServer({
+        noServer: true,
+        perMessageDeflate: {
+          zlibDeflateOptions: {
+            level: 6,
+            memLevel: 8,
+          },
+          threshold: 1024,
+          clientNoContextTakeover: true,
+          serverNoContextTakeover: true,
+        },
+      });
       this._webSocketServer.on('connection', (ws) => {
         this.sync.handleConnection(ws);
       });
@@ -220,6 +231,37 @@ export class TetherServer {
     }
 
     try {
+      if (method === 'GET' && url.pathname === `${this.basePath}/health`) {
+        this.sendJson(res, 200, {
+          status: 'ok',
+          uptime: process.uptime(),
+        });
+        return true;
+      }
+
+      if (method === 'GET' && url.pathname === `${this.basePath}/ready`) {
+        try {
+          await this.storage.getApps();
+          this.sendJson(res, 200, { status: 'ready' });
+        } catch (err) {
+          const message =
+            err instanceof Error ? err.message : 'Storage unavailable.';
+          this.sendJson(res, 503, { status: 'unready', error: message });
+        }
+        return true;
+      }
+
+      if (method === 'GET' && url.pathname === `${this.basePath}/metrics`) {
+        const apps = await this.storage.getApps();
+        this.sendJson(res, 200, {
+          uptime: process.uptime(),
+          connectedClients: this.sync.connectedClientsCount,
+          appsCount: apps.length,
+          memoryUsage: process.memoryUsage(),
+        });
+        return true;
+      }
+
       if (
         method === 'POST' &&
         url.pathname === `${this.basePath}/auth/register`
@@ -386,6 +428,8 @@ function getHttpStatusForError(err: unknown): number {
         return 409;
       case TetherServerErrorCode.LimitExceeded:
         return 413;
+      case TetherServerErrorCode.NotSupported:
+        return 501;
       case TetherServerErrorCode.InternalError:
         return 500;
     }

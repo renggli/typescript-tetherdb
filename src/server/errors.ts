@@ -16,6 +16,8 @@ export enum TetherServerErrorCode {
   LimitExceeded,
   /** Configuration or command-line option is invalid. */
   ConfigurationError,
+  /** The requested operation is not supported by this backend or engine. */
+  NotSupported,
   /** An unexpected internal server error occurred. */
   InternalError,
 }
@@ -60,6 +62,8 @@ function getDefaultServerErrorMessage(code: TetherServerErrorCode): string {
       return 'Request or resource limit exceeded.';
     case TetherServerErrorCode.ConfigurationError:
       return 'Server configuration error.';
+    case TetherServerErrorCode.NotSupported:
+      return 'Operation not supported.';
     case TetherServerErrorCode.InternalError:
       return 'Internal server error.';
   }

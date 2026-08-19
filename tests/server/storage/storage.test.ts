@@ -350,4 +350,66 @@ function runStorageTestSuite(createStorage: () => Storage) {
     expect(await recreated.getRecord(user, 'del_1')).toBeUndefined();
     expect(await recreated.getAllRecords(user)).toHaveLength(0);
   });
+
+  it('should return storage status for all apps and a specific app', async () => {
+    const statusAll = await storage.getStatus();
+    expect(statusAll.backend).toBeDefined();
+    expect(statusAll.appsCount).toBeGreaterThanOrEqual(1);
+    expect(statusAll.apps?.some((a) => a.id === 'default')).toBe(true);
+
+    const statusDefault = await storage.getStatus('default');
+    expect(statusDefault.apps).toHaveLength(1);
+    expect(statusDefault.apps?.[0].id).toBe('default');
+    expect(statusDefault.apps?.[0].tables).toEqual(
+      expect.arrayContaining(['todos', 'notes', 'items']),
+    );
+
+    await expect(storage.getStatus('nonexistent-app')).rejects.toThrow(
+      /not found/i,
+    );
+  });
+
+  it('should handle checkpoint and vacuum or throw NotSupported', async () => {
+    const isSqlite = (await storage.getStatus()).backend === 'sqlite';
+
+    if (isSqlite) {
+      const checkpointRes = await storage.checkpoint('default');
+      expect(checkpointRes.action).toBe('checkpoint');
+      expect(checkpointRes.affectedCount).toBeGreaterThan(0);
+
+      const vacuumRes = await storage.vacuum('default');
+      expect(vacuumRes.action).toBe('vacuum');
+      expect(vacuumRes.affectedCount).toBeGreaterThan(0);
+    } else {
+      await expect(storage.checkpoint()).rejects.toThrow(/not supported/i);
+      await expect(storage.vacuum()).rejects.toThrow(/not supported/i);
+    }
+  });
+
+  it('should prune changelogs across storage backends', async () => {
+    const user = await storage.createUser('prune_user', 'password');
+    const app = await storage.getApp('default');
+    expect(app).toBeDefined();
+    const table = await app?.getTable('todos');
+    expect(table).toBeDefined();
+
+    // Apply 5 changes
+    for (let i = 1; i <= 5; i++) {
+      await table?.applyChanges(user, [
+        {
+          table: 'todos',
+          id: `todo_${i}`,
+          op: OperationType.Put,
+          data: { title: `Task ${i}` },
+          timestamp: 1000 + i,
+          clientId: 'c1',
+        },
+      ]);
+    }
+
+    // Prune keeping 2
+    const pruneRes = await storage.prune('default', 2);
+    expect(pruneRes.action).toBe('prune');
+    expect(pruneRes.affectedCount).toBeGreaterThanOrEqual(3);
+  });
 }

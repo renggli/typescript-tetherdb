@@ -10,7 +10,9 @@ import { parseCliArgs } from './args.js';
 import { createBackend } from './backend.js';
 import {
   handleAppsCommand,
+  handleMaintenanceCommand,
   handleServeCommand,
+  handleStatusCommand,
   handleTablesCommand,
   handleUsersCommand,
   printHelp,
@@ -36,6 +38,12 @@ export async function runCli(
     switch (command) {
       case 'serve':
         await handleServeCommand(storage, backend, dir, port, host);
+        break;
+      case 'status':
+        await handleStatusCommand(storage, positionalArgs);
+        break;
+      case 'maintenance':
+        await handleMaintenanceCommand(storage, positionalArgs);
         break;
       case 'apps':
         await handleAppsCommand(storage, positionalArgs);

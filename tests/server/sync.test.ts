@@ -271,7 +271,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       }
     });
 
-    it('should fallback to full snapshot when diff exceeds 50 changes threshold', async () => {
+    it('should deliver delta diff even when diff exceeds 50 changes if changelog is intact', async () => {
       const user = await storage.getUserByToken(validToken);
       expect(user).toBeDefined();
       if (!user) return;
@@ -293,7 +293,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       const ws = new MockServerWebSocket();
       sync.handleConnection(ws as unknown as WebSocket);
 
-      // Client connecting with seq 1 (> 50 changes diff)
+      // Client connecting with seq 1 (> 50 changes diff, but changelog retained)
       ws.emitClientMessage({
         type: ClientMessageType.Auth,
         token: validToken,
@@ -306,9 +306,11 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
 
       const messages = ws.getParsedMessages();
       expect(messages).toHaveLength(2);
-      expect(messages[1].type).toBe(ServerMessageType.SyncSnapshot);
-      if (messages[1].type === ServerMessageType.SyncSnapshot) {
-        expect(messages[1].snapshot).toHaveLength(55);
+      expect(messages[1].type).toBe(ServerMessageType.SyncDiff);
+      if (messages[1].type === ServerMessageType.SyncDiff) {
+        expect(messages[1].changes).toHaveLength(54);
+        expect(messages[1].fromSeq).toBe(1);
+        expect(messages[1].toSeq).toBe(55);
       }
     });
   });
