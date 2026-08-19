@@ -26,7 +26,7 @@ This document outlines the core architecture, developer rules, TypeScript conven
 
 ## 📂 Architecture Overview
 
-The codebase is organized into three decoupled layers with clear subpath exports:
+The codebase is organized into four decoupled layers with clear subpath exports:
 
 - **Shared / Protocol (`src/shared/`)**:
   - Exported as `tetherdb/shared`.
@@ -41,23 +41,25 @@ The codebase is organized into three decoupled layers with clear subpath exports
   - **Tables (`table.ts`)**: Typed table wrappers providing local-first CRUD operations and reactive event subscriptions.
   - **Sync (`sync.ts`)**: Two-way WebSocket sync coordinator managing initial snapshot / diff downloads, outbox queue flushing, acknowledgments, and auto-reconnect backoff.
 
-
-
-
-
-
 - **Server Layer (`src/server/`)**:
   - Exported as `tetherdb/server`.
-  - **Authentication (`auth/`)**: Pluggable authentication abstraction with implementations for in-memory testing (`MemoryAuthAdapter`) and filesystem persistence (`FileAuthAdapter`).
-  - **Storage Adapters (`storage/`)**: Pluggable storage abstraction with implementations for in-memory testing (`MemoryStorageAdapter`) and per-user filesystem directories (`FileStorageAdapter`).
+  - **Authentication (`crypto.ts`)**: Session token signing and password hashing with salt.
+  - **Storage (`storage/`)**: Pluggable storage abstraction with implementations for in-memory testing (`MemoryStorage`), per-user filesystem directories (`FileStorage`), and SQLite (`SqliteStorage`).
   - **Sync (`sync.ts`)**: Real-time WebSocket connection manager and user-isolated broadcast engine.
   - **Server (`server.ts`)**: Unified HTTP and WebSocket server handling authentication endpoints and real-time streaming connections.
+
+- **CLI Layer (`src/cli/`)**:
+  - Exported as `tetherdb/cli`.
+  - **CLI Runner (`cli.ts`)**: Main dispatch entry point for command line execution.
+  - **Argument Parsing (`args.ts`)**: Command line option parsing and validation.
+  - **Backend Factory (`backend.ts`)**: Storage engine instantiation for memory, file, and sqlite targets.
+  - **Commands (`commands/`)**: Modular subcommand handlers (`serve.ts`, `apps.ts`, `tables.ts`, `users.ts`, `help.ts`).
 
 ## 🔑 Key TypeScript & Design Conventions
 
 1. **Strict Type Safety**: Never use `any` unless strictly necessary for generic boundaries. Leverage generics (`<T = unknown>`) and discriminated unions for message types.
 2. **Explicit Enums & Discriminated Unions**: Use discriminated union types for message protocols (`ClientMessage`, `ServerMessage`) and explicit enum/literal types for operational states (`SyncStatus`, `OperationType`).
-3. **Pluggable & Extensible Abstractions**: Components requiring alternative backend implementations (such as storage persistence, authentication adapters, or WebSocket transports) must adhere to clear TypeScript interfaces (e.g. `StorageAdapter`, `AuthAdapter`).
+3. **Pluggable & Extensible Abstractions**: Components requiring alternative backend implementations (such as storage persistence or WebSocket transports) must adhere to clear TypeScript interfaces (e.g. `Storage`, `AppStorage`, `TableStorage`, `UserStorage`).
 4. **Local-First Consistency**:
    - Write operations must complete locally in IndexedDB first.
    - Outbox logs and data mutations must execute atomically within the same IndexedDB transaction.
@@ -67,7 +69,7 @@ The codebase is organized into three decoupled layers with clear subpath exports
 ## 🧪 Testing Rules
 
 - **Zero Test Side Effects**: Tests must be fully isolated and clean up resources (`afterEach`), including closing server listeners, active WebSockets, IndexedDB connections, and temporary filesystem directories.
-- **Fast Unit Tests**: Test core components (`Database`, `Table`, `MemoryAuthAdapter`, `FileAuthAdapter`, `MemoryStorageAdapter`) in isolation.
+- **Fast Unit Tests**: Test core components (`TetherClient`, `Table`, `Storage`, `MemoryStorage`, `FileStorage`, `SqliteStorage`, `Sync`) in isolation.
 
 - **End-to-End Sync Tests**: End-to-end tests must verify real-time multi-client scenarios:
   - Initial snapshot delivery on fresh client connection.

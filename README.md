@@ -7,16 +7,16 @@
 - **Offline-First & Local-First**: Operations are applied to IndexedDB immediately, queued in an outbox, and transparently synced in the background.
 - **Multi-Application on Standard Domain**: Host multiple independent web apps on a single TetherDB server instance (e.g. `store.mysite.com`). Data and real-time broadcasts are isolated by `appId`.
 - **Application & User Management**: Declare apps, active tables, and users programmatically (`declareApp()`, `declareUser()`) or via CLI commands (`apps`, `tables`, `users`).
-- **Zero-Config Server Starter & CLI**: Start in one line with `startServer()` or run directly via `npx tetherdb --port 8080 --dir ./data`.
-- **Seamless Local-to-Synced Onboarding**: Start offline with zero-config local storage, then attach cloud sync with a single `db.register()` or `db.login()` call.
+- **Zero-Config Server Starter & CLI**: Start in one line with `startServer()` or run directly via `npx tetherdb --sqlite=./data` or `npx tetherdb --file=./data`.
+- **Seamless Local-to-Synced Onboarding**: Start offline with zero-config local storage, then attach cloud sync with a single `client.register()` or `client.login()` call.
 - **Batch-by-Default Architecture**: High-throughput atomic mutations (`putAll`, `deleteAll`, `getAll`) and coalesced WebSocket transmission.
 - **Client-First Synchronization**: On first load or cache-miss, the client receives the complete dataset snapshot. On reconnect, it catches up with delta diffs.
 - **Adaptive Snapshot Delivery & Compaction**: Compacts changelog history and automatically falls back to full snapshots when changelog windows are exceeded.
 - **Last-Write-Wins (LWW) Conflict Resolution**: Monotonic logical clocks and deterministic tie-breaking.
 - **Real-Time Broadcast**: Server broadcasts incoming changes in real-time to all other active client instances belonging to the same app and user.
-- **Sharded & Secure File Storage**: Persists data per app and user in sharded directories (`<baseDir>/<appId>/<shard>/<userId>/stores/`) with path confinement and injection defenses.
+- **Pluggable Server Storage**: Persistent SQLite storage (`SqliteStorage`), sharded filesystem storage (`FileStorage`), and ephemeral in-memory storage (`MemoryStorage`).
 - **Simple, Secure Auth**: Built-in account registration, password hashing (scrypt with salt), and HMAC-signed tokens.
-- **Modern Subpath Exports**: Import cleanly via `tetherdb/client` and `tetherdb/server`.
+- **Modern Subpath Exports**: Import cleanly via `tetherdb/client`, `tetherdb/server`, `tetherdb/cli`, and `tetherdb/shared`.
 
 ## Installation
 
@@ -31,18 +31,18 @@ npm install tetherdb
 You can launch a TetherDB server instantly from the command line:
 
 ```bash
-# Run standalone server CLI
-npx tetherdb --port 8080 --dir ./data
+# Run standalone server CLI with SQLite persistence
+npx tetherdb --sqlite=./data --port=8080
 ```
 
-Or programmatically in two lines of TypeScript:
+Or programmatically in TypeScript:
 
 ```typescript
-import { startServer } from 'tetherdb/server';
+import { SqliteStorage, startServer } from 'tetherdb/server';
 
 const running = await startServer({
   port: 8080,
-  storageDir: './data',
+  storage: new SqliteStorage({ baseDir: './data' }),
 });
 console.log(`TetherDB running at http://${running.host}:${running.port}`);
 ```
@@ -114,24 +114,10 @@ The standard server provides authentication and WebSocket sync endpoints:
 
 ## Architecture & Subpaths
 
-- **`tetherdb/client`**:
-  - `TetherClient`: Main reactive facade client with local-first storage, multi-app support, auto-session, and auth helpers (`authStatus`, `username`).
-  - `Table`: Typed table wrapper around IndexedDB object stores supporting single and bulk CRUD (`put`, `putAll`, `delete`, `deleteAll`, `get`, `getAll`, `clear`) and reactive subscriptions (`onChange`, `subscribeAll`).
-  - `SyncStatus`: Connection lifecycle states (`Disconnected`, `Connecting`, `Connected`, `Error`).
-  - `AuthStatus`: Session lifecycle states (`SignedOut`, `SigningIn`, `SignedIn`, `Error`).
-  - `DataMode`: Reconciliation strategy on auth transitions (`Remote`, `Local`, `Merge`, `Clear`).
-
-- **`tetherdb/server`**:
-  - `startServer`: Zero-config server launcher with automatic port assignment and clean shutdown.
-  - `TetherServer`: Unified HTTP and WebSocket server with discovery endpoints and programmatic provisioning (`declareApp`, `declareUser`).
-  - `MemoryStorage`: Ephemeral in-memory storage engine for fast testing and development.
-  - `FileStorage`: Persistent filesystem storage engine sharded by app and user.
-  - `SqliteStorage`: Persistent SQLite storage engine for production deployments.
-  - `Sync`: WebSocket connection manager with app- and user-level change routing and broadcasting.
-
-- **`tetherdb/shared`**:
-  - Shared protocol schemas and data types (`ChangeRecord`, `StoredRecord`, `SnapshotRecord`, `ClientMessage`, `ServerMessage`, `OperationType`).
-  - Path normalization utilities (`normalizeBasePath`).
+- **`tetherdb/client`**: Reactive local-first client layer providing IndexedDB storage, CRUD tables, authentication state, and automatic WebSocket synchronization.
+- **`tetherdb/server`**: Backend server coordinator handling HTTP authentication endpoints, WebSocket sync routing, and pluggable storage engines (memory, file, and SQLite).
+- **`tetherdb/cli`**: Command-line administrative interface and runner for launching servers and managing applications, tables, and user accounts.
+- **`tetherdb/shared`**: Shared protocol schemas, message formats, and path normalization utilities used across client and server packages.
 
 ---
 

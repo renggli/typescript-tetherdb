@@ -1,14 +1,8 @@
 /**
- * TetherDB Server — Modular storage, crypto, sync hub, HTTP server, and CLI.
+ * TetherDB Server — Modular storage, crypto, sync hub, and HTTP server.
  *
  * @module tetherdb/server
  */
-
-export {
-  type BackendType,
-  createBackend,
-  runCli,
-} from './cli.js';
 export {
   createSessionToken,
   hashPassword,

@@ -1,0 +1,92 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { parseCliArgs } from '../../src/cli/args.js';
+import {
+  TetherServerError,
+  TetherServerErrorCode,
+} from '../../src/server/index.js';
+
+describe('parseCliArgs', () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    delete process.env.PORT;
+    delete process.env.HOST;
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  it('should parse default options when args are empty', () => {
+    const result = parseCliArgs([]);
+    expect(result).toEqual({
+      command: 'serve',
+      positionalArgs: [],
+      port: 8080,
+      host: '0.0.0.0',
+      backend: 'memory',
+      dir: '.data',
+    });
+  });
+
+  it('should read PORT and HOST from environment variables by default', () => {
+    process.env.PORT = '9000';
+    process.env.HOST = '127.0.0.1';
+    const result = parseCliArgs([]);
+    expect(result.port).toBe(9000);
+    expect(result.host).toBe('127.0.0.1');
+  });
+
+  it('should parse port and host flags with equals and short aliases', () => {
+    const result1 = parseCliArgs(['--port=3000', '--host=127.0.0.1']);
+    expect(result1.port).toBe(3000);
+    expect(result1.host).toBe('127.0.0.1');
+
+    const result2 = parseCliArgs(['-p', '4000', '-H', 'localhost']);
+    expect(result2.port).toBe(4000);
+    expect(result2.host).toBe('localhost');
+  });
+
+  it('should parse backend options (--memory, --file, --sqlite)', () => {
+    const memResult = parseCliArgs(['--memory']);
+    expect(memResult.backend).toBe('memory');
+
+    const fileResult1 = parseCliArgs(['--file']);
+    expect(fileResult1.backend).toBe('file');
+    expect(fileResult1.dir).toBe('.data');
+
+    const fileResult2 = parseCliArgs(['--file=/custom/path']);
+    expect(fileResult2.backend).toBe('file');
+    expect(fileResult2.dir).toBe('/custom/path');
+
+    const sqliteResult1 = parseCliArgs(['--sqlite']);
+    expect(sqliteResult1.backend).toBe('sqlite');
+    expect(sqliteResult1.dir).toBe('.data');
+
+    const sqliteResult2 = parseCliArgs(['--sqlite=/db/path']);
+    expect(sqliteResult2.backend).toBe('sqlite');
+    expect(sqliteResult2.dir).toBe('/db/path');
+  });
+
+  it('should extract positional arguments and subcommands', () => {
+    const result = parseCliArgs(['apps', 'add', 'my-app', '--sqlite=.data']);
+    expect(result.command).toBe('apps');
+    expect(result.positionalArgs).toEqual(['apps', 'add', 'my-app']);
+    expect(result.backend).toBe('sqlite');
+  });
+
+  it('should throw an error on unknown flags starting with dash', () => {
+    expect(() => parseCliArgs(['--unknown-flag'])).toThrow(TetherServerError);
+    try {
+      parseCliArgs(['--port', '8080']);
+    } catch (err) {
+      expect((err as TetherServerError).code).toBe(
+        TetherServerErrorCode.ConfigurationError,
+      );
+      expect((err as Error).message).toContain(
+        'Unknown or invalid option: "--port"',
+      );
+    }
+  });
+});

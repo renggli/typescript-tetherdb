@@ -3,8 +3,8 @@ import { defineConfig } from 'tsup';
 export default defineConfig({
   entry: {
     index: 'src/index.ts',
+    'cli/index': 'src/cli/index.ts',
     'client/index': 'src/client/index.ts',
-    'server/cli': 'src/server/cli.ts',
     'server/index': 'src/server/index.ts',
     'shared/index': 'src/shared/index.ts',
   },
