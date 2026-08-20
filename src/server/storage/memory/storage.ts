@@ -39,7 +39,7 @@ export interface MemoryStorageOptions extends StorageOptions {}
 export class MemoryStorage implements Storage {
   private apps: Map<string, AppMemoryStorage> = new Map();
   private userStates: Map<string, UserState> = new Map(); // key = `${appId}:${userId}`
-  readonly rawUsers: Map<string, MemoryUserData> = new Map(); // key = userId
+  private users: Map<string, MemoryUserData> = new Map(); // key = userId
   private usersByUsername: Map<string, string> = new Map(); // username -> userId
   readonly secret: string;
   readonly options: MemoryStorageOptions;
@@ -137,14 +137,18 @@ export class MemoryStorage implements Storage {
       createdAt: Date.now(),
     };
 
-    this.rawUsers.set(userId, userData);
+    this.users.set(userId, userData);
     this.usersByUsername.set(safeUsername, userId);
     return new UserMemoryStorage(userData, this);
   }
 
+  getUserData(userId: string): MemoryUserData | undefined {
+    return this.users.get(userId);
+  }
+
   async getUser(id: string): Promise<UserStorage | undefined> {
     const safeUserId = validateUserId(id);
-    const data = this.rawUsers.get(safeUserId);
+    const data = this.users.get(safeUserId);
     if (data) {
       return new UserMemoryStorage(data, this);
     }
@@ -156,7 +160,7 @@ export class MemoryStorage implements Storage {
     if (!safeUsername) return undefined;
     const userId = this.usersByUsername.get(safeUsername);
     if (!userId) return undefined;
-    const data = this.rawUsers.get(userId);
+    const data = this.users.get(userId);
     if (data) {
       return new UserMemoryStorage(data, this);
     }
@@ -170,7 +174,7 @@ export class MemoryStorage implements Storage {
   }
 
   async getUsers(): Promise<UserStorage[]> {
-    return Array.from(this.rawUsers.values()).map(
+    return Array.from(this.users.values()).map(
       (data) => new UserMemoryStorage(data, this),
     );
   }
@@ -178,10 +182,10 @@ export class MemoryStorage implements Storage {
   deleteUser(id: string): boolean {
     const safeUserId = validateUserId(id);
     this.deleteUserState(safeUserId);
-    const data = this.rawUsers.get(safeUserId);
+    const data = this.users.get(safeUserId);
     if (data) {
       this.usersByUsername.delete(data.username);
-      this.rawUsers.delete(safeUserId);
+      this.users.delete(safeUserId);
       return true;
     }
     return false;
@@ -280,7 +284,7 @@ export class MemoryStorage implements Storage {
   async close(): Promise<void> {
     this.apps.clear();
     this.userStates.clear();
-    this.rawUsers.clear();
+    this.users.clear();
     this.usersByUsername.clear();
   }
 }

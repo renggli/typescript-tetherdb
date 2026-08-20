@@ -33,7 +33,7 @@ export class UserMemoryStorage implements UserStorage {
   }
 
   private getUserData(): MemoryUserData {
-    const data = this.storage.rawUsers.get(this.id);
+    const data = this.storage.getUserData(this.id);
     if (!data) {
       throw new TetherServerError(
         TetherServerErrorCode.NotFound,

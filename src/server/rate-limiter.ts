@@ -14,13 +14,6 @@ export interface RateLimiterOptions {
   maxBackoffMs?: number;
 }
 
-interface RateLimitEntry {
-  count: number;
-  resetAt: number;
-  failures: number;
-  blockedUntil: number;
-}
-
 /**
  * In-memory sliding-window rate limiter with failure-based exponential backoff.
  */
@@ -157,4 +150,13 @@ export class RateLimiter {
       }
     }
   }
+}
+
+// -- Private Helpers --------------------------------------------------------
+
+interface RateLimitEntry {
+  count: number;
+  resetAt: number;
+  failures: number;
+  blockedUntil: number;
 }

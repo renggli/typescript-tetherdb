@@ -226,7 +226,9 @@ export class TetherClient {
     const isBrowser = typeof window !== 'undefined' && Boolean(window.location);
     const host =
       options.host ??
-      (isBrowser ? window.location.hostname || undefined : undefined);
+      (isBrowser && window.location.hostname !== ''
+        ? window.location.hostname
+        : undefined);
     const port =
       options.port ??
       (isBrowser && window.location.port

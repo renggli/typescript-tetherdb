@@ -9,12 +9,6 @@ import { EventRegistry } from './shared/event.js';
 import { randomUUID } from './shared/id.js';
 import { Table } from './table.js';
 
-/** Internal IndexedDB object store name used for queuing pending outgoing mutations. */
-export const OUTBOX_STORE = '__tether_outbox';
-
-/** Internal IndexedDB object store name used for client metadata and sync progression tracking. */
-export const META_STORE = '__tether_meta';
-
 /**
  * Represents a pending mutation queue item within the internal IndexedDB outbox.
  */
@@ -558,6 +552,11 @@ export class Storage {
     }
   }
 }
+
+// -- Private Helpers --------------------------------------------------------
+
+const OUTBOX_STORE = '__tether_outbox';
+const META_STORE = '__tether_meta';
 
 function promisifyRequest<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise<T>((resolve, reject) => {

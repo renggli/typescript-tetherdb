@@ -228,7 +228,7 @@ describe('Validation', () => {
       expect(calculateByteSize(obj)).toBeGreaterThan(10);
 
       // Circular reference safely falls back to 0 without crashing
-      const circular: Record<string, unknown> = {};
+      const circular: { self?: unknown } = {};
       circular.self = circular;
       expect(calculateByteSize(circular)).toBe(0);
     });

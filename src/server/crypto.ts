@@ -5,16 +5,6 @@ import * as path from 'node:path';
 /** Default token expiration window in seconds (7 days). */
 export const DEFAULT_TOKEN_EXPIRES_IN = 7 * 24 * 60 * 60;
 
-/** Default scrypt parameters matching standard cryptographic best practices. */
-const SCRYPT_OPTIONS: crypto.ScryptOptions = {
-  N: 16384,
-  r: 8,
-  p: 1,
-  maxmem: 32 * 1024 * 1024,
-};
-
-let dummyPasswordHashPromise: Promise<string> | null = null;
-
 /**
  * Loads a persistent HMAC signing secret from `<baseDir>/.secret`, or generates and saves one
  * with restricted permissions (`0o600`) if it does not yet exist.
@@ -191,3 +181,15 @@ export function verifySessionToken(
     return null;
   }
 }
+
+// -- Private Helpers --------------------------------------------------------
+
+/** Default scrypt parameters matching standard cryptographic best practices. */
+const SCRYPT_OPTIONS: crypto.ScryptOptions = {
+  N: 16384,
+  r: 8,
+  p: 1,
+  maxmem: 32 * 1024 * 1024,
+};
+
+let dummyPasswordHashPromise: Promise<string> | null = null;

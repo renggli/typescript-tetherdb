@@ -20,7 +20,8 @@ export async function handleAppsCommand(
     console.log(`Applications (${apps.length}):`);
     for (const app of apps) {
       const tables = await app.getTables();
-      const tableList = tables.map((t) => t.name).join(', ') || 'no tables';
+      const tableList =
+        tables.length > 0 ? tables.map((t) => t.name).join(', ') : 'no tables';
       console.log(`  • ${app.id} (tables: ${tableList})`);
     }
   } else if (action === 'add') {

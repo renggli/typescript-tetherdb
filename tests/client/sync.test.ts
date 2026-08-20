@@ -148,7 +148,6 @@ describe('Sync', () => {
       expect(sync.clientId).toBe('custom-client');
       expect(sync.url).toBe('ws://127.0.0.1:9999/sync');
       expect(sync.status).toBe(SyncStatus.Disconnected);
-      expect(sync.getStatus()).toBe(SyncStatus.Disconnected);
     });
 
     it('should auto-connect when both token and url are provided in constructor', async () => {

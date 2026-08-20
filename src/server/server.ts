@@ -79,10 +79,39 @@ export interface RunningServer {
 }
 
 /**
+ * Starts a complete standalone HTTP & WebSocket synchronization server.
+ *
+ * @param options - Start options including port, host, storage, and limits.
+ * @returns Handle to the running server.
+ */
+export async function startServer(
+  options: StartServerOptions = {},
+): Promise<RunningServer> {
+  const port =
+    options.port ??
+    (process.env.PORT ? Number.parseInt(process.env.PORT, 10) : 8080);
+  const host = options.host ?? '0.0.0.0';
+
+  const server = new TetherServer(options);
+  const httpServer = await server.listen(port, host);
+  const addr = httpServer.address();
+  const boundPort = typeof addr === 'object' && addr ? addr.port : port;
+
+  return {
+    server,
+    httpServer,
+    port: boundPort,
+    host,
+    close: async () => {
+      await server.close();
+    },
+  };
+}
+
+/**
  * Unified HTTP and WebSocket server handling authentication endpoints (`/auth/register`, `/auth/login`)
  * and real-time streaming connections (`/sync`).
  */
-
 export class TetherServer {
   /** Underlying storage engine for users, apps, and tables. */
   readonly storage: Storage;
@@ -415,9 +444,7 @@ export class TetherServer {
     res.end(JSON.stringify(data));
   }
 
-  private async readJsonBody(
-    req: http.IncomingMessage,
-  ): Promise<Record<string, unknown>> {
+  private async readJsonBody(req: http.IncomingMessage): Promise<unknown> {
     return new Promise((resolve, reject) => {
       let body = '';
       req.on('data', (chunk) => {
@@ -602,6 +629,8 @@ export class TetherServer {
   }
 }
 
+// -- Private Helpers --------------------------------------------------------
+
 function getHttpStatusForError(err: unknown): number {
   if (err instanceof TetherServerError) {
     switch (err.code) {
@@ -624,34 +653,4 @@ function getHttpStatusForError(err: unknown): number {
     }
   }
   return 500;
-}
-
-/**
- * Starts a complete standalone HTTP & WebSocket synchronization server.
- *
- * @param options - Start options including port, host, storage, and limits.
- * @returns Handle to the running server.
- */
-export async function startServer(
-  options: StartServerOptions = {},
-): Promise<RunningServer> {
-  const port =
-    options.port ??
-    (process.env.PORT ? Number.parseInt(process.env.PORT, 10) : 8080);
-  const host = options.host ?? '0.0.0.0';
-
-  const server = new TetherServer(options);
-  const httpServer = await server.listen(port, host);
-  const addr = httpServer.address();
-  const boundPort = typeof addr === 'object' && addr ? addr.port : port;
-
-  return {
-    server,
-    httpServer,
-    port: boundPort,
-    host,
-    close: async () => {
-      await server.close();
-    },
-  };
 }

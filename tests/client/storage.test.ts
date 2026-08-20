@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { META_STORE, OUTBOX_STORE, Storage } from '../../src/client/storage.js';
+import { Storage } from '../../src/client/storage.js';
 import { type ChangeRecord, OperationType } from '../../src/shared/types.js';
 
 describe('Storage', () => {
@@ -15,9 +15,7 @@ describe('Storage', () => {
     await storage.close();
   });
 
-  it('should export expected store name constants and initialize properties', () => {
-    expect(OUTBOX_STORE).toBe('__tether_outbox');
-    expect(META_STORE).toBe('__tether_meta');
+  it('should initialize instance properties properly', () => {
     expect(storage.name).toBe(dbName);
     expect(typeof storage.clientId).toBe('string');
     expect(storage.clientId.length).toBeGreaterThan(0);
@@ -37,8 +35,8 @@ describe('Storage', () => {
   describe('Database Connection & Schema Management', () => {
     it('should open database and automatically create internal stores', async () => {
       const db = await storage.getDatabase();
-      expect(db.objectStoreNames.contains(OUTBOX_STORE)).toBe(true);
-      expect(db.objectStoreNames.contains(META_STORE)).toBe(true);
+      expect(db.objectStoreNames.contains('__tether_outbox')).toBe(true);
+      expect(db.objectStoreNames.contains('__tether_meta')).toBe(true);
     });
 
     it('should dynamically create table object stores via ensureTable and ensureTables', async () => {

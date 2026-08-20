@@ -18,18 +18,6 @@ import {
   printHelp,
 } from './commands/index.js';
 
-function isHelpRequested(args: string[]): boolean {
-  return args.some(
-    (arg) =>
-      arg === 'help' ||
-      arg === '--help' ||
-      arg === '-h' ||
-      arg === '-?' ||
-      arg === '/?' ||
-      arg === '-help',
-  );
-}
-
 /**
  * Standard command line interface for TetherDB.
  *
@@ -91,4 +79,18 @@ if (
     console.error('Failed to start TetherDB CLI:', err);
     process.exit(1);
   });
+}
+
+// -- Private Helpers --------------------------------------------------------
+
+function isHelpRequested(args: string[]): boolean {
+  return args.some(
+    (arg) =>
+      arg === 'help' ||
+      arg === '--help' ||
+      arg === '-h' ||
+      arg === '-?' ||
+      arg === '/?' ||
+      arg === '-help',
+  );
 }

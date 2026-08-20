@@ -44,22 +44,6 @@ export interface FileStorageOptions extends StorageOptions {
 }
 
 /**
- * Validates that no external TetherDB server process is actively running on this data directory.
- *
- * @param baseDir - Storage base directory.
- * @throws TetherServerError if an active server lock is held by another process.
- */
-export function assertNoActiveServerLock(baseDir: string): void {
-  const lock = readServerLock(baseDir);
-  if (lock && lock.pid !== process.pid) {
-    throw new TetherServerError(
-      TetherServerErrorCode.NotSupported,
-      `Cannot modify file storage directly while server is running (PID ${lock.pid})`,
-    );
-  }
-}
-
-/**
  * Filesystem-backed implementation of `Storage`.
  */
 export class FileStorage implements Storage {
@@ -491,6 +475,22 @@ export class FileStorage implements Storage {
 }
 
 // -- Private Helpers --------------------------------------------------------
+
+/**
+ * Validates that no external TetherDB server process is actively running on this data directory.
+ *
+ * @param baseDir - Storage base directory.
+ * @throws TetherServerError if an active server lock is held by another process.
+ */
+export function assertNoActiveServerLock(baseDir: string): void {
+  const lock = readServerLock(baseDir);
+  if (lock && lock.pid !== process.pid) {
+    throw new TetherServerError(
+      TetherServerErrorCode.NotSupported,
+      `Cannot modify file storage directly while server is running (PID ${lock.pid})`,
+    );
+  }
+}
 
 /**
  * Writes data atomically to a file using a unique temp file and atomic rename.

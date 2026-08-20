@@ -141,15 +141,6 @@ export class Sync {
   }
 
   /**
-   * Retrieves the current operational status of the sync coordinator.
-   *
-   * @returns Current `SyncStatus` value.
-   */
-  getStatus(): SyncStatus {
-    return this.currentStatus;
-  }
-
-  /**
    * Initiates a WebSocket connection to the sync endpoint and sends authentication.
    *
    * @param token - Optional session token to connect with.

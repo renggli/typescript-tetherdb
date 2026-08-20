@@ -37,7 +37,7 @@ export async function handleStatusCommand(
     for (const app of status.apps) {
       console.log(`  - App: ${app.id}`);
       console.log(
-        `    Tables (${app.tables.length}): ${app.tables.join(', ') || '(none)'}`,
+        `    Tables (${app.tables.length}): ${app.tables.length > 0 ? app.tables.join(', ') : '(none)'}`,
       );
     }
   } else if (appId) {

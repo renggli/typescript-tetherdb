@@ -30,13 +30,6 @@ export interface SyncOptions {
   rateLimiter?: RateLimiter | null;
 }
 
-interface ActiveClient {
-  webSocket: WebSocket;
-  clientId: string;
-  user: UserStorage;
-  appId: string;
-}
-
 /**
  * Real-time WebSocket synchronization coordinator managing authentication handshakes,
  * snapshot/diff delivery, change ingestion, acknowledgments, and peer broadcasts per application and user.
@@ -461,4 +454,13 @@ export class Sync {
       }
     }
   }
+}
+
+// -- Private Helpers --------------------------------------------------------
+
+interface ActiveClient {
+  webSocket: WebSocket;
+  clientId: string;
+  user: UserStorage;
+  appId: string;
 }
