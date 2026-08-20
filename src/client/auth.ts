@@ -129,7 +129,7 @@ export class Auth {
     if (!rawFetch) {
       throw new TetherClientError(
         TetherClientErrorCode.FetchUnavailable,
-        'No fetch implementation available.',
+        'No fetch implementation available',
       );
     }
     this.fetchFn = rawFetch.bind(globalThis);
@@ -188,7 +188,7 @@ export class Auth {
     if (!options?.username || !options?.password) {
       throw new TetherClientError(
         TetherClientErrorCode.MissingCredentials,
-        'Registration requires username and password.',
+        'Registration requires username and password',
       );
     }
 
@@ -215,7 +215,7 @@ export class Auth {
       if (!res.ok) {
         throw new TetherClientError(
           TetherClientErrorCode.RegistrationFailed,
-          data.error ?? 'Registration failed.',
+          data.error ?? 'Registration failed',
         );
       }
 
@@ -273,7 +273,7 @@ export class Auth {
         if (!res.ok) {
           throw new TetherClientError(
             TetherClientErrorCode.AuthenticationFailed,
-            data.error ?? 'Authentication failed.',
+            data.error ?? 'Authentication failed',
           );
         }
 
@@ -302,7 +302,7 @@ export class Auth {
       if (!token) {
         throw new TetherClientError(
           TetherClientErrorCode.MissingCredentials,
-          'No login credentials or saved session available.',
+          'No login credentials or saved session available',
         );
       }
 

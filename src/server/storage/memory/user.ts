@@ -37,7 +37,7 @@ export class UserMemoryStorage implements UserStorage {
     if (!data) {
       throw new TetherServerError(
         TetherServerErrorCode.NotFound,
-        'User not found.',
+        'User not found',
       );
     }
     return data;

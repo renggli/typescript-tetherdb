@@ -20,7 +20,7 @@ export async function handleMaintenanceCommand(
   if (!action) {
     throw new TetherServerError(
       TetherServerErrorCode.InvalidInput,
-      'Missing maintenance action. Expected "checkpoint", "vacuum", or "prune".',
+      'Missing maintenance action. Expected "checkpoint", "vacuum", or "prune"',
     );
   }
 
@@ -48,7 +48,7 @@ export async function handleMaintenanceCommand(
     default:
       throw new TetherServerError(
         TetherServerErrorCode.InvalidInput,
-        `Unknown maintenance action: "${action}". Expected "checkpoint", "vacuum", or "prune".`,
+        `Unknown maintenance action: "${action}". Expected "checkpoint", "vacuum", or "prune"`,
       );
   }
 }

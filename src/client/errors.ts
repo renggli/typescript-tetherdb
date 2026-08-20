@@ -49,22 +49,22 @@ export class TetherClientError extends Error {
 function getDefaultClientErrorMessage(code: TetherClientErrorCode): string {
   switch (code) {
     case TetherClientErrorCode.MissingConfiguration:
-      return 'Missing required configuration option.';
+      return 'Missing required configuration option';
     case TetherClientErrorCode.InvalidInput:
-      return 'Invalid input parameter provided.';
+      return 'Invalid input parameter provided';
     case TetherClientErrorCode.FetchUnavailable:
-      return 'No fetch implementation available.';
+      return 'No fetch implementation available';
     case TetherClientErrorCode.NetworkError:
-      return 'Network communication error.';
+      return 'Network communication error';
     case TetherClientErrorCode.MissingCredentials:
-      return 'Missing authentication credentials.';
+      return 'Missing authentication credentials';
     case TetherClientErrorCode.RegistrationFailed:
-      return 'Registration failed.';
+      return 'Registration failed';
     case TetherClientErrorCode.AuthenticationFailed:
-      return 'Authentication failed.';
+      return 'Authentication failed';
     case TetherClientErrorCode.StorageError:
-      return 'Local storage operation failed.';
+      return 'Local storage operation failed';
     case TetherClientErrorCode.SyncError:
-      return 'Synchronization error.';
+      return 'Synchronization error';
   }
 }

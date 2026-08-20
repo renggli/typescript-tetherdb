@@ -289,7 +289,7 @@ describe.each(storageDescriptors)(
         });
         expect(res.status).toBe(400);
         const json = (await res.json()) as { error: string };
-        expect(json.error).toBe('Invalid JSON payload.');
+        expect(json.error).toBe('Invalid JSON payload');
       });
 
       it('should return 404 for unknown HTTP methods or routes', async () => {

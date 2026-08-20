@@ -11,15 +11,21 @@ import { Sync } from './sync.js';
 import { normalizePassword, normalizeUsername } from './validate.js';
 
 /**
- * Rate limiting options for authentication endpoints.
+ * Rate limiting and resource control options for authentication endpoints and sync streams.
  */
-export interface AuthRateLimitOptions {
+export interface RateLimitOptions {
   /** Maximum login attempts per IP within the time window (defaults to 100). */
   ipLoginMaxRequests?: number;
   /** Maximum login attempts per target username within the time window (defaults to 20). */
   userLoginMaxRequests?: number;
   /** Maximum registration attempts per IP within the time window (defaults to 100). */
   ipRegisterMaxRequests?: number;
+  /** Maximum WebSocket connection handshakes per IP within the time window (defaults to 100). */
+  ipSyncMaxRequests?: number;
+  /** Maximum concurrent active WebSocket connections allowed per user channel (defaults to 20). */
+  maxConcurrentConnectionsPerUser?: number;
+  /** Maximum duration in milliseconds to wait for authentication before terminating socket (defaults to 10,000ms). */
+  authTimeoutMs?: number;
   /** Sliding window duration in milliseconds (defaults to 60,000ms / 1 minute). */
   windowMs?: number;
   /** Consecutive failed attempts before progressive backoff begins (defaults to 5). */
@@ -42,8 +48,8 @@ export interface TetherServerOptions {
   webSocketPath?: string;
   /** Whether user self-registration is allowed via `/auth/register` (defaults to true). */
   allowRegistration?: boolean;
-  /** Rate limiting options for auth endpoints, or `false` to disable rate limiting (defaults to true). */
-  rateLimiting?: boolean | AuthRateLimitOptions;
+  /** Rate limiting options for auth and sync endpoints, or `false` to disable rate limiting (defaults to true). */
+  rateLimiting?: boolean | RateLimitOptions;
 }
 
 /**
@@ -101,7 +107,6 @@ export class TetherServer {
    */
   constructor(options: TetherServerOptions = {}) {
     this.storage = options.storage ?? new MemoryStorage();
-    this.sync = new Sync(this.storage);
     this.basePath = normalizeBasePath(options.basePath ?? '');
     this.webSocketPath = options.webSocketPath ?? `${this.basePath}/sync`;
     this.allowRegistration = options.allowRegistration ?? true;
@@ -111,8 +116,13 @@ export class TetherServer {
       this.ipLoginLimiter = null;
       this.userLoginLimiter = null;
       this.ipRegisterLimiter = null;
+      this.sync = new Sync(this.storage, {
+        maxConcurrentConnectionsPerUser: 1_000,
+        authTimeoutMs: 0,
+        rateLimiter: null,
+      });
     } else {
-      const opts: AuthRateLimitOptions =
+      const opts: RateLimitOptions =
         typeof rateLimitConfig === 'object' ? rateLimitConfig : {};
       const windowMs = opts.windowMs ?? 60_000;
       const maxFailures = opts.maxFailures ?? 5;
@@ -136,6 +146,21 @@ export class TetherServer {
       this.ipRegisterLimiter = new RateLimiter({
         windowMs,
         maxRequests: opts.ipRegisterMaxRequests ?? 100,
+      });
+
+      const syncLimiter = new RateLimiter({
+        windowMs,
+        maxRequests: opts.ipSyncMaxRequests ?? 100,
+        maxFailures,
+        initialBackoffMs,
+        maxBackoffMs,
+      });
+
+      this.sync = new Sync(this.storage, {
+        maxConcurrentConnectionsPerUser:
+          opts.maxConcurrentConnectionsPerUser ?? 20,
+        authTimeoutMs: opts.authTimeoutMs ?? 10_000,
+        rateLimiter: syncLimiter,
       });
     }
   }
@@ -210,8 +235,9 @@ export class TetherServer {
           serverNoContextTakeover: true,
         },
       });
-      this._webSocketServer.on('connection', (ws) => {
-        this.sync.handleConnection(ws);
+      this._webSocketServer.on('connection', (ws, req) => {
+        const ip = req ? this.getClientIp(req) : '127.0.0.1';
+        this.sync.handleConnection(ws, ip);
       });
     }
     server.on('upgrade', (req, socket, head) => {
@@ -371,7 +397,7 @@ export class TetherServer {
       return false;
     } catch (err) {
       const status = getHttpStatusForError(err);
-      const msg = err instanceof Error ? err.message : 'Internal server error.';
+      const msg = err instanceof Error ? err.message : 'Internal server error';
       this.sendJson(res, status, { error: msg });
       return true;
     }
@@ -400,7 +426,7 @@ export class TetherServer {
           reject(
             new TetherServerError(
               TetherServerErrorCode.LimitExceeded,
-              'Payload exceeds maximum allowed size.',
+              'Payload exceeds maximum allowed size',
             ),
           );
         }
@@ -412,7 +438,7 @@ export class TetherServer {
           reject(
             new TetherServerError(
               TetherServerErrorCode.InvalidInput,
-              'Invalid JSON payload.',
+              'Invalid JSON payload',
             ),
           );
         }
@@ -449,7 +475,7 @@ export class TetherServer {
       this.sendJson(res, 200, { status: 'ready' });
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : 'Storage unavailable.';
+        err instanceof Error ? err.message : 'Storage unavailable';
       this.sendJson(res, 503, { status: 'unready', error: message });
     }
   }
@@ -474,7 +500,7 @@ export class TetherServer {
     const ip = this.getClientIp(req);
     if (this.ipRegisterLimiter && !this.ipRegisterLimiter.consume(ip)) {
       this.sendJson(res, 429, {
-        error: 'Too many registration requests. Please try again later.',
+        error: 'Too many registration requests',
       });
       return;
     }
@@ -503,7 +529,7 @@ export class TetherServer {
       });
     } catch (err) {
       const status = getHttpStatusForError(err);
-      const msg = err instanceof Error ? err.message : 'Registration error.';
+      const msg = err instanceof Error ? err.message : 'Registration error';
       this.sendJson(res, status, { error: msg });
     }
   }
@@ -515,7 +541,7 @@ export class TetherServer {
     const ip = this.getClientIp(req);
     if (this.ipLoginLimiter && !this.ipLoginLimiter.consume(ip)) {
       this.sendJson(res, 429, {
-        error: 'Too many login attempts. Please try again later.',
+        error: 'Too many login attempts',
       });
       return;
     }

@@ -13,16 +13,16 @@ describe('TetherClientError', () => {
     expect(err).toBeInstanceOf(TetherClientError);
     expect(err.name).toBe('TetherClientError');
     expect(err.code).toBe(TetherClientErrorCode.MissingConfiguration);
-    expect(err.message).toBe('Missing required configuration option.');
+    expect(err.message).toBe('Missing required configuration option');
   });
 
   it('should initialize with custom message', () => {
     const err = new TetherClientError(
       TetherClientErrorCode.FetchUnavailable,
-      'Custom fetch error.',
+      'Custom fetch error',
     );
     expect(err.code).toBe(TetherClientErrorCode.FetchUnavailable);
-    expect(err.message).toBe('Custom fetch error.');
+    expect(err.message).toBe('Custom fetch error');
   });
 
   it('should provide default messages for all client error codes', () => {

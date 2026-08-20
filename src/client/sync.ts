@@ -99,13 +99,13 @@ export class Sync {
     if (!options.appId) {
       throw new TetherClientError(
         TetherClientErrorCode.MissingConfiguration,
-        'Missing required appId in SyncOptions.',
+        'Missing required appId in SyncOptions',
       );
     }
     if (!options.clientId) {
       throw new TetherClientError(
         TetherClientErrorCode.MissingConfiguration,
-        'Missing required clientId in SyncOptions.',
+        'Missing required clientId in SyncOptions',
       );
     }
     this.url = options.url;
@@ -179,7 +179,7 @@ export class Sync {
       this.onError.publish(
         new TetherClientError(
           TetherClientErrorCode.MissingConfiguration,
-          'No WebSocket implementation available in this environment.',
+          'No WebSocket implementation available in this environment',
         ),
       );
       return;
@@ -194,7 +194,7 @@ export class Sync {
           TetherClientErrorCode.NetworkError,
           err instanceof Error
             ? err.message
-            : 'Failed to construct WebSocket connection.',
+            : 'Failed to construct WebSocket connection',
         ),
       );
       this.scheduleReconnect();
@@ -222,7 +222,7 @@ export class Sync {
                 TetherClientErrorCode.SyncError,
                 err instanceof Error
                   ? err.message
-                  : 'Failed to process incoming WebSocket message.',
+                  : 'Failed to process incoming WebSocket message',
               ),
             );
           });
@@ -232,7 +232,7 @@ export class Sync {
             TetherClientErrorCode.SyncError,
             err instanceof Error
               ? err.message
-              : 'Failed to parse incoming WebSocket message.',
+              : 'Failed to parse incoming WebSocket message',
           ),
         );
       }
@@ -242,7 +242,7 @@ export class Sync {
       this.onError.publish(
         new TetherClientError(
           TetherClientErrorCode.NetworkError,
-          'WebSocket connection encountered an error.',
+          'WebSocket connection encountered an error',
         ),
       );
     };
@@ -360,7 +360,7 @@ export class Sync {
           TetherClientErrorCode.SyncError,
           err instanceof Error
             ? err.message
-            : 'Failed to push outbox batch to server.',
+            : 'Failed to push outbox batch to server',
         ),
       );
     } finally {

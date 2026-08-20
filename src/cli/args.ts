@@ -42,7 +42,7 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
     } else if (arg.startsWith('-')) {
       throw new TetherServerError(
         TetherServerErrorCode.ConfigurationError,
-        `Unknown or invalid option: "${arg}".`,
+        `Unknown or invalid option: "${arg}"`,
       );
     } else {
       positionalArgs.push(arg);

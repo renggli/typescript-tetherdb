@@ -9,6 +9,7 @@ import {
   type SnapshotRecord,
 } from '../shared/types.js';
 import { TetherServerError, TetherServerErrorCode } from './errors.js';
+import type { RateLimiter } from './rate-limiter.js';
 import type { Storage } from './storage/storage.js';
 import type { UserStorage } from './storage/user.js';
 import {
@@ -16,6 +17,18 @@ import {
   validateAppId,
   validateIdentifier,
 } from './validate.js';
+
+/**
+ * Configuration options for the WebSocket synchronization coordinator.
+ */
+export interface SyncOptions {
+  /** Maximum number of concurrent active connections allowed per user channel (defaults to 20). */
+  maxConcurrentConnectionsPerUser?: number;
+  /** Maximum duration in milliseconds to wait for authentication before terminating socket (defaults to 10,000ms). */
+  authTimeoutMs?: number;
+  /** Optional rate limiter for connection handshakes and invalid token tracking. */
+  rateLimiter?: RateLimiter | null;
+}
 
 interface ActiveClient {
   webSocket: WebSocket;
@@ -29,17 +42,27 @@ interface ActiveClient {
  * snapshot/diff delivery, change ingestion, acknowledgments, and peer broadcasts per application and user.
  */
 export class Sync {
-  private storage: Storage;
-  private userClients: Map<string, Set<ActiveClient>> = new Map(); // key = `${appId}:${userId}`
-  private webSocketToClient: Map<WebSocket, ActiveClient> = new Map();
+  private readonly storage: Storage;
+  private readonly maxConcurrentConnectionsPerUser: number;
+  private readonly authTimeoutMs: number;
+  private readonly rateLimiter: RateLimiter | null;
+  private readonly userClients = new Map<string, Set<ActiveClient>>(); // key = `${appId}:${userId}`
+  private readonly webSocketToClient = new Map<WebSocket, ActiveClient>();
+  private readonly pendingAuthTimers = new Map<WebSocket, NodeJS.Timeout>();
+  private readonly webSocketToIp = new Map<WebSocket, string>();
 
   /**
    * Initializes a new Sync coordinator instance.
    *
    * @param storage - Pluggable backend storage engine.
+   * @param options - Configuration options for concurrency limits, auth timeout, and rate limiting.
    */
-  constructor(storage: Storage) {
+  constructor(storage: Storage, options: SyncOptions = {}) {
     this.storage = storage;
+    this.maxConcurrentConnectionsPerUser =
+      options.maxConcurrentConnectionsPerUser ?? 20;
+    this.authTimeoutMs = options.authTimeoutMs ?? 10_000;
+    this.rateLimiter = options.rateLimiter ?? null;
   }
 
   /**
@@ -53,8 +76,33 @@ export class Sync {
    * Handles an incoming WebSocket connection, binding message, error, and disconnection events.
    *
    * @param webSocket - Active WebSocket connection.
+   * @param clientIp - Remote client IP address.
    */
-  handleConnection(webSocket: WebSocket): void {
+  handleConnection(webSocket: WebSocket, clientIp = '127.0.0.1'): void {
+    this.webSocketToIp.set(webSocket, clientIp);
+
+    if (this.rateLimiter && !this.rateLimiter.consume(clientIp)) {
+      this.send(webSocket, {
+        type: ServerMessageType.AuthError,
+        message: 'Too many connection attempts',
+      });
+      webSocket.close();
+      return;
+    }
+
+    if (this.authTimeoutMs > 0) {
+      const timer = setTimeout(() => {
+        if (!this.webSocketToClient.has(webSocket)) {
+          this.send(webSocket, {
+            type: ServerMessageType.AuthError,
+            message: 'Authentication timeout',
+          });
+          webSocket.close();
+        }
+      }, this.authTimeoutMs);
+      this.pendingAuthTimers.set(webSocket, timer);
+    }
+
     let messageQueue: Promise<void> = Promise.resolve();
 
     webSocket.on('message', (data) => {
@@ -71,7 +119,7 @@ export class Sync {
             await this.handleMessage(webSocket, msg);
           } catch (err) {
             const message =
-              err instanceof Error ? err.message : 'Unknown server error.';
+              err instanceof Error ? err.message : 'Unknown server error';
             console.error(
               `[TetherServer.Sync] Error processing WebSocket message${userContext}:`,
               err,
@@ -117,7 +165,7 @@ export class Sync {
     if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string') {
       throw new TetherServerError(
         TetherServerErrorCode.InvalidInput,
-        'Invalid message format.',
+        'Invalid message format',
       );
     }
 
@@ -137,7 +185,7 @@ export class Sync {
       default:
         throw new TetherServerError(
           TetherServerErrorCode.InvalidInput,
-          'Unsupported message type.',
+          'Unsupported message type',
         );
     }
   }
@@ -148,10 +196,19 @@ export class Sync {
     webSocket: WebSocket,
     msg: AuthClientMessage,
   ): Promise<void> {
+    const ip = this.webSocketToIp.get(webSocket) ?? '127.0.0.1';
+
+    const authTimer = this.pendingAuthTimers.get(webSocket);
+    if (authTimer) {
+      clearTimeout(authTimer);
+      this.pendingAuthTimers.delete(webSocket);
+    }
+
     if (typeof msg.token !== 'string' || !msg.token) {
+      this.rateLimiter?.recordFailure(ip);
       this.send(webSocket, {
         type: ServerMessageType.AuthError,
-        message: 'Missing or invalid authentication token.',
+        message: 'Missing or invalid authentication token',
       });
       webSocket.close();
       return;
@@ -159,9 +216,10 @@ export class Sync {
 
     const user = await this.storage.getUserByToken(msg.token);
     if (!user) {
+      this.rateLimiter?.recordFailure(ip);
       this.send(webSocket, {
         type: ServerMessageType.AuthError,
-        message: 'Invalid or expired authentication token.',
+        message: 'Invalid or expired authentication token',
       });
       webSocket.close();
       return;
@@ -170,7 +228,7 @@ export class Sync {
     if (typeof msg.appId !== 'string' || !msg.appId) {
       this.send(webSocket, {
         type: ServerMessageType.AuthError,
-        message: 'Missing required field: appId.',
+        message: 'Missing required field: appId',
       });
       webSocket.close();
       return;
@@ -181,11 +239,29 @@ export class Sync {
     if (!app) {
       this.send(webSocket, {
         type: ServerMessageType.AuthError,
-        message: 'Application not found.',
+        message: 'Application not found',
       });
       webSocket.close();
       return;
     }
+
+    const channelKey = `${appId}:${user.id}`;
+    let set = this.userClients.get(channelKey);
+    if (!set) {
+      set = new Set();
+      this.userClients.set(channelKey, set);
+    }
+
+    if (set.size >= this.maxConcurrentConnectionsPerUser) {
+      this.send(webSocket, {
+        type: ServerMessageType.AuthError,
+        message: 'Maximum concurrent connections exceeded for this user',
+      });
+      webSocket.close();
+      return;
+    }
+
+    this.rateLimiter?.reset(ip);
 
     const clientId = validateIdentifier(
       msg.clientId ?? 'client_anon',
@@ -199,12 +275,6 @@ export class Sync {
     };
 
     this.webSocketToClient.set(webSocket, client);
-    const channelKey = `${appId}:${user.id}`;
-    let set = this.userClients.get(channelKey);
-    if (!set) {
-      set = new Set();
-      this.userClients.set(channelKey, set);
-    }
     set.add(client);
 
     const currentSeq = await app.getCurrentSeq(user);
@@ -228,7 +298,7 @@ export class Sync {
     if (!client) {
       this.send(webSocket, {
         type: ServerMessageType.AuthError,
-        message: 'Not authenticated.',
+        message: 'Not authenticated',
       });
       return;
     }
@@ -236,7 +306,7 @@ export class Sync {
     if (!Array.isArray(msg.changes)) {
       throw new TetherServerError(
         TetherServerErrorCode.InvalidInput,
-        'Invalid change batch: changes must be an array.',
+        'Invalid change batch: changes must be an array',
       );
     }
 
@@ -246,7 +316,7 @@ export class Sync {
     if (batchBytes > maxBatchSize) {
       throw new TetherServerError(
         TetherServerErrorCode.LimitExceeded,
-        'Change batch exceeds maximum allowed size.',
+        'Change batch exceeds maximum allowed size',
       );
     }
 
@@ -256,7 +326,7 @@ export class Sync {
     if (!app) {
       throw new TetherServerError(
         TetherServerErrorCode.NotFound,
-        'Application not found.',
+        'Application not found',
       );
     }
 
@@ -292,6 +362,13 @@ export class Sync {
   // -- Private Helpers ------------------------------------------------------
 
   private cleanupConnection(webSocket: WebSocket): void {
+    const authTimer = this.pendingAuthTimers.get(webSocket);
+    if (authTimer) {
+      clearTimeout(authTimer);
+      this.pendingAuthTimers.delete(webSocket);
+    }
+    this.webSocketToIp.delete(webSocket);
+
     const client = this.webSocketToClient.get(webSocket);
     if (!client) return;
 
@@ -320,7 +397,7 @@ export class Sync {
     if (!app) {
       throw new TetherServerError(
         TetherServerErrorCode.NotFound,
-        'Application not found.',
+        'Application not found',
       );
     }
 

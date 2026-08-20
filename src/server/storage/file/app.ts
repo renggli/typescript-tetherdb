@@ -190,7 +190,7 @@ export class AppFileStorage implements AppStorage {
     if (manifest.tables.includes(safeName)) {
       throw new TetherServerError(
         TetherServerErrorCode.AlreadyExists,
-        'Table already exists in this application.',
+        'Table already exists in this application',
       );
     }
     manifest.tables.push(safeName);
@@ -242,7 +242,7 @@ export class AppFileStorage implements AppStorage {
         if (!registeredTables.has(tableName)) {
           throw new TetherServerError(
             TetherServerErrorCode.NotFound,
-            'Table not found.',
+            'Table not found',
           );
         }
 
@@ -259,7 +259,7 @@ export class AppFileStorage implements AppStorage {
         ) {
           throw new TetherServerError(
             TetherServerErrorCode.LimitExceeded,
-            'Table record limit reached.',
+            'Table record limit reached',
           );
         }
 
@@ -267,7 +267,7 @@ export class AppFileStorage implements AppStorage {
         if (payloadBytes > maxRecordSize) {
           throw new TetherServerError(
             TetherServerErrorCode.LimitExceeded,
-            'Record payload exceeds maximum allowed size.',
+            'Record payload exceeds maximum allowed size',
           );
         }
 

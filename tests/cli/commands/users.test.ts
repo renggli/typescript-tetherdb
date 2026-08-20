@@ -110,7 +110,7 @@ describe('handleUsersCommand', () => {
         TetherServerErrorCode.ConfigurationError,
       );
       expect((err as Error).message).toBe(
-        'Unknown users action: "invalid_action".',
+        'Unknown users action: "invalid_action"',
       );
     }
   });

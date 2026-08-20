@@ -27,7 +27,7 @@ export async function handleAppsCommand(
     if (!appId) {
       throw new TetherServerError(
         TetherServerErrorCode.ConfigurationError,
-        'Missing application ID.',
+        'Missing application ID',
       );
     }
     if (await storage.getApp(appId)) {
@@ -39,7 +39,7 @@ export async function handleAppsCommand(
     if (!appId) {
       throw new TetherServerError(
         TetherServerErrorCode.ConfigurationError,
-        'Missing application ID.',
+        'Missing application ID',
       );
     }
     const app = await storage.getApp(appId);
@@ -49,7 +49,7 @@ export async function handleAppsCommand(
   } else {
     throw new TetherServerError(
       TetherServerErrorCode.ConfigurationError,
-      `Unknown apps action: "${action}".`,
+      `Unknown apps action: "${action}"`,
     );
   }
 }

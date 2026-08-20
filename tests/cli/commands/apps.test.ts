@@ -102,7 +102,7 @@ describe('handleAppsCommand', () => {
         TetherServerErrorCode.ConfigurationError,
       );
       expect((err as Error).message).toBe(
-        'Unknown apps action: "invalid-action".',
+        'Unknown apps action: "invalid-action"',
       );
     }
   });

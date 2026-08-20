@@ -78,7 +78,7 @@ export class AppSqliteStorage implements AppStorage {
     if (existing) {
       throw new TetherServerError(
         TetherServerErrorCode.AlreadyExists,
-        'Table already exists in this application.',
+        'Table already exists in this application',
       );
     }
     appsDb.stmtInsertTable.run(this.id, safeName, Date.now());
@@ -130,7 +130,7 @@ export class AppSqliteStorage implements AppStorage {
           if (!tableExists) {
             throw new TetherServerError(
               TetherServerErrorCode.NotFound,
-              'Table not found.',
+              'Table not found',
             );
           }
           checkedTables.add(tableName);
@@ -149,7 +149,7 @@ export class AppSqliteStorage implements AppStorage {
           if (tableCount >= maxRecords) {
             throw new TetherServerError(
               TetherServerErrorCode.LimitExceeded,
-              'Table record limit reached.',
+              'Table record limit reached',
             );
           }
         }
@@ -158,7 +158,7 @@ export class AppSqliteStorage implements AppStorage {
         if (payloadBytes > maxRecordSize) {
           throw new TetherServerError(
             TetherServerErrorCode.LimitExceeded,
-            'Record payload exceeds maximum allowed size.',
+            'Record payload exceeds maximum allowed size',
           );
         }
 

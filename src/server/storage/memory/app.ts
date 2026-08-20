@@ -34,7 +34,7 @@ export class AppMemoryStorage implements AppStorage {
     if (this.tables.has(safeName)) {
       throw new TetherServerError(
         TetherServerErrorCode.AlreadyExists,
-        'Table already exists in this application.',
+        'Table already exists in this application',
       );
     }
     const table = new TableMemoryStorage(safeName, this, this.storage);
@@ -69,7 +69,7 @@ export class AppMemoryStorage implements AppStorage {
       if (!this.tables.has(tableName)) {
         throw new TetherServerError(
           TetherServerErrorCode.NotFound,
-          'Table not found.',
+          'Table not found',
         );
       }
 
@@ -86,7 +86,7 @@ export class AppMemoryStorage implements AppStorage {
       ) {
         throw new TetherServerError(
           TetherServerErrorCode.LimitExceeded,
-          'Table record limit reached.',
+          'Table record limit reached',
         );
       }
 
@@ -94,7 +94,7 @@ export class AppMemoryStorage implements AppStorage {
       if (payloadBytes > maxRecordSize) {
         throw new TetherServerError(
           TetherServerErrorCode.LimitExceeded,
-          'Record payload exceeds maximum allowed size.',
+          'Record payload exceeds maximum allowed size',
         );
       }
 

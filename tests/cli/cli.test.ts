@@ -75,7 +75,7 @@ describe('runCli', () => {
     await runCli(['unknown_command']);
     expect(errorSpy).toHaveBeenCalledWith(
       'Command failed:',
-      'Unknown command: "unknown_command".',
+      'Unknown command: "unknown_command"',
     );
     expect(exitSpy).toHaveBeenCalledWith(1);
 

@@ -768,7 +768,7 @@ describe('Sync', () => {
       await new Promise((r) => setTimeout(r, 20));
 
       expect(errors).toHaveLength(1);
-      expect(errors[0].message).toBe('Failed to push outbox batch to server.');
+      expect(errors[0].message).toBe('Failed to push outbox batch to server');
     });
 
     it('should unregister window event listeners on destroy if window exists', () => {

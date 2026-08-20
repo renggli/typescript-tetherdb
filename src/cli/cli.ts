@@ -72,7 +72,7 @@ export async function runCli(
       default:
         throw new TetherServerError(
           TetherServerErrorCode.ConfigurationError,
-          `Unknown command: "${command}".`,
+          `Unknown command: "${command}"`,
         );
     }
     await storage.close?.();

@@ -54,7 +54,7 @@ export function assertNoActiveServerLock(baseDir: string): void {
   if (lock && lock.pid !== process.pid) {
     throw new TetherServerError(
       TetherServerErrorCode.NotSupported,
-      `Cannot modify file storage directly while a TetherDB server is actively running (PID: ${lock.pid}, Port: ${lock.port}). Please stop the server first or use SQLite storage for safe concurrent access.`,
+      `Cannot modify file storage directly while server is running (PID ${lock.pid})`,
     );
   }
 }
@@ -172,7 +172,7 @@ export class FileStorage implements Storage {
       if (!existing) {
         throw new TetherServerError(
           TetherServerErrorCode.NotFound,
-          'User not found.',
+          'User not found',
         );
       }
       users.set(id, { ...existing, ...update });
@@ -188,7 +188,7 @@ export class FileStorage implements Storage {
       if (apps.has(safeId)) {
         throw new TetherServerError(
           TetherServerErrorCode.AlreadyExists,
-          'Application already exists.',
+          'Application already exists',
         );
       }
 
@@ -256,7 +256,7 @@ export class FileStorage implements Storage {
         if (u.username.toLowerCase() === safeUsername.toLowerCase()) {
           throw new TetherServerError(
             TetherServerErrorCode.AlreadyExists,
-            'Username is already registered.',
+            'Username is already registered',
           );
         }
       }
@@ -379,7 +379,7 @@ export class FileStorage implements Storage {
     if (appId && targetApps.length === 0) {
       throw new TetherServerError(
         TetherServerErrorCode.NotFound,
-        `Application "${appId}" not found.`,
+        `Application "${appId}" not found`,
       );
     }
 
@@ -404,14 +404,14 @@ export class FileStorage implements Storage {
   async checkpoint(appId?: string): Promise<MaintenanceResult> {
     throw new TetherServerError(
       TetherServerErrorCode.NotSupported,
-      `Checkpoint operation is not supported by file storage.${appId ? ` (app: ${appId})` : ''}`,
+      `Checkpoint operation is not supported by file storage${appId ? ` (app: ${appId})` : ''}`,
     );
   }
 
   async vacuum(appId?: string): Promise<MaintenanceResult> {
     throw new TetherServerError(
       TetherServerErrorCode.NotSupported,
-      `Vacuum operation is not supported by file storage.${appId ? ` (app: ${appId})` : ''}`,
+      `Vacuum operation is not supported by file storage${appId ? ` (app: ${appId})` : ''}`,
     );
   }
 
@@ -425,7 +425,7 @@ export class FileStorage implements Storage {
     if (appId && targetApps.length === 0) {
       throw new TetherServerError(
         TetherServerErrorCode.NotFound,
-        `Application "${appId}" not found.`,
+        `Application "${appId}" not found`,
       );
     }
 
@@ -481,7 +481,7 @@ export class FileStorage implements Storage {
       backend: 'file',
       appId,
       affectedCount: totalPruned,
-      message: `Prune completed successfully. Removed ${totalPruned} changelog record(s).`,
+      message: `Prune completed successfully. Removed ${totalPruned} changelog record(s)`,
     };
   }
 

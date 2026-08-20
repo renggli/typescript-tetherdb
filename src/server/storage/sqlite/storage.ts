@@ -405,7 +405,7 @@ export class SqliteStorage implements Storage {
     if (existing) {
       throw new TetherServerError(
         TetherServerErrorCode.AlreadyExists,
-        'Application already exists.',
+        'Application already exists',
       );
     }
 
@@ -448,7 +448,7 @@ export class SqliteStorage implements Storage {
     if (existing) {
       throw new TetherServerError(
         TetherServerErrorCode.AlreadyExists,
-        'Username is already registered.',
+        'Username is already registered',
       );
     }
 
@@ -649,7 +649,7 @@ export class SqliteStorage implements Storage {
     if (appId && targetApps.length === 0) {
       throw new TetherServerError(
         TetherServerErrorCode.NotFound,
-        `Application "${appId}" not found.`,
+        `Application "${appId}" not found`,
       );
     }
 
@@ -689,7 +689,7 @@ export class SqliteStorage implements Storage {
     if (appId && targetApps.length === 0) {
       throw new TetherServerError(
         TetherServerErrorCode.NotFound,
-        `Application "${appId}" not found.`,
+        `Application "${appId}" not found`,
       );
     }
 
@@ -717,7 +717,7 @@ export class SqliteStorage implements Storage {
       backend: 'sqlite',
       appId,
       affectedCount: count,
-      message: `Checkpoint completed successfully across ${count} database(s).`,
+      message: `Checkpoint completed successfully across ${count} database(s)`,
     };
   }
 
@@ -739,7 +739,7 @@ export class SqliteStorage implements Storage {
     if (appId && targetApps.length === 0) {
       throw new TetherServerError(
         TetherServerErrorCode.NotFound,
-        `Application "${appId}" not found.`,
+        `Application "${appId}" not found`,
       );
     }
 
@@ -767,7 +767,7 @@ export class SqliteStorage implements Storage {
       backend: 'sqlite',
       appId,
       affectedCount: count,
-      message: `Vacuum completed successfully across ${count} database(s).`,
+      message: `Vacuum completed successfully across ${count} database(s)`,
     };
   }
 
@@ -781,7 +781,7 @@ export class SqliteStorage implements Storage {
     if (appId && targetApps.length === 0) {
       throw new TetherServerError(
         TetherServerErrorCode.NotFound,
-        `Application "${appId}" not found.`,
+        `Application "${appId}" not found`,
       );
     }
 
@@ -823,7 +823,7 @@ export class SqliteStorage implements Storage {
       backend: 'sqlite',
       appId,
       affectedCount: totalPruned,
-      message: `Prune completed successfully. Removed ${totalPruned} changelog record(s).`,
+      message: `Prune completed successfully. Removed ${totalPruned} changelog record(s)`,
     };
   }
 

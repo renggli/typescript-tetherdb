@@ -63,7 +63,7 @@ export function validateRecordId(id: string): string {
   if (typeof id !== 'string' || id.length === 0 || id.length > 512) {
     throw new TetherServerError(
       TetherServerErrorCode.InvalidInput,
-      'Invalid record ID.',
+      'Invalid record ID',
     );
   }
   return id;
@@ -91,7 +91,7 @@ export function validateUsername(username: string): string {
   if (typeof username !== 'string') {
     throw new TetherServerError(
       TetherServerErrorCode.InvalidInput,
-      `Username must be between ${MIN_USERNAME_LENGTH} and ${MAX_USERNAME_LENGTH} characters.`,
+      `Username must be between ${MIN_USERNAME_LENGTH} and ${MAX_USERNAME_LENGTH} characters`,
     );
   }
   const normalized = normalizeUsername(username);
@@ -101,7 +101,7 @@ export function validateUsername(username: string): string {
   ) {
     throw new TetherServerError(
       TetherServerErrorCode.InvalidInput,
-      `Username must be between ${MIN_USERNAME_LENGTH} and ${MAX_USERNAME_LENGTH} characters.`,
+      `Username must be between ${MIN_USERNAME_LENGTH} and ${MAX_USERNAME_LENGTH} characters`,
     );
   }
   return normalized;
@@ -128,7 +128,7 @@ export function validatePassword(password: string): string {
   if (typeof password !== 'string') {
     throw new TetherServerError(
       TetherServerErrorCode.InvalidInput,
-      'Password must be a valid non-empty string.',
+      'Password must be a valid non-empty string',
     );
   }
   const normalized = normalizePassword(password);
@@ -138,7 +138,7 @@ export function validatePassword(password: string): string {
   ) {
     throw new TetherServerError(
       TetherServerErrorCode.InvalidInput,
-      `Password must be between ${MIN_PASSWORD_LENGTH} and ${MAX_PASSWORD_LENGTH} characters.`,
+      `Password must be between ${MIN_PASSWORD_LENGTH} and ${MAX_PASSWORD_LENGTH} characters`,
     );
   }
   return normalized;
@@ -156,7 +156,7 @@ export function validateIdentifier(id: string, name = 'identifier'): string {
   if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{2,128}$/.test(id)) {
     throw new TetherServerError(
       TetherServerErrorCode.InvalidInput,
-      `Invalid ${name}.`,
+      `Invalid ${name}`,
     );
   }
   return id;
@@ -198,7 +198,7 @@ function validateFilesystemSafe(id: string, name: string): string {
   if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(id)) {
     throw new TetherServerError(
       TetherServerErrorCode.InvalidInput,
-      `Invalid ${name}.`,
+      `Invalid ${name}`,
     );
   }
   return id;

@@ -20,21 +20,21 @@ export async function handleTablesCommand(
     if (!appId) {
       throw new TetherServerError(
         TetherServerErrorCode.ConfigurationError,
-        'Missing application ID.',
+        'Missing application ID',
       );
     }
     const tableNames = args.slice(3);
     if (!tableNames.length) {
       throw new TetherServerError(
         TetherServerErrorCode.ConfigurationError,
-        'Missing table name.',
+        'Missing table name',
       );
     }
     const app = await storage.getApp(appId);
     if (!app) {
       throw new TetherServerError(
         TetherServerErrorCode.NotFound,
-        `Application "${appId}" not found.`,
+        `Application "${appId}" not found`,
       );
     }
     for (const tableName of tableNames) {
@@ -66,14 +66,14 @@ export async function handleTablesCommand(
     if (!appId) {
       throw new TetherServerError(
         TetherServerErrorCode.ConfigurationError,
-        'Missing application ID.',
+        'Missing application ID',
       );
     }
     const app = await storage.getApp(appId);
     if (!app) {
       throw new TetherServerError(
         TetherServerErrorCode.NotFound,
-        `Application "${appId}" not found.`,
+        `Application "${appId}" not found`,
       );
     }
     const tables = await app.getTables();

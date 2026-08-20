@@ -27,13 +27,13 @@ export async function handleUsersCommand(
     if (!arg1) {
       throw new TetherServerError(
         TetherServerErrorCode.ConfigurationError,
-        'Missing username.',
+        'Missing username',
       );
     }
     if (!arg2) {
       throw new TetherServerError(
         TetherServerErrorCode.ConfigurationError,
-        'Missing password.',
+        'Missing password',
       );
     }
     const user = await storage.createUser(arg1, arg2);
@@ -42,7 +42,7 @@ export async function handleUsersCommand(
     if (!arg1) {
       throw new TetherServerError(
         TetherServerErrorCode.ConfigurationError,
-        'Missing user ID.',
+        'Missing user ID',
       );
     }
     const user = await storage.getUser(arg1);
@@ -52,7 +52,7 @@ export async function handleUsersCommand(
   } else {
     throw new TetherServerError(
       TetherServerErrorCode.ConfigurationError,
-      `Unknown users action: "${action}".`,
+      `Unknown users action: "${action}"`,
     );
   }
 }

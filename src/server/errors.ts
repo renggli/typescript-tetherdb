@@ -49,22 +49,22 @@ export class TetherServerError extends Error {
 function getDefaultServerErrorMessage(code: TetherServerErrorCode): string {
   switch (code) {
     case TetherServerErrorCode.InvalidInput:
-      return 'Invalid request parameter.';
+      return 'Invalid request parameter';
     case TetherServerErrorCode.NotFound:
-      return 'Requested resource not found.';
+      return 'Requested resource not found';
     case TetherServerErrorCode.AlreadyExists:
-      return 'Resource already exists.';
+      return 'Resource already exists';
     case TetherServerErrorCode.Unauthorized:
-      return 'Authentication required.';
+      return 'Authentication required';
     case TetherServerErrorCode.AuthenticationFailed:
-      return 'Authentication failed.';
+      return 'Authentication failed';
     case TetherServerErrorCode.LimitExceeded:
-      return 'Request or resource limit exceeded.';
+      return 'Request or resource limit exceeded';
     case TetherServerErrorCode.ConfigurationError:
-      return 'Server configuration error.';
+      return 'Server configuration error';
     case TetherServerErrorCode.NotSupported:
-      return 'Operation not supported.';
+      return 'Operation not supported';
     case TetherServerErrorCode.InternalError:
-      return 'Internal server error.';
+      return 'Internal server error';
   }
 }

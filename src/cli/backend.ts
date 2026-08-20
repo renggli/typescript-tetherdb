@@ -38,7 +38,7 @@ export function createBackend(
     default:
       throw new TetherServerError(
         TetherServerErrorCode.ConfigurationError,
-        `Unknown backend type: "${backend}". Expected 'memory', 'file', or 'sqlite'.`,
+        `Unknown backend type: "${backend}". Expected 'memory', 'file', or 'sqlite'`,
       );
   }
 }

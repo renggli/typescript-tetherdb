@@ -101,7 +101,7 @@ export class MemoryStorage implements Storage {
     if (this.apps.has(safeId)) {
       throw new TetherServerError(
         TetherServerErrorCode.AlreadyExists,
-        'Application already exists.',
+        'Application already exists',
       );
     }
     const app = new AppMemoryStorage(safeId, this);
@@ -124,7 +124,7 @@ export class MemoryStorage implements Storage {
     if (this.usersByUsername.has(safeUsername)) {
       throw new TetherServerError(
         TetherServerErrorCode.AlreadyExists,
-        'Username is already registered.',
+        'Username is already registered',
       );
     }
 
@@ -203,7 +203,7 @@ export class MemoryStorage implements Storage {
     if (appId && targetApps.length === 0) {
       throw new TetherServerError(
         TetherServerErrorCode.NotFound,
-        `Application "${appId}" not found.`,
+        `Application "${appId}" not found`,
       );
     }
 
@@ -227,14 +227,14 @@ export class MemoryStorage implements Storage {
   async checkpoint(appId?: string): Promise<MaintenanceResult> {
     throw new TetherServerError(
       TetherServerErrorCode.NotSupported,
-      `Checkpoint operation is not supported by memory storage.${appId ? ` (app: ${appId})` : ''}`,
+      `Checkpoint operation is not supported by memory storage${appId ? ` (app: ${appId})` : ''}`,
     );
   }
 
   async vacuum(appId?: string): Promise<MaintenanceResult> {
     throw new TetherServerError(
       TetherServerErrorCode.NotSupported,
-      `Vacuum operation is not supported by memory storage.${appId ? ` (app: ${appId})` : ''}`,
+      `Vacuum operation is not supported by memory storage${appId ? ` (app: ${appId})` : ''}`,
     );
   }
 
@@ -248,7 +248,7 @@ export class MemoryStorage implements Storage {
     if (appId && targetApps.length === 0) {
       throw new TetherServerError(
         TetherServerErrorCode.NotFound,
-        `Application "${appId}" not found.`,
+        `Application "${appId}" not found`,
       );
     }
 
@@ -273,7 +273,7 @@ export class MemoryStorage implements Storage {
       backend: 'memory',
       appId,
       affectedCount: totalPruned,
-      message: `Prune completed successfully. Removed ${totalPruned} changelog record(s).`,
+      message: `Prune completed successfully. Removed ${totalPruned} changelog record(s)`,
     };
   }
 

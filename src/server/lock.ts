@@ -89,7 +89,7 @@ export function acquireServerLock(
   if (existing && existing.pid !== process.pid) {
     throw new TetherServerError(
       TetherServerErrorCode.AlreadyExists,
-      'A TetherDB server is already running on this data directory.',
+      'A TetherDB server is already running on this data directory',
     );
   }
 

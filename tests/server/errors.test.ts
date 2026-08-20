@@ -11,16 +11,16 @@ describe('TetherServerError', () => {
     expect(err).toBeInstanceOf(TetherServerError);
     expect(err.name).toBe('TetherServerError');
     expect(err.code).toBe(TetherServerErrorCode.InvalidInput);
-    expect(err.message).toBe('Invalid request parameter.');
+    expect(err.message).toBe('Invalid request parameter');
   });
 
   it('should initialize with custom message', () => {
     const err = new TetherServerError(
       TetherServerErrorCode.NotFound,
-      'Resource not found.',
+      'Resource not found',
     );
     expect(err.code).toBe(TetherServerErrorCode.NotFound);
-    expect(err.message).toBe('Resource not found.');
+    expect(err.message).toBe('Resource not found');
   });
 
   it('should provide default messages for all server error codes', () => {

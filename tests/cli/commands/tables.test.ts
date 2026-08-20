@@ -171,7 +171,7 @@ describe('handleTablesCommand', () => {
       expect((err as TetherServerError).code).toBe(
         TetherServerErrorCode.ConfigurationError,
       );
-      expect((err as Error).message).toBe('Missing table name.');
+      expect((err as Error).message).toBe('Missing table name');
     }
   });
 });

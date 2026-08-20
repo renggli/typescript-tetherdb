@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebSocket } from 'ws';
+import { RateLimiter } from '../../src/server/rate-limiter.js';
 import type { Storage } from '../../src/server/storage/index.js';
 import { Sync } from '../../src/server/sync.js';
 import {
@@ -26,6 +27,10 @@ class MockServerWebSocket extends EventEmitter {
     this.readyState = this.CLOSED;
     this.isClosed = true;
     this.emit('close');
+  }
+
+  terminate(): void {
+    this.close();
   }
 
   // Helper to send message from client to server
@@ -80,7 +85,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       expect(messages).toHaveLength(1);
       expect(messages[0]).toEqual({
         type: ServerMessageType.AuthError,
-        message: 'Missing or invalid authentication token.',
+        message: 'Missing or invalid authentication token',
       });
       expect(ws.isClosed).toBe(true);
     });
@@ -101,7 +106,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       expect(messages).toHaveLength(1);
       expect(messages[0]).toEqual({
         type: ServerMessageType.AuthError,
-        message: 'Invalid or expired authentication token.',
+        message: 'Invalid or expired authentication token',
       });
       expect(ws.isClosed).toBe(true);
     });
@@ -122,7 +127,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       expect(messages).toHaveLength(1);
       expect(messages[0]).toEqual({
         type: ServerMessageType.AuthError,
-        message: 'Missing required field: appId.',
+        message: 'Missing required field: appId',
       });
       expect(ws.isClosed).toBe(true);
     });
@@ -143,7 +148,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       expect(messages).toHaveLength(1);
       expect(messages[0]).toEqual({
         type: ServerMessageType.AuthError,
-        message: 'Application not found.',
+        message: 'Application not found',
       });
       expect(ws.isClosed).toBe(true);
     });
@@ -332,7 +337,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       expect(messages).toHaveLength(1);
       expect(messages[0]).toEqual({
         type: ServerMessageType.AuthError,
-        message: 'Not authenticated.',
+        message: 'Not authenticated',
       });
     });
 
@@ -575,6 +580,170 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       );
 
       consoleSpy.mockRestore();
+    });
+  });
+
+  describe('Sync Rate Limiting & Resource Protection', () => {
+    it('should enforce connection rate limits per IP', async () => {
+      const limiter = new RateLimiter({ maxRequests: 2, windowMs: 60_000 });
+      const limitedSync = new Sync(storage, { rateLimiter: limiter });
+
+      const ws1 = new MockServerWebSocket();
+      limitedSync.handleConnection(
+        ws1 as unknown as WebSocket,
+        '192.168.1.100',
+      );
+      expect(ws1.isClosed).toBe(false);
+
+      const ws2 = new MockServerWebSocket();
+      limitedSync.handleConnection(
+        ws2 as unknown as WebSocket,
+        '192.168.1.100',
+      );
+      expect(ws2.isClosed).toBe(false);
+
+      // 3rd connection exceeds maxRequests=2
+      const ws3 = new MockServerWebSocket();
+      limitedSync.handleConnection(
+        ws3 as unknown as WebSocket,
+        '192.168.1.100',
+      );
+      expect(ws3.isClosed).toBe(true);
+      const messages = ws3.getParsedMessages();
+      expect(messages[0]).toEqual({
+        type: ServerMessageType.AuthError,
+        message: 'Too many connection attempts',
+      });
+
+      // Different IP should still connect
+      const wsOther = new MockServerWebSocket();
+      limitedSync.handleConnection(
+        wsOther as unknown as WebSocket,
+        '192.168.1.200',
+      );
+      expect(wsOther.isClosed).toBe(false);
+    });
+
+    it('should apply progressive backoff on repeated invalid tokens', async () => {
+      const limiter = new RateLimiter({
+        maxFailures: 2,
+        initialBackoffMs: 2_000,
+        windowMs: 60_000,
+      });
+      const limitedSync = new Sync(storage, { rateLimiter: limiter });
+
+      // 1st failed token
+      const ws1 = new MockServerWebSocket();
+      limitedSync.handleConnection(ws1 as unknown as WebSocket, '10.0.0.1');
+      ws1.emitClientMessage({
+        type: ClientMessageType.Auth,
+        token: 'bad-token-1',
+        appId: 'todo-app',
+      });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(ws1.isClosed).toBe(true);
+
+      // 2nd failed token -> triggers backoff
+      const ws2 = new MockServerWebSocket();
+      limitedSync.handleConnection(ws2 as unknown as WebSocket, '10.0.0.1');
+      ws2.emitClientMessage({
+        type: ClientMessageType.Auth,
+        token: 'bad-token-2',
+        appId: 'todo-app',
+      });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(ws2.isClosed).toBe(true);
+
+      // 3rd connection during cooldown is rejected on connect
+      const ws3 = new MockServerWebSocket();
+      limitedSync.handleConnection(ws3 as unknown as WebSocket, '10.0.0.1');
+      expect(ws3.isClosed).toBe(true);
+      const msgs = ws3.getParsedMessages();
+      expect((msgs[0] as { message: string }).message).toContain(
+        'Too many connection attempts',
+      );
+    });
+
+    it('should enforce maxConcurrentConnectionsPerUser limit', async () => {
+      const cappedSync = new Sync(storage, {
+        maxConcurrentConnectionsPerUser: 2,
+      });
+
+      // Client 1 connects & auths
+      const ws1 = new MockServerWebSocket();
+      cappedSync.handleConnection(ws1 as unknown as WebSocket);
+      ws1.emitClientMessage({
+        type: ClientMessageType.Auth,
+        token: validToken,
+        appId: 'todo-app',
+        clientId: 'c1',
+      });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(cappedSync.connectedClientsCount).toBe(1);
+
+      // Client 2 connects & auths
+      const ws2 = new MockServerWebSocket();
+      cappedSync.handleConnection(ws2 as unknown as WebSocket);
+      ws2.emitClientMessage({
+        type: ClientMessageType.Auth,
+        token: validToken,
+        appId: 'todo-app',
+        clientId: 'c2',
+      });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(cappedSync.connectedClientsCount).toBe(2);
+
+      // Client 3 exceeds maxConcurrentConnectionsPerUser=2
+      const ws3 = new MockServerWebSocket();
+      cappedSync.handleConnection(ws3 as unknown as WebSocket);
+      ws3.emitClientMessage({
+        type: ClientMessageType.Auth,
+        token: validToken,
+        appId: 'todo-app',
+        clientId: 'c3',
+      });
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(ws3.isClosed).toBe(true);
+      const msgs = ws3.getParsedMessages();
+      expect((msgs[0] as { message: string }).message).toContain(
+        'Maximum concurrent connections exceeded',
+      );
+      expect(cappedSync.connectedClientsCount).toBe(2);
+
+      // After client 1 disconnects, client 3 can connect
+      ws1.close();
+      expect(cappedSync.connectedClientsCount).toBe(1);
+
+      const ws4 = new MockServerWebSocket();
+      cappedSync.handleConnection(ws4 as unknown as WebSocket);
+      ws4.emitClientMessage({
+        type: ClientMessageType.Auth,
+        token: validToken,
+        appId: 'todo-app',
+        clientId: 'c4',
+      });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(cappedSync.connectedClientsCount).toBe(2);
+      expect(ws4.isClosed).toBe(false);
+    });
+
+    it('should terminate unauthenticated connections on authTimeoutMs', async () => {
+      const fastTimeoutSync = new Sync(storage, {
+        authTimeoutMs: 50,
+      });
+
+      const ws = new MockServerWebSocket();
+      fastTimeoutSync.handleConnection(ws as unknown as WebSocket);
+      expect(ws.isClosed).toBe(false);
+
+      // Wait past timeout (50ms)
+      await new Promise((r) => setTimeout(r, 70));
+      expect(ws.isClosed).toBe(true);
+      const msgs = ws.getParsedMessages();
+      expect((msgs[0] as { message: string }).message).toContain(
+        'Authentication timeout',
+      );
     });
   });
 });
