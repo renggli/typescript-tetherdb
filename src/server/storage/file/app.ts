@@ -17,7 +17,11 @@ import {
 import type { AppStorage } from '../app.js';
 import type { TableStorage } from '../table.js';
 import type { UserStorage } from '../user.js';
-import { type FileStorage, writeFileAtomic } from './storage.js';
+import {
+  assertNoActiveServerLock,
+  type FileStorage,
+  writeFileAtomic,
+} from './storage.js';
 import { TableFileStorage } from './table.js';
 
 export interface AppManifest {
@@ -180,6 +184,7 @@ export class AppFileStorage implements AppStorage {
   }
 
   async createTable(name: string): Promise<TableStorage> {
+    assertNoActiveServerLock(this.storage.baseDir);
     const safeName = validateTableName(name);
     const manifest = await this.readManifest();
     if (manifest.tables.includes(safeName)) {
@@ -212,6 +217,7 @@ export class AppFileStorage implements AppStorage {
     user: UserStorage,
     changes: ChangeRecord[],
   ): Promise<{ applied: ChangeRecord[]; newSeq: number }> {
+    assertNoActiveServerLock(this.storage.baseDir);
     return this.storage.withUserLock(user.id, this.id, async () => {
       const manifest = await this.readManifest();
       const registeredTables = new Set(manifest.tables);
@@ -365,6 +371,7 @@ export class AppFileStorage implements AppStorage {
   }
 
   async deleteTable(name: string): Promise<boolean> {
+    assertNoActiveServerLock(this.storage.baseDir);
     const safeName = validateTableName(name);
     const manifest = await this.readManifest();
     const idx = manifest.tables.indexOf(safeName);

@@ -4,12 +4,6 @@
  * @module tetherdb/server
  */
 export {
-  createSessionToken,
-  hashPassword,
-  verifyPasswordHash,
-  verifySessionToken,
-} from './crypto.js';
-export {
   TetherServerError,
   TetherServerErrorCode,
 } from './errors.js';
@@ -33,4 +27,3 @@ export {
   type TableStorage,
   type UserStorage,
 } from './storage/index.js';
-export { Sync } from './sync.js';

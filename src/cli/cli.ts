@@ -18,6 +18,18 @@ import {
   printHelp,
 } from './commands/index.js';
 
+function isHelpRequested(args: string[]): boolean {
+  return args.some(
+    (arg) =>
+      arg === 'help' ||
+      arg === '--help' ||
+      arg === '-h' ||
+      arg === '-?' ||
+      arg === '/?' ||
+      arg === '-help',
+  );
+}
+
 /**
  * Standard command line interface for TetherDB.
  *
@@ -26,7 +38,7 @@ import {
 export async function runCli(
   args: string[] = process.argv.slice(2),
 ): Promise<void> {
-  if (args.includes('--help') || args.includes('-h')) {
+  if (isHelpRequested(args)) {
     printHelp();
     return;
   }
@@ -53,6 +65,9 @@ export async function runCli(
         break;
       case 'users':
         await handleUsersCommand(storage, positionalArgs);
+        break;
+      case 'help':
+        printHelp();
         break;
       default:
         throw new TetherServerError(

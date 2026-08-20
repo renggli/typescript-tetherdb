@@ -7,6 +7,7 @@ import {
   verifySessionToken,
 } from '../../crypto.js';
 import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
+import { readServerLock } from '../../lock.js';
 import {
   getUserBucket,
   normalizeUsername,
@@ -40,6 +41,22 @@ export interface FileAppData {
 
 export interface FileStorageOptions extends StorageOptions {
   baseDir?: string;
+}
+
+/**
+ * Validates that no external TetherDB server process is actively running on this data directory.
+ *
+ * @param baseDir - Storage base directory.
+ * @throws TetherServerError if an active server lock is held by another process.
+ */
+export function assertNoActiveServerLock(baseDir: string): void {
+  const lock = readServerLock(baseDir);
+  if (lock && lock.pid !== process.pid) {
+    throw new TetherServerError(
+      TetherServerErrorCode.NotSupported,
+      `Cannot modify file storage directly while a TetherDB server is actively running (PID: ${lock.pid}, Port: ${lock.port}). Please stop the server first or use SQLite storage for safe concurrent access.`,
+    );
+  }
 }
 
 /**
@@ -148,6 +165,7 @@ export class FileStorage implements Storage {
     id: string,
     update: Partial<FileUserData>,
   ): Promise<void> {
+    assertNoActiveServerLock(this.baseDir);
     return this.withLock('__users__', async () => {
       const users = await this.readUsersFile();
       const existing = users.get(id);
@@ -163,6 +181,7 @@ export class FileStorage implements Storage {
   }
 
   async createApp(id: string): Promise<AppStorage> {
+    assertNoActiveServerLock(this.baseDir);
     const safeId = validateAppId(id);
     return this.withLock('__apps__', async () => {
       const apps = await this.readAppsFile();
@@ -225,6 +244,7 @@ export class FileStorage implements Storage {
   }
 
   async createUser(username: string, password: string): Promise<UserStorage> {
+    assertNoActiveServerLock(this.baseDir);
     const safeUsername = validateUsername(username);
     const validPassword = validatePassword(password);
     const passwordHash = await hashPassword(validPassword);
@@ -290,6 +310,7 @@ export class FileStorage implements Storage {
   }
 
   async deleteUser(id: string): Promise<boolean> {
+    assertNoActiveServerLock(this.baseDir);
     const safeUserId = validateUserId(id);
     return this.withLock('__users__', async () => {
       let deleted = false;
@@ -324,6 +345,7 @@ export class FileStorage implements Storage {
   }
 
   async deleteApp(id: string): Promise<boolean> {
+    assertNoActiveServerLock(this.baseDir);
     const safeId = validateAppId(id);
     return this.withLock('__apps__', async () => {
       const apps = await this.readAppsFile();

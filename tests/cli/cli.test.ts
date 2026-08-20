@@ -23,20 +23,16 @@ describe('runCli', () => {
     }
   });
 
-  it('should show help message with --help and -h flags', async () => {
+  it('should show help message with help, --help, -h, -?, and /? flags', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    await runCli(['--help']);
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('TetherDB CLI'),
-    );
-
-    logSpy.mockClear();
-
-    await runCli(['-h']);
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('TetherDB CLI'),
-    );
+    for (const flag of ['--help', '-h', 'help', '-?', '/?', '-help']) {
+      logSpy.mockClear();
+      await runCli([flag]);
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('TetherDB CLI'),
+      );
+    }
 
     logSpy.mockRestore();
   });

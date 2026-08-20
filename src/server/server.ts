@@ -2,6 +2,7 @@ import * as http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { normalizeBasePath } from '../shared/index.js';
 import { TetherServerError, TetherServerErrorCode } from './errors.js';
+import { acquireServerLock, type ServerLockHandle } from './lock.js';
 import type { Storage, UserStorage } from './storage/index.js';
 import { MemoryStorage } from './storage/memory/index.js';
 import { Sync } from './sync.js';
@@ -61,6 +62,7 @@ export class TetherServer {
   readonly webSocketPath: string;
   private _httpServer: http.Server | null = null;
   private _webSocketServer: WebSocketServer | null = null;
+  private lockHandle: ServerLockHandle | null = null;
 
   /**
    * Initializes a new TetherServer instance.
@@ -171,7 +173,23 @@ export class TetherServer {
    * @returns The active Node.js HTTP server instance.
    */
   async listen(port = 8080, host = '0.0.0.0'): Promise<http.Server> {
-    return new Promise<http.Server>((resolve) => {
+    const storageBaseDir = (
+      this.storage as { baseDir?: string; inMemory?: boolean }
+    ).baseDir;
+    const isMemory =
+      (this.storage as { inMemory?: boolean }).inMemory ??
+      this.storage instanceof MemoryStorage;
+
+    if (storageBaseDir && !isMemory) {
+      const status = await this.storage.getStatus();
+      this.lockHandle = acquireServerLock(storageBaseDir, {
+        port,
+        host,
+        backend: status.backend,
+      });
+    }
+
+    return new Promise<http.Server>((resolve, reject) => {
       this._httpServer = http.createServer(async (req, res) => {
         const handled = await this.handleHttpRequest(req, res);
         if (!handled) {
@@ -181,8 +199,30 @@ export class TetherServer {
       this.attach(this._httpServer);
       this._httpServer.listen(port, host, () => {
         if (this._httpServer) {
+          const addr = this._httpServer.address();
+          const actualPort =
+            typeof addr === 'object' && addr ? addr.port : port;
+          if (
+            this.lockHandle &&
+            storageBaseDir &&
+            this.lockHandle.info.port !== actualPort
+          ) {
+            this.lockHandle.release();
+            this.lockHandle = acquireServerLock(storageBaseDir, {
+              port: actualPort,
+              host,
+              backend: this.lockHandle.info.backend,
+            });
+          }
           resolve(this._httpServer);
         }
+      });
+      this._httpServer.on('error', (err) => {
+        if (this.lockHandle) {
+          this.lockHandle.release();
+          this.lockHandle = null;
+        }
+        reject(err);
       });
     });
   }
@@ -191,6 +231,10 @@ export class TetherServer {
    * Closes active HTTP server and WebSocket server listeners.
    */
   async close(): Promise<void> {
+    if (this.lockHandle) {
+      this.lockHandle.release();
+      this.lockHandle = null;
+    }
     return new Promise<void>((resolve, reject) => {
       if (this._webSocketServer) {
         this._webSocketServer.close();
@@ -232,33 +276,17 @@ export class TetherServer {
 
     try {
       if (method === 'GET' && url.pathname === `${this.basePath}/health`) {
-        this.sendJson(res, 200, {
-          status: 'ok',
-          uptime: process.uptime(),
-        });
+        this.handleHealth(req, res);
         return true;
       }
 
       if (method === 'GET' && url.pathname === `${this.basePath}/ready`) {
-        try {
-          await this.storage.getApps();
-          this.sendJson(res, 200, { status: 'ready' });
-        } catch (err) {
-          const message =
-            err instanceof Error ? err.message : 'Storage unavailable.';
-          this.sendJson(res, 503, { status: 'unready', error: message });
-        }
+        await this.handleReady(req, res);
         return true;
       }
 
       if (method === 'GET' && url.pathname === `${this.basePath}/metrics`) {
-        const apps = await this.storage.getApps();
-        this.sendJson(res, 200, {
-          uptime: process.uptime(),
-          connectedClients: this.sync.connectedClientsCount,
-          appsCount: apps.length,
-          memoryUsage: process.memoryUsage(),
-        });
+        await this.handleMetrics(req, res);
         return true;
       }
 
@@ -335,6 +363,43 @@ export class TetherServer {
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     });
     res.end();
+  }
+
+  private handleHealth(
+    _req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    this.sendJson(res, 200, {
+      status: 'ok',
+      uptime: process.uptime(),
+    });
+  }
+
+  private async handleReady(
+    _req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<void> {
+    try {
+      await this.storage.getApps();
+      this.sendJson(res, 200, { status: 'ready' });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Storage unavailable.';
+      this.sendJson(res, 503, { status: 'unready', error: message });
+    }
+  }
+
+  private async handleMetrics(
+    _req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<void> {
+    const apps = await this.storage.getApps();
+    this.sendJson(res, 200, {
+      uptime: process.uptime(),
+      connectedClients: this.sync.connectedClientsCount,
+      appsCount: apps.length,
+      memoryUsage: process.memoryUsage(),
+    });
   }
 
   private async handleRegister(

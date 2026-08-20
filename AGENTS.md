@@ -8,6 +8,7 @@ This document outlines the core architecture, developer rules, TypeScript conven
 ## 🚨 Developer Rules & Quality Checks
 
 - **Structure & Documentation**: Public APIs, exported types, classes, and functions must be placed at the top of the file and thoroughly documented with JSDoc comments. Methods should be concise, focused, and readable. Avoid unnecessary abbreviations in identifiers.
+- **Minimal Public API Surface**: Only expose public (developer, user) consumable APIs, types, and classes from entry point `index.ts` files. Keep internal implementations, helper utilities, crypto primitives, lock handlers, and command dispatchers private to their internal modules.
 - **Private Helpers at the Bottom**: Place private helper methods and internal utility functions at the bottom of classes and files so that the public API and core lifecycle methods appear clearly at the top.
 - **No `any` Types**: Never use the `any` type. Leverage strict types, `unknown`, explicit generics (`<T = unknown>`), type narrowing, or specific interfaces/unions instead.
 - **Reusability & Duplication**: Reuse logic, types, and utility functions across modules. Refactor shared functions into utility modules (`src/shared/`). Do not duplicate code.
@@ -43,17 +44,18 @@ The codebase is organized into four decoupled layers with clear subpath exports:
 
 - **Server Layer (`src/server/`)**:
   - Exported as `tetherdb/server`.
-  - **Authentication (`crypto.ts`)**: Session token signing and password hashing with salt.
+  - **Server (`server.ts`)**: Unified HTTP and WebSocket server (`TetherServer`, `startServer`) handling authentication endpoints, health/readiness/metrics, and real-time synchronization.
   - **Storage (`storage/`)**: Pluggable storage abstraction with implementations for in-memory testing (`MemoryStorage`), per-user filesystem directories (`FileStorage`), and SQLite (`SqliteStorage`).
-  - **Sync (`sync.ts`)**: Real-time WebSocket connection manager and user-isolated broadcast engine.
-  - **Server (`server.ts`)**: Unified HTTP and WebSocket server handling authentication endpoints and real-time streaming connections.
+  - **Locking (`lock.ts`)**: Exclusive server process lockfile management (`server.lock`) and stale PID crash recovery.
+  - **Authentication (`crypto.ts`)**: Internal token signing, password hashing, and persistent keyfile management.
+  - **Sync (`sync.ts`)**: Internal WebSocket connection hub and broadcast engine.
 
 - **CLI Layer (`src/cli/`)**:
-  - Exported as `tetherdb/cli`.
+  - Exported as `tetherdb/cli` (`runCli`).
   - **CLI Runner (`cli.ts`)**: Main dispatch entry point for command line execution.
   - **Argument Parsing (`args.ts`)**: Command line option parsing and validation.
   - **Backend Factory (`backend.ts`)**: Storage engine instantiation for memory, file, and sqlite targets.
-  - **Commands (`commands/`)**: Modular subcommand handlers (`serve.ts`, `apps.ts`, `tables.ts`, `users.ts`, `help.ts`).
+  - **Commands (`commands/`)**: Modular subcommand handlers (`serve.ts`, `status.ts`, `maintenance.ts`, `apps.ts`, `tables.ts`, `users.ts`, `help.ts`).
 
 ## 🔑 Key TypeScript & Design Conventions
 

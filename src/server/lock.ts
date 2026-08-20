@@ -1,0 +1,141 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { TetherServerError, TetherServerErrorCode } from './errors.js';
+
+/**
+ * Metadata recorded inside the server lockfile.
+ */
+export interface ServerLockInfo {
+  /** Process identifier running the server. */
+  pid: number;
+  /** Port number the server is bound to. */
+  port: number;
+  /** Host interface the server is bound to. */
+  host: string;
+  /** Storage backend type ('sqlite', 'file', or 'memory'). */
+  backend: string;
+  /** Epoch timestamp when the server acquired the lock. */
+  startedAt: number;
+}
+
+/**
+ * Handle representing an active exclusive server lock.
+ */
+export interface ServerLockHandle {
+  /** Lock metadata information. */
+  readonly info: ServerLockInfo;
+  /** Path to the active lockfile on disk. */
+  readonly lockPath: string;
+  /** Releases the lock and removes the lockfile. */
+  release(): void;
+}
+
+/**
+ * Checks whether a given operating system process ID is currently alive.
+ *
+ * @param pid - Process ID to check.
+ * @returns `true` if the process is active; otherwise `false`.
+ */
+export function isProcessAlive(pid: number): boolean {
+  if (!pid || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    return code === 'EPERM';
+  }
+}
+
+/**
+ * Reads active server lock metadata from a storage base directory if present and live.
+ * Stale locks from terminated processes are ignored.
+ *
+ * @param baseDir - Storage base directory.
+ * @returns ServerLockInfo if an active server is running, or `null`.
+ */
+export function readServerLock(baseDir: string): ServerLockInfo | null {
+  const lockPath = path.join(baseDir, 'server.lock');
+  try {
+    if (!fs.existsSync(lockPath)) return null;
+    const content = fs.readFileSync(lockPath, 'utf-8');
+    const info = JSON.parse(content) as ServerLockInfo;
+    if (typeof info.pid === 'number' && isProcessAlive(info.pid)) {
+      return info;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Acquires an exclusive server lock on the specified directory to prevent multiple instances
+ * from running against the same data storage.
+ *
+ * @param baseDir - Directory path where the lockfile will be maintained.
+ * @param details - Port, host, and backend details to write to the lockfile.
+ * @returns ServerLockHandle representing the active lock.
+ * @throws TetherServerError if another active server already holds the lock.
+ */
+export function acquireServerLock(
+  baseDir: string,
+  details: { port: number; host: string; backend: string },
+): ServerLockHandle {
+  fs.mkdirSync(baseDir, { recursive: true });
+  const lockPath = path.join(baseDir, 'server.lock');
+
+  const existing = readServerLock(baseDir);
+  if (existing && existing.pid !== process.pid) {
+    throw new TetherServerError(
+      TetherServerErrorCode.AlreadyExists,
+      'A TetherDB server is already running on this data directory.',
+    );
+  }
+
+  // If a stale lockfile exists from a dead process, remove it
+  if (fs.existsSync(lockPath)) {
+    try {
+      fs.unlinkSync(lockPath);
+    } catch {
+      // Ignore
+    }
+  }
+
+  const info: ServerLockInfo = {
+    pid: process.pid,
+    port: details.port,
+    host: details.host,
+    backend: details.backend,
+    startedAt: Date.now(),
+  };
+
+  fs.writeFileSync(lockPath, JSON.stringify(info, null, 2), {
+    encoding: 'utf-8',
+    mode: 0o600,
+  });
+
+  let isReleased = false;
+  const release = () => {
+    if (isReleased) return;
+    isReleased = true;
+    try {
+      if (fs.existsSync(lockPath)) {
+        const current = JSON.parse(
+          fs.readFileSync(lockPath, 'utf-8'),
+        ) as ServerLockInfo;
+        if (current.pid === process.pid) {
+          fs.unlinkSync(lockPath);
+        }
+      }
+    } catch {
+      // Ignore cleanup error on shutdown
+    }
+  };
+
+  return {
+    info,
+    lockPath,
+    release,
+  };
+}

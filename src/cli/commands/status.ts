@@ -1,4 +1,5 @@
 import type { Storage } from '../../server/index.js';
+import { readServerLock } from '../../server/lock.js';
 
 /**
  * Handles the 'status' command to display storage backend statistics.
@@ -17,6 +18,16 @@ export async function handleStatusCommand(
   console.log(`  Backend:     ${status.backend}`);
   if (status.baseDir) {
     console.log(`  Directory:   ${status.baseDir}`);
+  }
+  if (status.baseDir && status.backend !== 'memory') {
+    const lock = readServerLock(status.baseDir);
+    if (lock) {
+      console.log(
+        `  Server:      Running (PID: ${lock.pid}, Port: ${lock.port}, Host: ${lock.host})`,
+      );
+    } else {
+      console.log('  Server:      Stopped');
+    }
   }
   console.log(`  Users:       ${status.usersCount}`);
   console.log(`  Total Apps:  ${status.appsCount}`);
