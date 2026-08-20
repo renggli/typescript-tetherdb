@@ -509,5 +509,178 @@ describe.each(storageDescriptors)(
         expect(putMetrics.status).toBe(404);
       });
     });
+
+    describe('Auth Endpoint Protection & Rate Limiting', () => {
+      it('should return 404 Not found when allowRegistration is false', async () => {
+        const noRegServer = new TetherServer({
+          allowRegistration: false,
+        });
+        const httpServer = await noRegServer.listen(0, '127.0.0.1');
+        const port = (httpServer.address() as { port: number }).port;
+
+        try {
+          const res = await fetch(`http://127.0.0.1:${port}/auth/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: 'new_user',
+              password: 'secure_password_123',
+            }),
+          });
+          expect(res.status).toBe(404);
+          const data = (await res.json()) as { error: string };
+          expect(data.error).toBe('Not found');
+        } finally {
+          await noRegServer.close();
+        }
+      });
+
+      it('should enforce registration rate limits and return 429', async () => {
+        const limitedServer = new TetherServer({
+          rateLimiting: {
+            ipRegisterMaxRequests: 2,
+          },
+        });
+        const httpServer = await limitedServer.listen(0, '127.0.0.1');
+        const port = (httpServer.address() as { port: number }).port;
+
+        try {
+          // 1st registration -> 201
+          const res1 = await fetch(`http://127.0.0.1:${port}/auth/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: 'reg_user1',
+              password: 'password1',
+            }),
+          });
+          expect(res1.status).toBe(201);
+
+          // 2nd registration -> 201
+          const res2 = await fetch(`http://127.0.0.1:${port}/auth/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: 'reg_user2',
+              password: 'password2',
+            }),
+          });
+          expect(res2.status).toBe(201);
+
+          // 3rd registration (exceeds limit) -> 429
+          const res3 = await fetch(`http://127.0.0.1:${port}/auth/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: 'reg_user3',
+              password: 'password3',
+            }),
+          });
+          expect(res3.status).toBe(429);
+          const data = (await res3.json()) as { error: string };
+          expect(data.error).toContain('Too many registration requests');
+        } finally {
+          await limitedServer.close();
+        }
+      });
+
+      it('should apply progressive backoff on repeated failed logins', async () => {
+        const limitedServer = new TetherServer({
+          rateLimiting: {
+            maxFailures: 2,
+            initialBackoffMs: 2_000,
+          },
+        });
+        await limitedServer.declareUser('target_user', 'correct_password');
+        const httpServer = await limitedServer.listen(0, '127.0.0.1');
+        const port = (httpServer.address() as { port: number }).port;
+
+        try {
+          // 1st failed attempt -> 401
+          const res1 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: 'target_user',
+              password: 'wrong_password_1',
+            }),
+          });
+          expect(res1.status).toBe(401);
+
+          // 2nd failed attempt (hits maxFailures=2) -> 401 and triggers backoff
+          const res2 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: 'target_user',
+              password: 'wrong_password_2',
+            }),
+          });
+          expect(res2.status).toBe(401);
+
+          // 3rd attempt while under cooldown -> 429 Too Many Requests
+          const res3 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: 'target_user',
+              password: 'correct_password',
+            }),
+          });
+          expect(res3.status).toBe(429);
+        } finally {
+          await limitedServer.close();
+        }
+      });
+
+      it('should reset failure tracking on valid login', async () => {
+        const limitedServer = new TetherServer({
+          rateLimiting: {
+            maxFailures: 3,
+            initialBackoffMs: 2_000,
+          },
+        });
+        await limitedServer.declareUser('alice_user', 'correct_password');
+        const httpServer = await limitedServer.listen(0, '127.0.0.1');
+        const port = (httpServer.address() as { port: number }).port;
+
+        try {
+          // 1 failed attempt
+          const res1 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: 'alice_user',
+              password: 'wrong_password',
+            }),
+          });
+          expect(res1.status).toBe(401);
+
+          // 1 successful login -> resets failure counter
+          const res2 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: 'alice_user',
+              password: 'correct_password',
+            }),
+          });
+          expect(res2.status).toBe(200);
+
+          // Verify failure count is reset: a subsequent single bad password gives 401 instead of 429 backoff
+          const res3 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: 'alice_user',
+              password: 'wrong_password_again',
+            }),
+          });
+          expect(res3.status).toBe(401);
+        } finally {
+          await limitedServer.close();
+        }
+      });
+    });
   },
 );

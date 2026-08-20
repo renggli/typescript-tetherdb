@@ -8,7 +8,7 @@ This document outlines the core architecture, developer rules, TypeScript conven
 ## 🚨 Developer Rules & Quality Checks
 
 - **Structure & Documentation**: Public APIs, exported types, classes, and functions must be placed at the top of the file and thoroughly documented with JSDoc comments. Methods should be concise, focused, and readable. Avoid unnecessary abbreviations in identifiers.
-- **Minimal Public API Surface**: Only expose public (developer, user) consumable APIs, types, and classes from entry point `index.ts` files. Keep internal implementations, helper utilities, crypto primitives, lock handlers, and command dispatchers private to their internal modules.
+- **Minimal Public API Surface**: Only export or make public APIs, types, classes, methods, and properties that are absolutely necessary for consumers. Keep internal implementations, helper utilities, state fields, rate limiters, crypto primitives, lock handlers, and command dispatchers strictly private to their classes and internal modules. Never export internal constants, helpers, or properties just for unit tests.
 - **Private Helpers at the Bottom**: Place private helper methods and internal utility functions at the bottom of classes and files so that the public API and core lifecycle methods appear clearly at the top.
 - **No `any` Types**: Never use the `any` type. Leverage strict types, `unknown`, explicit generics (`<T = unknown>`), type narrowing, or specific interfaces/unions instead.
 - **Reusability & Duplication**: Reuse logic, types, and utility functions across modules. Refactor shared functions into utility modules (`src/shared/`). Do not duplicate code.

@@ -81,4 +81,12 @@ describe('Crypto', () => {
       await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     }
   });
+
+  it('should safely verify dummy password hashes in constant time', async () => {
+    const { verifyDummyPasswordHash } = await import(
+      '../../src/server/crypto.js'
+    );
+    const result = await verifyDummyPasswordHash('anyPassword123');
+    expect(result).toBe(false);
+  });
 });

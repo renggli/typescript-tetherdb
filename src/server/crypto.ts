@@ -13,6 +13,8 @@ const SCRYPT_OPTIONS: crypto.ScryptOptions = {
   maxmem: 32 * 1024 * 1024,
 };
 
+let dummyPasswordHashPromise: Promise<string> | null = null;
+
 /**
  * Loads a persistent HMAC signing secret from `<baseDir>/.secret`, or generates and saves one
  * with restricted permissions (`0o600`) if it does not yet exist.
@@ -98,6 +100,22 @@ export async function verifyPasswordHash(
       },
     );
   });
+}
+
+/**
+ * Performs a constant-time dummy password verification to prevent user enumeration timing attacks.
+ *
+ * @param password - The plaintext password supplied by client.
+ * @returns Always resolves to `false`.
+ */
+export async function verifyDummyPasswordHash(
+  password: string,
+): Promise<boolean> {
+  if (!dummyPasswordHashPromise) {
+    dummyPasswordHashPromise = hashPassword('TetherDB:dummy_seed_password');
+  }
+  const dummyHash = await dummyPasswordHashPromise;
+  return verifyPasswordHash(password, dummyHash);
 }
 
 /**

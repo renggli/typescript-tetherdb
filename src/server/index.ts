@@ -8,6 +8,7 @@ export {
   TetherServerErrorCode,
 } from './errors.js';
 export {
+  type AuthRateLimitOptions,
   type RunningServer,
   type StartServerOptions,
   startServer,

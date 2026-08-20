@@ -1,12 +1,34 @@
 import * as http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { normalizeBasePath } from '../shared/index.js';
+import { verifyDummyPasswordHash } from './crypto.js';
 import { TetherServerError, TetherServerErrorCode } from './errors.js';
 import { acquireServerLock, type ServerLockHandle } from './lock.js';
+import { RateLimiter } from './rate-limiter.js';
 import type { Storage, UserStorage } from './storage/index.js';
 import { MemoryStorage } from './storage/memory/index.js';
 import { Sync } from './sync.js';
 import { normalizePassword, normalizeUsername } from './validate.js';
+
+/**
+ * Rate limiting options for authentication endpoints.
+ */
+export interface AuthRateLimitOptions {
+  /** Maximum login attempts per IP within the time window (defaults to 100). */
+  ipLoginMaxRequests?: number;
+  /** Maximum login attempts per target username within the time window (defaults to 20). */
+  userLoginMaxRequests?: number;
+  /** Maximum registration attempts per IP within the time window (defaults to 100). */
+  ipRegisterMaxRequests?: number;
+  /** Sliding window duration in milliseconds (defaults to 60,000ms / 1 minute). */
+  windowMs?: number;
+  /** Consecutive failed attempts before progressive backoff begins (defaults to 5). */
+  maxFailures?: number;
+  /** Initial backoff duration in milliseconds (defaults to 1,000ms). */
+  initialBackoffMs?: number;
+  /** Maximum backoff duration in milliseconds (defaults to 900,000ms / 15 minutes). */
+  maxBackoffMs?: number;
+}
 
 /**
  * Configuration options for the TetherServer.
@@ -18,6 +40,10 @@ export interface TetherServerOptions {
   basePath?: string;
   /** Path for WebSocket upgrade requests (defaults to '/sync'). */
   webSocketPath?: string;
+  /** Whether user self-registration is allowed via `/auth/register` (defaults to true). */
+  allowRegistration?: boolean;
+  /** Rate limiting options for auth endpoints, or `false` to disable rate limiting (defaults to true). */
+  rateLimiting?: boolean | AuthRateLimitOptions;
 }
 
 /**
@@ -60,6 +86,10 @@ export class TetherServer {
   readonly basePath: string;
   /** Path for WebSocket upgrade requests. */
   readonly webSocketPath: string;
+  private readonly allowRegistration: boolean;
+  private readonly ipLoginLimiter: RateLimiter | null;
+  private readonly userLoginLimiter: RateLimiter | null;
+  private readonly ipRegisterLimiter: RateLimiter | null;
   private _httpServer: http.Server | null = null;
   private _webSocketServer: WebSocketServer | null = null;
   private lockHandle: ServerLockHandle | null = null;
@@ -67,13 +97,47 @@ export class TetherServer {
   /**
    * Initializes a new TetherServer instance.
    *
-   * @param options - Configuration options for storage and endpoints.
+   * @param options - Configuration options for storage, endpoints, and rate limiting.
    */
   constructor(options: TetherServerOptions = {}) {
     this.storage = options.storage ?? new MemoryStorage();
     this.sync = new Sync(this.storage);
     this.basePath = normalizeBasePath(options.basePath ?? '');
     this.webSocketPath = options.webSocketPath ?? `${this.basePath}/sync`;
+    this.allowRegistration = options.allowRegistration ?? true;
+
+    const rateLimitConfig = options.rateLimiting ?? true;
+    if (rateLimitConfig === false) {
+      this.ipLoginLimiter = null;
+      this.userLoginLimiter = null;
+      this.ipRegisterLimiter = null;
+    } else {
+      const opts: AuthRateLimitOptions =
+        typeof rateLimitConfig === 'object' ? rateLimitConfig : {};
+      const windowMs = opts.windowMs ?? 60_000;
+      const maxFailures = opts.maxFailures ?? 5;
+      const initialBackoffMs = opts.initialBackoffMs ?? 1_000;
+      const maxBackoffMs = opts.maxBackoffMs ?? 900_000;
+
+      this.ipLoginLimiter = new RateLimiter({
+        windowMs,
+        maxRequests: opts.ipLoginMaxRequests ?? 100,
+        maxFailures,
+        initialBackoffMs,
+        maxBackoffMs,
+      });
+      this.userLoginLimiter = new RateLimiter({
+        windowMs,
+        maxRequests: opts.userLoginMaxRequests ?? 20,
+        maxFailures,
+        initialBackoffMs,
+        maxBackoffMs,
+      });
+      this.ipRegisterLimiter = new RateLimiter({
+        windowMs,
+        maxRequests: opts.ipRegisterMaxRequests ?? 100,
+      });
+    }
   }
 
   /**
@@ -291,6 +355,7 @@ export class TetherServer {
       }
 
       if (
+        this.allowRegistration &&
         method === 'POST' &&
         url.pathname === `${this.basePath}/auth/register`
       ) {
@@ -406,6 +471,14 @@ export class TetherServer {
     req: http.IncomingMessage,
     res: http.ServerResponse,
   ): Promise<void> {
+    const ip = this.getClientIp(req);
+    if (this.ipRegisterLimiter && !this.ipRegisterLimiter.consume(ip)) {
+      this.sendJson(res, 429, {
+        error: 'Too many registration requests. Please try again later.',
+      });
+      return;
+    }
+
     const body = await this.readJsonBody(req);
     const { username, password } = body as {
       username?: string;
@@ -439,6 +512,14 @@ export class TetherServer {
     req: http.IncomingMessage,
     res: http.ServerResponse,
   ): Promise<void> {
+    const ip = this.getClientIp(req);
+    if (this.ipLoginLimiter && !this.ipLoginLimiter.consume(ip)) {
+      this.sendJson(res, 429, {
+        error: 'Too many login attempts. Please try again later.',
+      });
+      return;
+    }
+
     const body = await this.readJsonBody(req);
     const { username, password } = body as {
       username?: string;
@@ -453,21 +534,29 @@ export class TetherServer {
       return;
     }
 
+    if (this.userLoginLimiter && !this.userLoginLimiter.consume(normUsername)) {
+      this.sendJson(res, 429, {
+        error: 'Too many login attempts for this account',
+      });
+      return;
+    }
+
     const user = await this.storage.getUserByUsername(normUsername);
-    if (!user) {
+    const valid = user
+      ? await user.verifyPassword(normPassword)
+      : await verifyDummyPasswordHash(normPassword);
+
+    if (!user || !valid) {
+      this.ipLoginLimiter?.recordFailure(ip);
+      this.userLoginLimiter?.recordFailure(normUsername);
       this.sendJson(res, 401, {
         error: 'Invalid username or password',
       });
       return;
     }
 
-    const valid = await user.verifyPassword(normPassword);
-    if (!valid) {
-      this.sendJson(res, 401, {
-        error: 'Invalid username or password',
-      });
-      return;
-    }
+    this.ipLoginLimiter?.reset(ip);
+    this.userLoginLimiter?.reset(normUsername);
 
     const token = await user.createToken();
     this.sendJson(res, 200, {
@@ -475,6 +564,15 @@ export class TetherServer {
       username: user.username,
       token,
     });
+  }
+
+  private getClientIp(req: http.IncomingMessage): string {
+    const forwarded = req.headers['x-forwarded-for'];
+    if (typeof forwarded === 'string') {
+      const first = forwarded.split(',')[0].trim();
+      if (first) return first;
+    }
+    return req.socket.remoteAddress ?? '127.0.0.1';
   }
 }
 
