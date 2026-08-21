@@ -30,8 +30,8 @@ This document outlines the core architecture, developer rules, TypeScript conven
 The codebase is organized into four decoupled layers with clear subpath exports:
 
 - **Shared / Protocol (`src/shared/`)**:
-  - Exported as `tetherdb/shared`.
-  - Single source of truth for protocol message schemas, data structures, and path normalization shared across client and server.
+  - Internal module (not exported publicly).
+  - Single source of truth for protocol message schemas, data structures, logical clocks, and path normalization shared internally across client and server.
   - Pure TypeScript with zero runtime dependencies.
 
 - **Client Layer (`src/client/`)**:

@@ -2,60 +2,69 @@
   "name": "tetherdb",
   "version": "0.1.0",
   "description": "Offline-first client-side IndexedDB with real-time two-way WebSocket sync and per-user server storage",
+  "author": "Lukas Renggli <renggli@gmail.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/renggli/typescript-tetherdb#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/renggli/typescript-tetherdb.git"
+  },
+  "bugs": {
+    "url": "https://github.com/renggli/typescript-tetherdb/issues"
+  },
   "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.js"
+      "types": {
+        "import": "./dist/index.d.ts",
+        "require": "./dist/index.d.cts"
       },
-      "require": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.cjs"
-      }
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
     },
     "./cli": {
-      "import": {
-        "types": "./dist/cli/index.d.ts",
-        "default": "./dist/cli/index.js"
+      "types": {
+        "import": "./dist/cli/index.d.ts",
+        "require": "./dist/cli/index.d.cts"
       },
-      "require": {
-        "types": "./dist/cli/index.d.ts",
-        "default": "./dist/cli/index.cjs"
-      }
+      "import": "./dist/cli/index.js",
+      "require": "./dist/cli/index.cjs"
     },
     "./client": {
-      "import": {
-        "types": "./dist/client/index.d.ts",
-        "default": "./dist/client/index.js"
+      "types": {
+        "import": "./dist/client/index.d.ts",
+        "require": "./dist/client/index.d.cts"
       },
-      "require": {
-        "types": "./dist/client/index.d.ts",
-        "default": "./dist/client/index.cjs"
-      }
+      "import": "./dist/client/index.js",
+      "require": "./dist/client/index.cjs"
     },
     "./server": {
-      "import": {
-        "types": "./dist/server/index.d.ts",
-        "default": "./dist/server/index.js"
+      "types": {
+        "import": "./dist/server/index.d.ts",
+        "require": "./dist/server/index.d.cts"
       },
-      "require": {
-        "types": "./dist/server/index.d.ts",
-        "default": "./dist/server/index.cjs"
-      }
-    },
-    "./shared": {
-      "import": {
-        "types": "./dist/shared/index.d.ts",
-        "default": "./dist/shared/index.js"
-      },
-      "require": {
-        "types": "./dist/shared/index.d.ts",
-        "default": "./dist/shared/index.cjs"
-      }
+      "import": "./dist/server/index.js",
+      "require": "./dist/server/index.cjs"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "cli": [
+        "./dist/cli/index.d.ts"
+      ],
+      "client": [
+        "./dist/client/index.d.ts"
+      ],
+      "server": [
+        "./dist/server/index.d.ts"
+      ]
     }
   },
   "bin": {
@@ -63,13 +72,19 @@
   },
   "files": [
     "dist",
-    "bin"
+    "bin",
+    "LICENSE",
+    "README.md"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "workspaces": [
     "examples/todo"
   ],
   "scripts": {
-    "build": "tsup && tsc --emitDeclarationOnly --outDir dist",
+    "build": "tsup && tsc --emitDeclarationOnly --outDir dist && node scripts/build-types.js",
+    "prepublishOnly": "npm run build && npm run typecheck && npm test",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
@@ -98,6 +113,5 @@
     "offline-first",
     "realtime",
     "database"
-  ],
-  "license": "MIT"
+  ]
 }

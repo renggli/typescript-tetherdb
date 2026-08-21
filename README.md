@@ -16,7 +16,7 @@
 - **Real-Time Broadcast**: Server broadcasts incoming changes in real-time to all other active client instances belonging to the same app and user.
 - **Pluggable Server Storage**: Persistent SQLite storage (`SqliteStorage`), sharded filesystem storage (`FileStorage`), and ephemeral in-memory storage (`MemoryStorage`).
 - **Simple, Secure Auth**: Built-in account registration, password hashing (scrypt with salt), and HMAC-signed tokens.
-- **Modern Subpath Exports**: Import cleanly via `tetherdb/client`, `tetherdb/server`, `tetherdb/cli`, and `tetherdb/shared`.
+- **Modern Subpath Exports**: Import cleanly via `tetherdb` (client facade), `tetherdb/client`, `tetherdb/server`, and `tetherdb/cli`.
 
 ## Installation
 
@@ -114,10 +114,9 @@ The standard server provides authentication and WebSocket sync endpoints:
 
 ## Architecture & Subpaths
 
-- **`tetherdb/client`**: Reactive local-first client layer providing IndexedDB storage, CRUD tables, authentication state, and automatic WebSocket synchronization.
+- **`tetherdb` / `tetherdb/client`**: Reactive local-first client layer providing IndexedDB storage, CRUD tables, authentication state, and automatic WebSocket synchronization.
 - **`tetherdb/server`**: Backend server coordinator handling HTTP authentication endpoints, WebSocket sync routing, and pluggable storage engines (memory, file, and SQLite).
 - **`tetherdb/cli`**: Command-line administrative interface and runner for launching servers and managing applications, tables, and user accounts.
-- **`tetherdb/shared`**: Shared protocol schemas, message formats, and path normalization utilities used across client and server packages.
 
 ---
 

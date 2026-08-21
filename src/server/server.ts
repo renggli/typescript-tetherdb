@@ -1,6 +1,6 @@
 import * as http from 'node:http';
 import { WebSocketServer } from 'ws';
-import { normalizeBasePath } from '../shared/index.js';
+import { normalizeBasePath } from '../shared/path.js';
 import { verifyDummyPasswordHash } from './crypto.js';
 import { TetherServerError, TetherServerErrorCode } from './errors.js';
 import { acquireServerLock, type ServerLockHandle } from './lock.js';

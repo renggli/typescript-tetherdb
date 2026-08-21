@@ -4,6 +4,7 @@
  * @module tetherdb/client
  */
 
+export { OperationType } from '../shared/types.js';
 export {
   AuthStatus,
   DataMode,
