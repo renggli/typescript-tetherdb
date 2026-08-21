@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createBackend } from '../../../src/cli/backend.js';
 import { handleTablesCommand } from '../../../src/cli/commands/tables.js';
 import {
@@ -9,6 +9,7 @@ import {
   TetherServerError,
   TetherServerErrorCode,
 } from '../../../src/server/index.js';
+import { testLogger } from '../../logger.js';
 
 describe('handleTablesCommand', () => {
   let tmpDir: string;
@@ -33,20 +34,20 @@ describe('handleTablesCommand', () => {
   });
 
   it('should list tables for an application (empty and populated)', async () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     await storage.createApp('rezeptario');
 
     // List empty
     await handleTablesCommand(storage, ['tables', 'list', 'rezeptario']);
-    expect(logSpy).toHaveBeenCalledWith(
-      'No tables found for application "rezeptario".',
-    );
+    expect(
+      testLogger.hasMessage('No tables found for application "rezeptario".'),
+    ).toBe(true);
 
     // List with direct app name shorthand: tables <appid>
+    testLogger.clear();
     await handleTablesCommand(storage, ['tables', 'rezeptario']);
-    expect(logSpy).toHaveBeenCalledWith(
-      'No tables found for application "rezeptario".',
-    );
+    expect(
+      testLogger.hasMessage('No tables found for application "rezeptario".'),
+    ).toBe(true);
 
     // Add tables via API
     const app = await storage.getApp('rezeptario');
@@ -54,18 +55,16 @@ describe('handleTablesCommand', () => {
     await app?.createTable('ingredients');
 
     // List again
+    testLogger.clear();
     await handleTablesCommand(storage, ['tables', 'list', 'rezeptario']);
-    expect(logSpy).toHaveBeenCalledWith(
-      'Tables for application "rezeptario" (2):',
-    );
-    expect(logSpy).toHaveBeenCalledWith('  • recipes');
-    expect(logSpy).toHaveBeenCalledWith('  • ingredients');
-
-    logSpy.mockRestore();
+    expect(
+      testLogger.hasMessage('Tables for application "rezeptario" (2):'),
+    ).toBe(true);
+    expect(testLogger.hasMessage('• recipes')).toBe(true);
+    expect(testLogger.hasMessage('• ingredients')).toBe(true);
   });
 
   it('should add multiple tables to an application', async () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     await storage.createApp('rezeptario');
 
     await handleTablesCommand(storage, [
@@ -75,12 +74,16 @@ describe('handleTablesCommand', () => {
       'recipes',
       'ingredients',
     ]);
-    expect(logSpy).toHaveBeenCalledWith(
-      'Added table "recipes" to application "rezeptario"',
-    );
-    expect(logSpy).toHaveBeenCalledWith(
-      'Added table "ingredients" to application "rezeptario"',
-    );
+    expect(
+      testLogger.hasMessage(
+        'Added table "recipes" to application "rezeptario"',
+      ),
+    ).toBe(true);
+    expect(
+      testLogger.hasMessage(
+        'Added table "ingredients" to application "rezeptario"',
+      ),
+    ).toBe(true);
 
     // Add existing table (idempotency check)
     await handleTablesCommand(storage, [
@@ -89,15 +92,14 @@ describe('handleTablesCommand', () => {
       'rezeptario',
       'recipes',
     ]);
-    expect(logSpy).toHaveBeenCalledWith(
-      'Table "recipes" already exists in application "rezeptario"',
-    );
-
-    logSpy.mockRestore();
+    expect(
+      testLogger.hasMessage(
+        'Table "recipes" already exists in application "rezeptario"',
+      ),
+    ).toBe(true);
   });
 
   it('should remove tables from an application', async () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const app = await storage.createApp('rezeptario');
     await app.createTable('recipes');
 
@@ -108,9 +110,11 @@ describe('handleTablesCommand', () => {
       'rezeptario',
       'recipes',
     ]);
-    expect(logSpy).toHaveBeenCalledWith(
-      'Removed table "recipes" from application "rezeptario"',
-    );
+    expect(
+      testLogger.hasMessage(
+        'Removed table "recipes" from application "rezeptario"',
+      ),
+    ).toBe(true);
 
     // Remove non-existent table
     await handleTablesCommand(storage, [
@@ -119,11 +123,11 @@ describe('handleTablesCommand', () => {
       'rezeptario',
       'nonexistent',
     ]);
-    expect(logSpy).toHaveBeenCalledWith(
-      'Table "nonexistent" not found in application "rezeptario"',
-    );
-
-    logSpy.mockRestore();
+    expect(
+      testLogger.hasMessage(
+        'Table "nonexistent" not found in application "rezeptario"',
+      ),
+    ).toBe(true);
   });
 
   it('should throw error when application does not exist', async () => {

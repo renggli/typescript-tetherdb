@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createBackend } from '../../../src/cli/backend.js';
 import { handleAppsCommand } from '../../../src/cli/commands/apps.js';
 import {
@@ -9,6 +9,7 @@ import {
   TetherServerError,
   TetherServerErrorCode,
 } from '../../../src/server/index.js';
+import { testLogger } from '../../logger.js';
 
 describe('handleAppsCommand', () => {
   let tmpDir: string;
@@ -33,22 +34,20 @@ describe('handleAppsCommand', () => {
   });
 
   it('should list empty applications', async () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     await handleAppsCommand(storage, ['apps', 'list']);
-    expect(logSpy).toHaveBeenCalledWith('No applications found.');
-    logSpy.mockRestore();
+    expect(testLogger.hasMessage('No applications found.')).toBe(true);
   });
 
   it('should add application and list it with tables', async () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
     // Add app
     await handleAppsCommand(storage, ['apps', 'add', 'todo-app']);
-    expect(logSpy).toHaveBeenCalledWith('Created application: todo-app');
+    expect(testLogger.hasMessage('Created application: todo-app')).toBe(true);
 
     // Add existing app (idempotency check)
     await handleAppsCommand(storage, ['apps', 'add', 'todo-app']);
-    expect(logSpy).toHaveBeenCalledWith('Application already exists: todo-app');
+    expect(testLogger.hasMessage('Application already exists: todo-app')).toBe(
+      true,
+    );
 
     // Create a table on it
     const app = await storage.getApp('todo-app');
@@ -56,28 +55,24 @@ describe('handleAppsCommand', () => {
 
     // List apps
     await handleAppsCommand(storage, ['apps', 'list']);
-    expect(logSpy).toHaveBeenCalledWith('Applications (1):');
-    expect(logSpy).toHaveBeenCalledWith('  • todo-app (tables: todos)');
-
-    logSpy.mockRestore();
+    expect(testLogger.hasMessage('Applications (1):')).toBe(true);
+    expect(testLogger.hasMessage('• todo-app (tables: todos)')).toBe(true);
   });
 
   it('should remove application and handle non-existent app deletion', async () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
     await handleAppsCommand(storage, ['apps', 'add', 'todo-app']);
     expect(await storage.getApp('todo-app')).toBeDefined();
 
     // Delete app
     await handleAppsCommand(storage, ['apps', 'rm', 'todo-app']);
-    expect(logSpy).toHaveBeenCalledWith('Deleted application: todo-app');
+    expect(testLogger.hasMessage('Deleted application: todo-app')).toBe(true);
     expect(await storage.getApp('todo-app')).toBeUndefined();
 
     // Delete non-existent app
     await handleAppsCommand(storage, ['apps', 'rm', 'nonexistent']);
-    expect(logSpy).toHaveBeenCalledWith('Application not found: nonexistent');
-
-    logSpy.mockRestore();
+    expect(testLogger.hasMessage('Application not found: nonexistent')).toBe(
+      true,
+    );
   });
 
   it('should validate missing appId and unknown action errors', async () => {

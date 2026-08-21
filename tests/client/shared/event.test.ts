@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { EventRegistry } from '../../../src/client/shared/event.js';
+import { testLogger } from '../../logger.js';
 
 describe('EventRegistry', () => {
   it('should register listeners and dispatch events', () => {
@@ -70,7 +71,6 @@ describe('EventRegistry', () => {
   });
 
   it('should isolate listener errors and continue notifying remaining listeners', () => {
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const registry = new EventRegistry<number>();
     const handled: number[] = [];
 
@@ -83,7 +83,6 @@ describe('EventRegistry', () => {
 
     expect(() => registry.publish(123)).not.toThrow();
     expect(handled).toEqual([123]);
-    expect(consoleSpy).toHaveBeenCalled();
-    consoleSpy.mockRestore();
+    expect(testLogger.hasMessage(/Unhandled error/, 'error')).toBe(true);
   });
 });

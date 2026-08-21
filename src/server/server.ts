@@ -409,10 +409,22 @@ export class TetherServer {
     }
     return new Promise<void>((resolve, reject) => {
       if (this._webSocketServer) {
+        for (const client of this._webSocketServer.clients) {
+          try {
+            client.terminate();
+          } catch {
+            // Ignore termination errors on shutdown
+          }
+        }
         this._webSocketServer.close();
         this._webSocketServer = null;
       }
       if (this._httpServer) {
+        try {
+          this._httpServer.closeAllConnections?.();
+        } catch {
+          // Ignore
+        }
         this._httpServer.close((err) => {
           this._httpServer = null;
           if (err) reject(err);

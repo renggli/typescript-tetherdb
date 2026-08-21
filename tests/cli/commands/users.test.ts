@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createBackend } from '../../../src/cli/backend.js';
 import { handleUsersCommand } from '../../../src/cli/commands/users.js';
 import {
@@ -9,6 +9,7 @@ import {
   TetherServerError,
   TetherServerErrorCode,
 } from '../../../src/server/index.js';
+import { testLogger } from '../../logger.js';
 
 describe('handleUsersCommand', () => {
   let tmpDir: string;
@@ -33,54 +34,41 @@ describe('handleUsersCommand', () => {
   });
 
   it('should list registered users (empty and populated)', async () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
     // Empty list
     await handleUsersCommand(storage, ['users', 'list']);
-    expect(logSpy).toHaveBeenCalledWith('No registered users found.');
+    expect(testLogger.hasMessage('No registered users found.')).toBe(true);
 
     // Add a user directly
     const user = await storage.createUser('alice', 'secret-pass');
 
     // List users
+    testLogger.clear();
     await handleUsersCommand(storage, ['users', 'list']);
-    expect(logSpy).toHaveBeenCalledWith('Registered users (1):');
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining(`[${user.id}] alice`),
-    );
-
-    logSpy.mockRestore();
+    expect(testLogger.hasMessage('Registered users (1):')).toBe(true);
+    expect(testLogger.hasMessage(`[${user.id}] alice`)).toBe(true);
   });
 
   it('should add a new user account', async () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
     await handleUsersCommand(storage, ['users', 'add', 'bobby', 'password123']);
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Created user: ['),
-    );
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('bobby'));
+    expect(testLogger.hasMessage('Created user: [')).toBe(true);
+    expect(testLogger.hasMessage('bobby')).toBe(true);
 
     const user = await storage.getUserByUsername('bobby');
     expect(user).toBeDefined();
-
-    logSpy.mockRestore();
   });
 
   it('should remove user and report not found when appropriate', async () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const user = await storage.createUser('charlie', 'password123');
 
     // Delete existing user
     await handleUsersCommand(storage, ['users', 'rm', user.id]);
-    expect(logSpy).toHaveBeenCalledWith(`Deleted user: ${user.id}`);
+    expect(testLogger.hasMessage(`Deleted user: ${user.id}`)).toBe(true);
     expect(await storage.getUser(user.id)).toBeUndefined();
 
     // Delete non-existent user
+    testLogger.clear();
     await handleUsersCommand(storage, ['users', 'rm', 'nonexistent_id']);
-    expect(logSpy).toHaveBeenCalledWith('User not found: nonexistent_id');
-
-    logSpy.mockRestore();
+    expect(testLogger.hasMessage('User not found: nonexistent_id')).toBe(true);
   });
 
   it('should throw error for missing arguments or invalid action', async () => {

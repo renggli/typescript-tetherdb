@@ -1,10 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { createBackend } from '../../../src/cli/backend.js';
 import { handleServeCommand } from '../../../src/cli/commands/serve.js';
+import { testLogger } from '../../logger.js';
 
 describe('handleServeCommand', () => {
   it('should launch server and log formatted endpoints', async () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const storage = createBackend('memory');
     const running = await handleServeCommand(
       storage,
@@ -15,25 +15,21 @@ describe('handleServeCommand', () => {
     );
 
     expect(running).toBeDefined();
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'TetherDB server listening at: http://127.0.0.1:',
-      ),
-    );
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('WebSocket sync endpoint: ws://127.0.0.1:'),
-    );
-    expect(logSpy).toHaveBeenCalledWith(
-      'Storage backend: in-memory (ephemeral)',
-    );
+    expect(
+      testLogger.hasMessage('TetherDB server listening at: http://127.0.0.1:'),
+    ).toBe(true);
+    expect(
+      testLogger.hasMessage('WebSocket sync endpoint: ws://127.0.0.1:'),
+    ).toBe(true);
+    expect(
+      testLogger.hasMessage('Storage backend: in-memory (ephemeral)'),
+    ).toBe(true);
 
     await running.close();
     await storage.close?.();
-    logSpy.mockRestore();
   });
 
   it('should format storage backend path for file/sqlite backends', async () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const storage = createBackend('memory');
     const running = await handleServeCommand(
       storage,
@@ -44,17 +40,14 @@ describe('handleServeCommand', () => {
     );
 
     expect(running).toBeDefined();
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'TetherDB server listening at: http://localhost:',
-      ),
-    );
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Storage backend: sqlite (/tmp/test-db)'),
-    );
+    expect(
+      testLogger.hasMessage('TetherDB server listening at: http://localhost:'),
+    ).toBe(true);
+    expect(
+      testLogger.hasMessage('Storage backend: sqlite (/tmp/test-db)'),
+    ).toBe(true);
 
     await running.close();
     await storage.close?.();
-    logSpy.mockRestore();
   });
 });

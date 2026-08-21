@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { WebSocket } from 'ws';
 import { RateLimiter } from '../../src/server/rate-limiter.js';
 import type { Storage } from '../../src/server/storage/index.js';
@@ -447,10 +447,6 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
     });
 
     it('should reject ChangeBatch when changes is not an array', async () => {
-      const consoleSpy = vi
-        .spyOn(console, 'error')
-        .mockImplementation(() => {});
-
       const ws = new MockServerWebSocket();
       sync.handleConnection(ws as unknown as WebSocket);
 
@@ -475,8 +471,6 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       const errMsg = messages.find((m) => m.type === ServerMessageType.Error);
       expect(errMsg).toBeDefined();
       expect(errMsg?.type).toBe(ServerMessageType.Error);
-
-      consoleSpy.mockRestore();
     });
   });
 
@@ -493,10 +487,6 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
     });
 
     it('should handle malformed JSON and unsupported message types', async () => {
-      const consoleSpy = vi
-        .spyOn(console, 'error')
-        .mockImplementation(() => {});
-
       const ws = new MockServerWebSocket();
       sync.handleConnection(ws as unknown as WebSocket);
 
@@ -512,15 +502,9 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       expect(messages).toHaveLength(2);
       expect(messages[0].type).toBe(ServerMessageType.Error);
       expect(messages[1].type).toBe(ServerMessageType.Error);
-
-      consoleSpy.mockRestore();
     });
 
     it('should clean up client on disconnect or socket error', async () => {
-      const consoleSpy = vi
-        .spyOn(console, 'error')
-        .mockImplementation(() => {});
-
       const ws = new MockServerWebSocket();
       sync.handleConnection(ws as unknown as WebSocket);
 
@@ -539,15 +523,9 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
 
       // @ts-expect-error - inspecting internal map
       expect(sync.webSocketToClient.has(ws)).toBe(false);
-
-      consoleSpy.mockRestore();
     });
 
     it('should send error when appId does not exist during auth sync', async () => {
-      const consoleSpy = vi
-        .spyOn(console, 'error')
-        .mockImplementation(() => {});
-
       const ws = new MockServerWebSocket();
       sync.handleConnection(ws as unknown as WebSocket);
 
@@ -565,15 +543,9 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       expect((messages[0] as { message: string }).message).toContain(
         'Application not found',
       );
-
-      consoleSpy.mockRestore();
     });
 
     it('should send error if app is deleted when client sends change batch', async () => {
-      const consoleSpy = vi
-        .spyOn(console, 'error')
-        .mockImplementation(() => {});
-
       const ws = new MockServerWebSocket();
       sync.handleConnection(ws as unknown as WebSocket);
 
@@ -611,8 +583,6 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       expect((lastMsg as { message: string }).message).toContain(
         'Application not found',
       );
-
-      consoleSpy.mockRestore();
     });
   });
 

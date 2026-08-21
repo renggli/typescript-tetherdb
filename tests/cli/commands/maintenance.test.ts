@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createBackend } from '../../../src/cli/backend.js';
 import { handleMaintenanceCommand } from '../../../src/cli/commands/maintenance.js';
 import {
@@ -9,6 +9,7 @@ import {
   TetherServerError,
   TetherServerErrorCode,
 } from '../../../src/server/index.js';
+import { testLogger } from '../../logger.js';
 
 describe('handleMaintenanceCommand', () => {
   let tmpDir: string;
@@ -36,43 +37,29 @@ describe('handleMaintenanceCommand', () => {
   });
 
   it('should run checkpoint and vacuum on sqlite storage', async () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
     await handleMaintenanceCommand(sqliteStorage, [
       'maintenance',
       'checkpoint',
     ]);
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Checkpoint completed successfully'),
+    expect(testLogger.hasMessage('Checkpoint completed successfully')).toBe(
+      true,
     );
 
     await handleMaintenanceCommand(sqliteStorage, ['maintenance', 'vacuum']);
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Vacuum completed successfully'),
-    );
-
-    logSpy.mockRestore();
+    expect(testLogger.hasMessage('Vacuum completed successfully')).toBe(true);
   });
 
   it('should run prune on sqlite and memory storage', async () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
     await handleMaintenanceCommand(sqliteStorage, [
       'maintenance',
       'prune',
       undefined as unknown as string,
       '100',
     ]);
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Prune completed successfully'),
-    );
+    expect(testLogger.hasMessage('Prune completed successfully')).toBe(true);
 
     await handleMaintenanceCommand(memoryStorage, ['maintenance', 'prune']);
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Prune completed successfully'),
-    );
-
-    logSpy.mockRestore();
+    expect(testLogger.hasMessage('Prune completed successfully')).toBe(true);
   });
 
   it('should throw NotSupported for checkpoint and vacuum on memory storage', async () => {

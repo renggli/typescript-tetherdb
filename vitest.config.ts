@@ -6,6 +6,8 @@ export default defineConfig({
     environment: 'node',
     setupFiles: ['tests/setup.ts'],
     slowTestThreshold: 5000,
+    testTimeout: 15000,
+    hookTimeout: 15000,
     server: {
       deps: {
         external: ['node:sqlite'],

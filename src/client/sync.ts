@@ -274,7 +274,12 @@ export class Sync {
       ws.onerror = () => {};
       ws.onclose = null;
       try {
-        ws.close();
+        const wsWithTerminate = ws as unknown as { terminate?: () => void };
+        if (typeof wsWithTerminate.terminate === 'function') {
+          wsWithTerminate.terminate();
+        } else {
+          ws.close();
+        }
       } catch {
         // Ignored during intentional disconnect
       }

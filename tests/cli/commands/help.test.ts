@@ -1,29 +1,16 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { printHelp } from '../../../src/cli/commands/help.js';
+import { testLogger } from '../../logger.js';
 
 describe('printHelp', () => {
   it('should print usage instructions to console.log', () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     printHelp();
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('TetherDB CLI'),
-    );
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('serve (default)'),
-    );
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('status [appid]'),
-    );
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('maintenance checkpoint'),
-    );
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('apps [list]'));
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('tables [list]'),
-    );
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('users [list]'),
-    );
-    logSpy.mockRestore();
+    expect(testLogger.hasMessage('TetherDB CLI')).toBe(true);
+    expect(testLogger.hasMessage('serve (default)')).toBe(true);
+    expect(testLogger.hasMessage('status [appid]')).toBe(true);
+    expect(testLogger.hasMessage('maintenance checkpoint')).toBe(true);
+    expect(testLogger.hasMessage('apps [list]')).toBe(true);
+    expect(testLogger.hasMessage('tables [list]')).toBe(true);
+    expect(testLogger.hasMessage('users [list]')).toBe(true);
   });
 });

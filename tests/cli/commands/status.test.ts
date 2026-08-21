@@ -1,10 +1,11 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createBackend } from '../../../src/cli/backend.js';
 import { handleStatusCommand } from '../../../src/cli/commands/status.js';
 import type { Storage } from '../../../src/server/index.js';
+import { testLogger } from '../../logger.js';
 
 describe('handleStatusCommand', () => {
   let tmpDir: string;
@@ -29,15 +30,13 @@ describe('handleStatusCommand', () => {
   });
 
   it('should display status for empty database', async () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     await handleStatusCommand(storage, ['status']);
 
-    expect(logSpy).toHaveBeenCalledWith('TetherDB Storage Status:');
-    expect(logSpy).toHaveBeenCalledWith('  Backend:     sqlite');
-    expect(logSpy).toHaveBeenCalledWith('  Server:      Stopped');
-    expect(logSpy).toHaveBeenCalledWith('  Users:       0');
-    expect(logSpy).toHaveBeenCalledWith('  Total Apps:  0');
-    logSpy.mockRestore();
+    expect(testLogger.hasMessage('TetherDB Storage Status:')).toBe(true);
+    expect(testLogger.hasMessage('Backend:     sqlite')).toBe(true);
+    expect(testLogger.hasMessage('Server:      Stopped')).toBe(true);
+    expect(testLogger.hasMessage('Users:       0')).toBe(true);
+    expect(testLogger.hasMessage('Total Apps:  0')).toBe(true);
   });
 
   it('should display status for specific app with tables', async () => {
@@ -45,16 +44,14 @@ describe('handleStatusCommand', () => {
     await app.createTable('tasks');
     await app.createTable('settings');
 
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     await handleStatusCommand(storage, ['status', 'demo-app']);
 
-    expect(logSpy).toHaveBeenCalledWith('TetherDB Storage Status:');
-    expect(logSpy).toHaveBeenCalledWith('  Server:      Stopped');
-    expect(logSpy).toHaveBeenCalledWith('  - App: demo-app');
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringMatching(/Tables \(2\): (settings, tasks|tasks, settings)/),
-    );
-    logSpy.mockRestore();
+    expect(testLogger.hasMessage('TetherDB Storage Status:')).toBe(true);
+    expect(testLogger.hasMessage('Server:      Stopped')).toBe(true);
+    expect(testLogger.hasMessage('- App: demo-app')).toBe(true);
+    expect(
+      testLogger.hasMessage(/Tables \(2\): (settings, tasks|tasks, settings)/),
+    ).toBe(true);
   });
 
   it('should display running server details when lock is present', async () => {
@@ -71,12 +68,8 @@ describe('handleStatusCommand', () => {
       { mode: 0o600 },
     );
 
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     await handleStatusCommand(storage, ['status']);
 
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Server:      Running (PID:'),
-    );
-    logSpy.mockRestore();
+    expect(testLogger.hasMessage(/Server:\s+Running \(PID:/)).toBe(true);
   });
 });
