@@ -152,4 +152,47 @@ describe('MemoryStorage', () => {
       await cleanup();
     }
   });
+
+  it('should guarantee atomic batch application without partial state commit on error', async () => {
+    const { backend, cleanup } = await memoryStorage.createBackend();
+    try {
+      const app = await backend.createApp('atomic-app');
+      await app.createTable('tasks');
+      const user = await backend.createUser('atomic_user', 'pass');
+
+      // Valid change 1
+      const c1: ChangeRecord = {
+        table: 'tasks',
+        id: 'task-1',
+        op: OperationType.Put,
+        data: { title: 'First' },
+        timestamp: 100,
+        clientId: 'c1',
+      };
+      // Invalid change 2 (table does not exist)
+      const c2: ChangeRecord = {
+        table: 'non_existent_table',
+        id: 'task-2',
+        op: OperationType.Put,
+        data: { title: 'Second' },
+        timestamp: 200,
+        clientId: 'c1',
+      };
+
+      // Applying batch [c1, c2] must reject
+      await expect(app.applyChanges(user, [c1, c2])).rejects.toThrow(
+        'Table not found',
+      );
+
+      // Verify task-1 was NOT committed to 'tasks' table
+      const table = await app.getTable('tasks');
+      const records = await table?.getAllRecords(user);
+      expect(records).toEqual([]);
+
+      // Verify sequence number did not advance
+      expect(await app.getCurrentSeq(user)).toBe(0);
+    } finally {
+      await cleanup();
+    }
+  });
 });

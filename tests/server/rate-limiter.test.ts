@@ -105,4 +105,25 @@ describe('RateLimiter', () => {
     limiter.clear();
     expect(limiter.isLimited('user2', now + 500)).toBe(false);
   });
+
+  it('should bound memory capacity and evict oldest or expired keys when maxEntries is reached', () => {
+    const limiter = new RateLimiter({
+      windowMs: 1_000,
+      maxEntries: 3,
+    });
+    const now = 100_000;
+
+    limiter.consume('key1', now);
+    limiter.consume('key2', now);
+    limiter.consume('key3', now);
+    expect(limiter.size).toBe(3);
+
+    // Adding key4 triggers eviction since maxEntries=3
+    limiter.consume('key4', now);
+    expect(limiter.size).toBe(3);
+
+    // key1 was the oldest key and got evicted
+    expect(limiter.isLimited('key1', now)).toBe(false);
+    expect(limiter.size).toBe(3);
+  });
 });

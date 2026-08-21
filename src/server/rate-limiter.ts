@@ -12,6 +12,8 @@ export interface RateLimiterOptions {
   initialBackoffMs?: number;
   /** Maximum backoff duration in milliseconds (defaults to 900,000ms / 15 minutes). */
   maxBackoffMs?: number;
+  /** Maximum number of tracking entries kept in memory before evicting (defaults to 10,000). */
+  maxEntries?: number;
 }
 
 /**
@@ -24,6 +26,7 @@ export class RateLimiter {
   private readonly maxFailures: number;
   private readonly initialBackoffMs: number;
   private readonly maxBackoffMs: number;
+  private readonly maxEntries: number;
 
   /**
    * Initializes a new RateLimiter instance.
@@ -36,6 +39,14 @@ export class RateLimiter {
     this.maxFailures = options.maxFailures ?? 3;
     this.initialBackoffMs = options.initialBackoffMs ?? 1_000;
     this.maxBackoffMs = options.maxBackoffMs ?? 900_000;
+    this.maxEntries = options.maxEntries ?? 10_000;
+  }
+
+  /**
+   * Returns the current number of tracked keys in memory.
+   */
+  get size(): number {
+    return this.store.size;
   }
 
   /**
@@ -75,12 +86,16 @@ export class RateLimiter {
 
     const entry = this.store.get(key);
     if (!entry || (entry.resetAt <= now && entry.blockedUntil <= now)) {
-      this.store.set(key, {
-        count: 1,
-        resetAt: now + this.windowMs,
-        failures: 0,
-        blockedUntil: 0,
-      });
+      this.setEntry(
+        key,
+        {
+          count: 1,
+          resetAt: now + this.windowMs,
+          failures: 0,
+          blockedUntil: 0,
+        },
+        now,
+      );
       return true;
     }
 
@@ -104,7 +119,7 @@ export class RateLimiter {
         failures: 0,
         blockedUntil: 0,
       };
-      this.store.set(key, entry);
+      this.setEntry(key, entry, now);
     }
 
     entry.failures++;
@@ -149,6 +164,21 @@ export class RateLimiter {
         this.store.delete(key);
       }
     }
+  }
+
+  // -- Private Helpers --------------------------------------------------------
+
+  private setEntry(key: string, entry: RateLimitEntry, now: number): void {
+    if (this.store.size >= this.maxEntries && !this.store.has(key)) {
+      this.cleanup(now);
+      if (this.store.size >= this.maxEntries) {
+        const oldestKey = this.store.keys().next().value;
+        if (oldestKey !== undefined) {
+          this.store.delete(oldestKey);
+        }
+      }
+    }
+    this.store.set(key, entry);
   }
 }
 

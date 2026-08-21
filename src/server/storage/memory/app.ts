@@ -57,15 +57,15 @@ export class AppMemoryStorage implements AppStorage {
     changes: ChangeRecord[],
   ): Promise<{ applied: ChangeRecord[]; newSeq: number }> {
     const userState = this.storage.getUserState(user.id, this.id);
-    const applied: ChangeRecord[] = [];
 
     const maxRecords = this.storage.options.maxRecordsPerTable ?? 10000;
     const maxRecordSize = this.storage.options.maxRecordSizeBytes ?? 512 * 1024;
     const maxChangelog = this.storage.options.maxChangelogEntries ?? 1000;
 
+    // Phase 1: Pre-validate all changes in the batch
     for (const change of changes) {
       const tableName = validateTableName(change.table);
-      const recordId = validateRecordId(change.id);
+      validateRecordId(change.id);
       validateTimestamp(change.timestamp);
 
       if (!this.tables.has(tableName)) {
@@ -75,10 +75,30 @@ export class AppMemoryStorage implements AppStorage {
         );
       }
 
-      let tableMap = userState.tables.get(tableName);
+      const payloadBytes = calculateByteSize(change.data);
+      if (payloadBytes > maxRecordSize) {
+        throw new TetherServerError(
+          TetherServerErrorCode.LimitExceeded,
+          'Record payload exceeds maximum allowed size',
+        );
+      }
+    }
+
+    // Phase 2: Stage mutations against cloned table maps
+    const stagedTables = new Map<string, Map<string, StoredRecord>>();
+    const stagedApplied: (ChangeRecord & { seq: number })[] = [];
+    let stagedCurrentSeq = userState.currentSeq;
+    let stagedMinSeq = userState.minSeq;
+
+    for (const change of changes) {
+      const tableName = validateTableName(change.table);
+      const recordId = validateRecordId(change.id);
+
+      let tableMap = stagedTables.get(tableName);
       if (!tableMap) {
-        tableMap = new Map();
-        userState.tables.set(tableName, tableMap);
+        const existingTableMap = userState.tables.get(tableName);
+        tableMap = new Map(existingTableMap);
+        stagedTables.set(tableName, tableMap);
       }
 
       if (
@@ -92,23 +112,15 @@ export class AppMemoryStorage implements AppStorage {
         );
       }
 
-      const payloadBytes = calculateByteSize(change.data);
-      if (payloadBytes > maxRecordSize) {
-        throw new TetherServerError(
-          TetherServerErrorCode.LimitExceeded,
-          'Record payload exceeds maximum allowed size',
-        );
-      }
-
       const existing = tableMap.get(recordId);
       const shouldApply = !existing || shouldOverwrite(change, existing);
 
       if (shouldApply) {
-        userState.currentSeq++;
-        const assignedSeq = userState.currentSeq;
+        stagedCurrentSeq++;
+        const assignedSeq = stagedCurrentSeq;
 
-        if (userState.minSeq === 0) {
-          userState.minSeq = 1;
+        if (stagedMinSeq === 0) {
+          stagedMinSeq = 1;
         }
 
         const isDeleted = change.op === OperationType.Delete;
@@ -136,20 +148,27 @@ export class AppMemoryStorage implements AppStorage {
           data: isDeleted ? undefined : change.data,
         };
 
-        applied.push(appliedChange);
-        userState.changelog.push(appliedChange);
-
-        if (userState.changelog.length > maxChangelog) {
-          const pruneCount = userState.changelog.length - maxChangelog;
-          userState.changelog.splice(0, pruneCount);
-          if (userState.changelog.length > 0) {
-            userState.minSeq = userState.changelog[0].seq;
-          }
-        }
+        stagedApplied.push(appliedChange);
       }
     }
 
-    return { applied, newSeq: userState.currentSeq };
+    // Phase 3: Commit staged modifications atomically to userState
+    for (const [tableName, stagedMap] of stagedTables.entries()) {
+      userState.tables.set(tableName, stagedMap);
+    }
+    userState.currentSeq = stagedCurrentSeq;
+    userState.minSeq = stagedMinSeq;
+    userState.changelog.push(...stagedApplied);
+
+    if (userState.changelog.length > maxChangelog) {
+      const pruneCount = userState.changelog.length - maxChangelog;
+      userState.changelog.splice(0, pruneCount);
+      if (userState.changelog.length > 0) {
+        userState.minSeq = userState.changelog[0].seq;
+      }
+    }
+
+    return { applied: stagedApplied, newSeq: userState.currentSeq };
   }
 
   async getChangesSince(
