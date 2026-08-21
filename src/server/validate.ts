@@ -19,6 +19,41 @@ export const MIN_PASSWORD_LENGTH = 4;
 /** Maximum allowed password character length. */
 export const MAX_PASSWORD_LENGTH = 512;
 
+/** Maximum allowable future timestamp drift in milliseconds (5 minutes). */
+export const MAX_FUTURE_TIMESTAMP_DRIFT_MS = 5 * 60 * 1000;
+
+/**
+ * Validates a change timestamp, ensuring it is a valid finite epoch number
+ * and does not exceed the maximum allowable future drift.
+ *
+ * @param timestamp - The epoch timestamp in milliseconds.
+ * @param maxFutureDriftMs - Optional maximum allowable future drift in ms (defaults to 5 minutes).
+ * @returns The validated timestamp.
+ * @throws TetherServerError if timestamp is not finite, is non-positive, or exceeds drift bounds.
+ */
+export function validateTimestamp(
+  timestamp: number,
+  maxFutureDriftMs = MAX_FUTURE_TIMESTAMP_DRIFT_MS,
+): number {
+  if (
+    typeof timestamp !== 'number' ||
+    !Number.isFinite(timestamp) ||
+    timestamp <= 0
+  ) {
+    throw new TetherServerError(
+      TetherServerErrorCode.InvalidInput,
+      'Invalid timestamp',
+    );
+  }
+  if (timestamp > Date.now() + maxFutureDriftMs) {
+    throw new TetherServerError(
+      TetherServerErrorCode.InvalidInput,
+      'Timestamp drift exceeds maximum allowable threshold',
+    );
+  }
+  return timestamp;
+}
+
 /**
  * Validates a user ID string ensuring it is safe for filesystem use.
  *

@@ -16,6 +16,7 @@ import {
   validatePassword,
   validateRecordId,
   validateTableName,
+  validateTimestamp,
   validateUserId,
   validateUsername,
 } from '../../src/server/validate.js';
@@ -241,6 +242,34 @@ describe('Validation', () => {
       expect(getUserBucket('user_42')).toBe('us');
       expect(getUserBucket('A1-test')).toBe('a1');
       expect(getUserBucket('x')).toBe('0x');
+    });
+  });
+
+  describe('validateTimestamp', () => {
+    it('should accept reasonable current and past timestamps', () => {
+      const now = Date.now();
+      expect(validateTimestamp(now)).toBe(now);
+      expect(validateTimestamp(now - 60_000)).toBe(now - 60_000);
+      expect(validateTimestamp(now + 60_000)).toBe(now + 60_000); // 1 minute in future is within 5 min limit
+    });
+
+    it('should reject invalid, non-finite, or non-positive timestamps', () => {
+      // @ts-expect-error Testing non-number handling
+      expect(() => validateTimestamp('invalid')).toThrow(TetherServerError);
+      expect(() => validateTimestamp(Number.NaN)).toThrow(TetherServerError);
+      expect(() => validateTimestamp(Number.POSITIVE_INFINITY)).toThrow(
+        TetherServerError,
+      );
+      expect(() => validateTimestamp(0)).toThrow(TetherServerError);
+      expect(() => validateTimestamp(-1000)).toThrow(TetherServerError);
+    });
+
+    it('should reject timestamps that exceed the maximum allowable future drift', () => {
+      const farFuture = Date.now() + 10 * 60 * 1000; // 10 minutes in future (> 5 min limit)
+      expect(() => validateTimestamp(farFuture)).toThrow(TetherServerError);
+      expect(() => validateTimestamp(farFuture)).toThrow(
+        'Timestamp drift exceeds maximum allowable threshold',
+      );
     });
   });
 });

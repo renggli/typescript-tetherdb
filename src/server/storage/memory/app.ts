@@ -9,6 +9,7 @@ import {
   calculateByteSize,
   validateRecordId,
   validateTableName,
+  validateTimestamp,
 } from '../../validate.js';
 import type { AppStorage } from '../app.js';
 import type { TableStorage } from '../table.js';
@@ -65,6 +66,7 @@ export class AppMemoryStorage implements AppStorage {
     for (const change of changes) {
       const tableName = validateTableName(change.table);
       const recordId = validateRecordId(change.id);
+      validateTimestamp(change.timestamp);
 
       if (!this.tables.has(tableName)) {
         throw new TetherServerError(

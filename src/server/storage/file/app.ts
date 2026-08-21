@@ -12,6 +12,7 @@ import {
   getUserBucket,
   validateRecordId,
   validateTableName,
+  validateTimestamp,
   validateUserId,
 } from '../../validate.js';
 import type { AppStorage } from '../app.js';
@@ -238,6 +239,7 @@ export class AppFileStorage implements AppStorage {
       for (const change of changes) {
         const tableName = validateTableName(change.table);
         const recordId = validateRecordId(change.id);
+        validateTimestamp(change.timestamp);
 
         if (!registeredTables.has(tableName)) {
           throw new TetherServerError(

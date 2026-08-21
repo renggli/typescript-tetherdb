@@ -5,6 +5,7 @@ import {
   calculateByteSize,
   validateRecordId,
   validateTableName,
+  validateTimestamp,
   validateUserId,
 } from '../../validate.js';
 import type { AppStorage } from '../app.js';
@@ -124,6 +125,7 @@ export class AppSqliteStorage implements AppStorage {
       for (const change of changes) {
         const tableName = validateTableName(change.table);
         const recordId = validateRecordId(change.id);
+        validateTimestamp(change.timestamp);
 
         if (!checkedTables.has(tableName)) {
           const tableExists = appsDb.stmtFindTable.get(this.id, tableName);

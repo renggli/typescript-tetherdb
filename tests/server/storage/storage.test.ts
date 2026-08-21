@@ -412,4 +412,24 @@ function runStorageTestSuite(createStorage: () => Storage) {
     expect(pruneRes.action).toBe('prune');
     expect(pruneRes.affectedCount).toBeGreaterThanOrEqual(3);
   });
+
+  it('should reject mutations with timestamps far in the future', async () => {
+    const user = await storage.createUser('time_user', 'password');
+    const app = await storage.getApp('default');
+    expect(app).toBeDefined();
+
+    const farFuture = Date.now() + 10 * 60 * 1000; // 10 minutes in future
+    await expect(
+      app?.applyChanges(user, [
+        {
+          table: 'todos',
+          id: 'future-task',
+          op: OperationType.Put,
+          data: { title: 'Poison' },
+          timestamp: farFuture,
+          clientId: 'malicious-client',
+        },
+      ]),
+    ).rejects.toThrow('Timestamp drift exceeds maximum allowable threshold');
+  });
 }
