@@ -1,5 +1,13 @@
 # TetherDB 🚀
 
+[![NPM Package](https://img.shields.io/npm/v/tetherdb.svg)](https://www.npmjs.com/package/tetherdb)
+[![Build Status](https://github.com/renggli/typescript-tetherdb/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/renggli/typescript-tetherdb/actions)
+[![Code Coverage](https://codecov.io/gh/renggli/typescript-tetherdb/branch/main/graph/badge.svg)](https://codecov.io/gh/renggli/typescript-tetherdb)
+[![GitHub Issues](https://img.shields.io/github/issues/renggli/typescript-tetherdb.svg)](https://github.com/renggli/typescript-tetherdb/issues)
+[![GitHub Forks](https://img.shields.io/github/forks/renggli/typescript-tetherdb.svg)](https://github.com/renggli/typescript-tetherdb/network)
+[![GitHub Stars](https://img.shields.io/github/stars/renggli/typescript-tetherdb.svg)](https://github.com/renggli/typescript-tetherdb/stargazers)
+[![GitHub License](https://img.shields.io/badge/license-MIT-blue.svg)](https://raw.githubusercontent.com/renggli/typescript-tetherdb/main/LICENSE)
+
 **TetherDB** is a lightweight, offline-first TypeScript library combining a reactive IndexedDB client wrapper with real-time two-way WebSocket synchronization against a server backend.
 
 ## Features

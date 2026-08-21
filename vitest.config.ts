@@ -24,7 +24,7 @@ export default defineConfig({
         'src/server/storage/index.ts',
         'src/**/*.d.ts',
       ],
-      reporter: ['text', 'text-summary', 'json-summary', 'html'],
+      reporter: ['text', 'text-summary', 'json-summary', 'html', 'lcov'],
     },
   },
   ssr: {
