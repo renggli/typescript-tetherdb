@@ -866,5 +866,187 @@ describe.each(storageDescriptors)(
         }
       });
     });
+
+    describe('CORS Configuration', () => {
+      it('should return default permissive CORS headers when not configured', async () => {
+        const running = await server.listen(0, '127.0.0.1');
+        const port = (running.address() as { port: number }).port;
+        const res = await fetch(`http://127.0.0.1:${port}/health`);
+        expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
+        expect(res.headers.get('Access-Control-Allow-Methods')).toContain(
+          'GET',
+        );
+      });
+
+      it('should respect custom string origin', async () => {
+        const corsServer = new TetherServer({
+          storage: storageContext.storage,
+          cors: { origin: 'https://trusted.app' },
+        });
+        const running = await corsServer.listen(0, '127.0.0.1');
+        const port = (running.address() as { port: number }).port;
+
+        try {
+          const res = await fetch(`http://127.0.0.1:${port}/health`, {
+            headers: { Origin: 'https://trusted.app' },
+          });
+          expect(res.headers.get('Access-Control-Allow-Origin')).toBe(
+            'https://trusted.app',
+          );
+          expect(res.headers.get('Vary')).toBe('Origin');
+        } finally {
+          await corsServer.close();
+        }
+      });
+
+      it('should match origin against an array of allowed origins', async () => {
+        const corsServer = new TetherServer({
+          storage: storageContext.storage,
+          cors: {
+            origin: ['https://app1.example.com', 'https://app2.example.com'],
+          },
+        });
+        const running = await corsServer.listen(0, '127.0.0.1');
+        const port = (running.address() as { port: number }).port;
+
+        try {
+          // Allowed origin
+          const resAllowed = await fetch(`http://127.0.0.1:${port}/health`, {
+            headers: { Origin: 'https://app2.example.com' },
+          });
+          expect(resAllowed.headers.get('Access-Control-Allow-Origin')).toBe(
+            'https://app2.example.com',
+          );
+
+          // Disallowed origin
+          const resDenied = await fetch(`http://127.0.0.1:${port}/health`, {
+            headers: { Origin: 'https://malicious.com' },
+          });
+          expect(
+            resDenied.headers.get('Access-Control-Allow-Origin'),
+          ).toBeNull();
+        } finally {
+          await corsServer.close();
+        }
+      });
+
+      it('should handle credentials, exposedHeaders, and maxAge on OPTIONS preflight', async () => {
+        const corsServer = new TetherServer({
+          storage: storageContext.storage,
+          cors: {
+            origin: true,
+            credentials: true,
+            allowedHeaders: ['X-Custom-Header', 'Content-Type'],
+            exposedHeaders: ['X-Total-Count'],
+            maxAge: 3600,
+          },
+        });
+        const running = await corsServer.listen(0, '127.0.0.1');
+        const port = (running.address() as { port: number }).port;
+
+        try {
+          const res = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+            method: 'OPTIONS',
+            headers: { Origin: 'https://myclient.com' },
+          });
+          expect(res.status).toBe(204);
+          expect(res.headers.get('Access-Control-Allow-Origin')).toBe(
+            'https://myclient.com',
+          );
+          expect(res.headers.get('Access-Control-Allow-Credentials')).toBe(
+            'true',
+          );
+          expect(res.headers.get('Access-Control-Allow-Headers')).toBe(
+            'X-Custom-Header, Content-Type',
+          );
+          expect(res.headers.get('Access-Control-Expose-Headers')).toBe(
+            'X-Total-Count',
+          );
+          expect(res.headers.get('Access-Control-Max-Age')).toBe('3600');
+        } finally {
+          await corsServer.close();
+        }
+      });
+
+      it('should disable CORS headers when cors is false', async () => {
+        const corsServer = new TetherServer({
+          storage: storageContext.storage,
+          cors: false,
+        });
+        const running = await corsServer.listen(0, '127.0.0.1');
+        const port = (running.address() as { port: number }).port;
+
+        try {
+          const res = await fetch(`http://127.0.0.1:${port}/health`, {
+            headers: { Origin: 'https://client.com' },
+          });
+          expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull();
+        } finally {
+          await corsServer.close();
+        }
+      });
+    });
+
+    describe('Logger Integration', () => {
+      it('should accept custom logger and receive debug logs on client errors and error logs on 500', async () => {
+        const mockLogger = {
+          debug: vi.fn(),
+          info: vi.fn(),
+          warn: vi.fn(),
+          error: vi.fn(),
+        };
+
+        const loggedServer = new TetherServer({
+          storage: storageContext.storage,
+          logger: mockLogger,
+        });
+        const running = await loggedServer.listen(0, '127.0.0.1');
+        const port = (running.address() as { port: number }).port;
+
+        try {
+          // Send invalid JSON to trigger 400 debug log
+          const res400 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{invalid-json',
+          });
+          expect(res400.status).toBe(400);
+          expect(mockLogger.debug).toHaveBeenCalled();
+
+          // Mock an unexpected internal error to trigger 500 error log
+          vi.spyOn(loggedServer.storage, 'createUser').mockRejectedValueOnce(
+            new Error('Database disk failure'),
+          );
+          const res500 = await fetch(`http://127.0.0.1:${port}/auth/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: 'testuser',
+              password: 'password123',
+            }),
+          });
+          expect(res500.status).toBe(500);
+          expect(mockLogger.error).toHaveBeenCalled();
+        } finally {
+          await loggedServer.close();
+        }
+      });
+
+      it('should support logger: false to silence logs completely', async () => {
+        const silentServer = new TetherServer({
+          storage: storageContext.storage,
+          logger: false,
+        });
+        const running = await silentServer.listen(0, '127.0.0.1');
+        const port = (running.address() as { port: number }).port;
+
+        try {
+          const res = await fetch(`http://127.0.0.1:${port}/health`);
+          expect(res.status).toBe(200);
+        } finally {
+          await silentServer.close();
+        }
+      });
+    });
   },
 );

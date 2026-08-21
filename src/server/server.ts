@@ -37,6 +37,40 @@ export interface RateLimitOptions {
 }
 
 /**
+ * Options for configuring Cross-Origin Resource Sharing (CORS) on HTTP endpoints.
+ */
+export interface CorsOptions {
+  /**
+   * Allowed origin(s). Can be `'*'` for unrestricted access, a specific origin string (e.g. `'https://example.com'`),
+   * an array of allowed origin strings, `true` to reflect the request's `Origin` header, or `false` to disable CORS headers.
+   * Defaults to `'*'`.
+   */
+  origin?: string | string[] | boolean;
+  /** Whether to set `Access-Control-Allow-Credentials: true` (defaults to false). */
+  credentials?: boolean;
+  /** Allowed request headers for preflight OPTIONS checks (defaults to `['Content-Type', 'Authorization']`). */
+  allowedHeaders?: string[];
+  /** Exposed response headers (Access-Control-Expose-Headers). */
+  exposedHeaders?: string[];
+  /** Maximum age in seconds to cache preflight responses (Access-Control-Max-Age). */
+  maxAge?: number;
+}
+
+/**
+ * Pluggable logger interface for TetherServer logging.
+ */
+export interface TetherLogger {
+  /** Logs debug information. */
+  debug(message: string, ...args: unknown[]): void;
+  /** Logs operational information. */
+  info(message: string, ...args: unknown[]): void;
+  /** Logs warning conditions. */
+  warn(message: string, ...args: unknown[]): void;
+  /** Logs error conditions. */
+  error(message: string, ...args: unknown[]): void;
+}
+
+/**
  * Configuration options for the TetherServer.
  */
 export interface TetherServerOptions {
@@ -52,6 +86,10 @@ export interface TetherServerOptions {
   rateLimiting?: boolean | RateLimitOptions;
   /** Whether to trust the `X-Forwarded-For` header for resolving client IP addresses (defaults to false). */
   trustProxy?: boolean;
+  /** CORS options for HTTP endpoints, `false` to disable CORS headers, or `true` for default permissive CORS (defaults to true). */
+  cors?: boolean | CorsOptions;
+  /** Optional custom logger instance, or `false` to silence internal server logs (defaults to `console`). */
+  logger?: TetherLogger | false;
 }
 
 /**
@@ -125,6 +163,8 @@ export class TetherServer {
   readonly webSocketPath: string;
   readonly trustProxy: boolean;
   private readonly allowRegistration: boolean;
+  private readonly corsConfig: CorsOptions | null;
+  private readonly logger: TetherLogger | null;
   private readonly ipLoginLimiter: RateLimiter | null;
   private readonly userLoginLimiter: RateLimiter | null;
   private readonly ipRegisterLimiter: RateLimiter | null;
@@ -143,6 +183,13 @@ export class TetherServer {
     this.webSocketPath = options.webSocketPath ?? `${this.basePath}/sync`;
     this.allowRegistration = options.allowRegistration ?? true;
     this.trustProxy = options.trustProxy ?? false;
+    this.corsConfig =
+      options.cors === false
+        ? null
+        : typeof options.cors === 'object'
+          ? options.cors
+          : {};
+    this.logger = options.logger === false ? null : (options.logger ?? console);
 
     const rateLimitConfig = options.rateLimiting ?? true;
     if (rateLimitConfig === false) {
@@ -153,6 +200,7 @@ export class TetherServer {
         maxConcurrentConnectionsPerUser: 1_000,
         authTimeoutMs: 0,
         rateLimiter: null,
+        logger: this.logger,
       });
     } else {
       const opts: RateLimitOptions =
@@ -194,6 +242,7 @@ export class TetherServer {
           opts.maxConcurrentConnectionsPerUser ?? 20,
         authTimeoutMs: opts.authTimeoutMs ?? 10_000,
         rateLimiter: syncLimiter,
+        logger: this.logger,
       });
     }
   }
@@ -393,7 +442,7 @@ export class TetherServer {
     const method = req.method?.toUpperCase();
 
     if (method === 'OPTIONS') {
-      this.handleOptions(res);
+      this.handleOptions(req, res);
       return true;
     }
 
@@ -430,20 +479,82 @@ export class TetherServer {
       return false;
     } catch (err) {
       const status = getHttpStatusForError(err);
+      if (status >= 500) {
+        this.logger?.error('Error handling HTTP request:', err);
+      } else {
+        this.logger?.debug('Client error handling HTTP request:', err);
+      }
       const msg = err instanceof Error ? err.message : 'Internal server error';
-      this.sendJson(res, status, { error: msg });
+      this.sendJson(res, status, { error: msg }, req);
       return true;
     }
   }
 
   // -- Private Helpers ------------------------------------------------------
 
-  private sendJson(res: http.ServerResponse, status: number, data: unknown) {
+  private getCorsHeaders(req?: http.IncomingMessage): Record<string, string> {
+    if (!this.corsConfig) return {};
+
+    const headers: Record<string, string> = {
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': (
+        this.corsConfig.allowedHeaders ?? ['Content-Type', 'Authorization']
+      ).join(', '),
+    };
+
+    if (
+      this.corsConfig.exposedHeaders &&
+      this.corsConfig.exposedHeaders.length > 0
+    ) {
+      headers['Access-Control-Expose-Headers'] =
+        this.corsConfig.exposedHeaders.join(', ');
+    }
+
+    if (this.corsConfig.maxAge !== undefined) {
+      headers['Access-Control-Max-Age'] = String(this.corsConfig.maxAge);
+    }
+
+    const reqOrigin = req?.headers.origin;
+    const origin = this.corsConfig.origin ?? '*';
+
+    if (origin === '*') {
+      if (this.corsConfig.credentials) {
+        if (reqOrigin) {
+          headers['Access-Control-Allow-Origin'] = reqOrigin;
+          headers.Vary = 'Origin';
+        }
+      } else {
+        headers['Access-Control-Allow-Origin'] = '*';
+      }
+    } else if (typeof origin === 'string') {
+      headers['Access-Control-Allow-Origin'] = origin;
+      headers.Vary = 'Origin';
+    } else if (Array.isArray(origin)) {
+      if (reqOrigin && origin.includes(reqOrigin)) {
+        headers['Access-Control-Allow-Origin'] = reqOrigin;
+        headers.Vary = 'Origin';
+      }
+    } else if (origin === true && reqOrigin) {
+      headers['Access-Control-Allow-Origin'] = reqOrigin;
+      headers.Vary = 'Origin';
+    }
+
+    if (this.corsConfig.credentials) {
+      headers['Access-Control-Allow-Credentials'] = 'true';
+    }
+
+    return headers;
+  }
+
+  private sendJson(
+    res: http.ServerResponse,
+    status: number,
+    data: unknown,
+    req?: http.IncomingMessage,
+  ) {
     res.writeHead(status, {
       'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      ...this.getCorsHeaders(req),
     });
     res.end(JSON.stringify(data));
   }
@@ -478,50 +589,60 @@ export class TetherServer {
     });
   }
 
-  private handleOptions(res: http.ServerResponse): void {
-    res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    });
+  private handleOptions(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    res.writeHead(204, this.getCorsHeaders(req));
     res.end();
   }
 
   private handleHealth(
-    _req: http.IncomingMessage,
+    req: http.IncomingMessage,
     res: http.ServerResponse,
   ): void {
-    this.sendJson(res, 200, {
-      status: 'ok',
-      uptime: process.uptime(),
-    });
+    this.sendJson(
+      res,
+      200,
+      {
+        status: 'ok',
+        uptime: process.uptime(),
+      },
+      req,
+    );
   }
 
   private async handleReady(
-    _req: http.IncomingMessage,
+    req: http.IncomingMessage,
     res: http.ServerResponse,
   ): Promise<void> {
     try {
       await this.storage.getApps();
-      this.sendJson(res, 200, { status: 'ready' });
+      this.sendJson(res, 200, { status: 'ready' }, req);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Storage unavailable';
-      this.sendJson(res, 503, { status: 'unready', error: message });
+      this.logger?.error('Storage readiness error:', err);
+      this.sendJson(res, 503, { status: 'unready', error: message }, req);
     }
   }
 
   private async handleMetrics(
-    _req: http.IncomingMessage,
+    req: http.IncomingMessage,
     res: http.ServerResponse,
   ): Promise<void> {
     const apps = await this.storage.getApps();
-    this.sendJson(res, 200, {
-      uptime: process.uptime(),
-      connectedClients: this.sync.connectedClientsCount,
-      appsCount: apps.length,
-      memoryUsage: process.memoryUsage(),
-    });
+    this.sendJson(
+      res,
+      200,
+      {
+        uptime: process.uptime(),
+        connectedClients: this.sync.connectedClientsCount,
+        appsCount: apps.length,
+        memoryUsage: process.memoryUsage(),
+      },
+      req,
+    );
   }
 
   private async handleRegister(
@@ -530,9 +651,14 @@ export class TetherServer {
   ): Promise<void> {
     const ip = this.getClientIp(req);
     if (this.ipRegisterLimiter && !this.ipRegisterLimiter.consume(ip)) {
-      this.sendJson(res, 429, {
-        error: 'Too many registration requests',
-      });
+      this.sendJson(
+        res,
+        429,
+        {
+          error: 'Too many registration requests',
+        },
+        req,
+      );
       return;
     }
 
@@ -544,24 +670,39 @@ export class TetherServer {
     const normUsername = normalizeUsername(username ?? '');
     const normPassword = normalizePassword(password ?? '');
     if (!normUsername || !normPassword) {
-      this.sendJson(res, 400, {
-        error: 'Missing or invalid required field: username and password',
-      });
+      this.sendJson(
+        res,
+        400,
+        {
+          error: 'Missing or invalid required field: username and password',
+        },
+        req,
+      );
       return;
     }
 
     try {
       const user = await this.storage.createUser(normUsername, normPassword);
       const token = await user.createToken();
-      this.sendJson(res, 201, {
-        userId: user.id,
-        username: user.username,
-        token,
-      });
+      this.sendJson(
+        res,
+        201,
+        {
+          userId: user.id,
+          username: user.username,
+          token,
+        },
+        req,
+      );
     } catch (err) {
       const status = getHttpStatusForError(err);
+      if (status >= 500) {
+        this.logger?.error('Registration error:', err);
+      } else {
+        this.logger?.debug('Client registration error:', err);
+      }
       const msg = err instanceof Error ? err.message : 'Registration error';
-      this.sendJson(res, status, { error: msg });
+      this.sendJson(res, status, { error: msg }, req);
     }
   }
 
@@ -571,9 +712,14 @@ export class TetherServer {
   ): Promise<void> {
     const ip = this.getClientIp(req);
     if (this.ipLoginLimiter && !this.ipLoginLimiter.consume(ip)) {
-      this.sendJson(res, 429, {
-        error: 'Too many login attempts',
-      });
+      this.sendJson(
+        res,
+        429,
+        {
+          error: 'Too many login attempts',
+        },
+        req,
+      );
       return;
     }
 
@@ -585,17 +731,27 @@ export class TetherServer {
     const normUsername = normalizeUsername(username ?? '');
     const normPassword = normalizePassword(password ?? '');
     if (!normUsername || !normPassword) {
-      this.sendJson(res, 400, {
-        error: 'Missing required field: username and password',
-      });
+      this.sendJson(
+        res,
+        400,
+        {
+          error: 'Missing required field: username and password',
+        },
+        req,
+      );
       return;
     }
 
     const userKey = `${ip}:${normUsername}`;
     if (this.userLoginLimiter && !this.userLoginLimiter.consume(userKey)) {
-      this.sendJson(res, 429, {
-        error: 'Too many login attempts for this account',
-      });
+      this.sendJson(
+        res,
+        429,
+        {
+          error: 'Too many login attempts for this account',
+        },
+        req,
+      );
       return;
     }
 
@@ -607,9 +763,14 @@ export class TetherServer {
     if (!user || !valid) {
       this.ipLoginLimiter?.recordFailure(ip);
       this.userLoginLimiter?.recordFailure(userKey);
-      this.sendJson(res, 401, {
-        error: 'Invalid username or password',
-      });
+      this.sendJson(
+        res,
+        401,
+        {
+          error: 'Invalid username or password',
+        },
+        req,
+      );
       return;
     }
 
@@ -617,11 +778,16 @@ export class TetherServer {
     this.userLoginLimiter?.reset(userKey);
 
     const token = await user.createToken();
-    this.sendJson(res, 200, {
-      userId: user.id,
-      username: user.username,
-      token,
-    });
+    this.sendJson(
+      res,
+      200,
+      {
+        userId: user.id,
+        username: user.username,
+        token,
+      },
+      req,
+    );
   }
 
   private getClientIp(req: http.IncomingMessage): string {

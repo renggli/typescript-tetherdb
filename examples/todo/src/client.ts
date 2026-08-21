@@ -4,7 +4,7 @@ import {
   type Table,
   type TableChangeEvent,
   TetherClient,
-} from 'tetherdb';
+} from 'tetherdb/client';
 
 /**
  * Todo record data model.
@@ -40,8 +40,10 @@ enum AuthMode {
   Register = 'register',
 }
 
-// Database & UI State
-const db = new TetherClient('todo-example');
+// Database & UI State — initialize with unified backend URL
+const db = new TetherClient('todo-example', {
+  url: window.location.origin,
+});
 const todosTable: Table<TodoItem> = db.table<TodoItem>('todos');
 
 let currentFilter: FilterMode = FilterMode.All;

@@ -4,12 +4,14 @@ import {
   type ChangeBatchClientMessage,
   type ClientMessage,
   ClientMessageType,
+  PROTOCOL_VERSION,
   type ServerMessage,
   ServerMessageType,
   type SnapshotRecord,
 } from '../shared/types.js';
 import { TetherServerError, TetherServerErrorCode } from './errors.js';
 import type { RateLimiter } from './rate-limiter.js';
+import type { TetherLogger } from './server.js';
 import type { Storage } from './storage/storage.js';
 import type { UserStorage } from './storage/user.js';
 import {
@@ -28,6 +30,8 @@ export interface SyncOptions {
   authTimeoutMs?: number;
   /** Optional rate limiter for connection handshakes and invalid token tracking. */
   rateLimiter?: RateLimiter | null;
+  /** Optional logger instance (or null to suppress internal error logs). */
+  logger?: TetherLogger | null;
 }
 
 /**
@@ -39,6 +43,7 @@ export class Sync {
   private readonly maxConcurrentConnectionsPerUser: number;
   private readonly authTimeoutMs: number;
   private readonly rateLimiter: RateLimiter | null;
+  private readonly logger: TetherLogger | null;
   private readonly userClients = new Map<string, Set<ActiveClient>>(); // key = `${appId}:${userId}`
   private readonly webSocketToClient = new Map<WebSocket, ActiveClient>();
   private readonly pendingAuthTimers = new Map<WebSocket, NodeJS.Timeout>();
@@ -56,6 +61,7 @@ export class Sync {
       options.maxConcurrentConnectionsPerUser ?? 20;
     this.authTimeoutMs = options.authTimeoutMs ?? 10_000;
     this.rateLimiter = options.rateLimiter ?? null;
+    this.logger = options.logger ?? null;
   }
 
   /**
@@ -113,7 +119,7 @@ export class Sync {
           } catch (err) {
             const message =
               err instanceof Error ? err.message : 'Unknown server error';
-            console.error(
+            this.logger?.error(
               `[TetherServer.Sync] Error processing WebSocket message${userContext}:`,
               err,
             );
@@ -124,7 +130,7 @@ export class Sync {
           }
         })
         .catch((err) => {
-          console.error(
+          this.logger?.error(
             `[TetherServer.Sync] Unhandled error in message queue${userContext}:`,
             err,
           );
@@ -136,7 +142,7 @@ export class Sync {
       const userContext = client
         ? ` (app: "${client.appId}", user: "${client.user.id}", client: "${client.clientId}")`
         : '';
-      console.error(
+      this.logger?.error(
         `[TetherServer.Sync] WebSocket connection error${userContext}:`,
         err,
       );
@@ -195,6 +201,16 @@ export class Sync {
     if (authTimer) {
       clearTimeout(authTimer);
       this.pendingAuthTimers.delete(webSocket);
+    }
+
+    if (msg.protocolVersion !== PROTOCOL_VERSION) {
+      this.rateLimiter?.recordFailure(ip);
+      this.send(webSocket, {
+        type: ServerMessageType.AuthError,
+        message: `Unsupported protocol version: expected ${PROTOCOL_VERSION}, got ${msg.protocolVersion}`,
+      });
+      webSocket.close();
+      return;
     }
 
     if (typeof msg.token !== 'string' || !msg.token) {
@@ -287,6 +303,7 @@ export class Sync {
     const refreshedToken = await user.createToken();
     this.send(webSocket, {
       type: ServerMessageType.AuthSuccess,
+      protocolVersion: PROTOCOL_VERSION,
       userId: user.id,
       currentSeq,
       token: refreshedToken,

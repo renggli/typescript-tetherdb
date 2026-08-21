@@ -3,15 +3,18 @@
  *
  * @module tetherdb/server
  */
+export { PROTOCOL_VERSION } from '../shared/types.js';
 export {
   TetherServerError,
   TetherServerErrorCode,
 } from './errors.js';
 export {
+  type CorsOptions,
   type RateLimitOptions,
   type RunningServer,
   type StartServerOptions,
   startServer,
+  type TetherLogger,
   TetherServer,
   type TetherServerOptions,
 } from './server.js';

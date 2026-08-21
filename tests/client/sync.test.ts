@@ -183,6 +183,7 @@ describe('Sync', () => {
       expect(messages).toHaveLength(1);
       expect(messages[0]).toEqual({
         type: ClientMessageType.Auth,
+        protocolVersion: 1,
         token: 'my-jwt-token',
         appId: 'test-app',
         clientId: 'client-xyz',

@@ -18,20 +18,20 @@
 import * as http from 'node:http';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FileStorage, TetherServer } from 'tetherdb/server';
+import { SqliteStorage, TetherServer } from 'tetherdb/server';
 import { createServer as createViteServer } from 'vite';
 
 const rootDir = fileURLToPath(new URL('..', import.meta.url));
-const dataDir = path.join(rootDir, '.data');
+const baseDir = path.join(rootDir, '.data');
 
 async function main(): Promise<void> {
   const port = Number(process.env.PORT ?? 3000);
   const host = process.env.HOST ?? '0.0.0.0';
 
-  // 1. Configure storage persistence (FileStorage, SqliteStorage, or MemoryStorage)
-  const storage = new FileStorage({ baseDir: dataDir });
+  // 1. Configure SQLite storage persistence with versioned schemas
+  const storage = new SqliteStorage({ baseDir });
 
-  // 2. Instantiate TetherServer with configured storage backend
+  // 2. Instantiate TetherServer with storage
   const tetherServer = new TetherServer({ storage });
 
   // 3. Provision applications, tables, and default accounts
@@ -63,7 +63,7 @@ async function main(): Promise<void> {
   server.listen(port, host, () => {
     const hostLabel = host === '0.0.0.0' ? 'localhost' : host;
     console.log(`Server listening on http://${hostLabel}:${port}`);
-    console.log(`Storage directory: ${dataDir}`);
+    console.log(`Storage directory: ${baseDir}`);
   });
 }
 

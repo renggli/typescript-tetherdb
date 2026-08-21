@@ -35,7 +35,7 @@ You can launch a TetherDB server instantly from the command line:
 npx tetherdb --sqlite=./data --port=8080
 ```
 
-Or programmatically in TypeScript:
+Or programmatically in TypeScript with custom CORS and logging:
 
 ```typescript
 import { SqliteStorage, startServer } from 'tetherdb/server';
@@ -43,6 +43,12 @@ import { SqliteStorage, startServer } from 'tetherdb/server';
 const running = await startServer({
   port: 8080,
   storage: new SqliteStorage({ baseDir: './data' }),
+  trustProxy: true, // Enable when running behind Nginx, Caddy, or Cloudflare
+  cors: {
+    origin: ['https://myapp.com', 'https://staging.myapp.com'],
+    credentials: true,
+  },
+  logger: console, // Or custom logger (Pino, Winston)
 });
 console.log(`TetherDB running at http://${running.host}:${running.port}`);
 ```
@@ -57,10 +63,9 @@ interface Todo {
   completed: boolean;
 }
 
-// 1. Initialize local client scoped to your application
+// 1. Initialize local client with unified URL connection
 const client = new TetherClient('todo-app', {
-  host: 'localhost',
-  port: 8080,
+  url: 'http://localhost:8080', // or 'https://api.example.com/db'
 });
 const todos = client.table<Todo>('todos');
 
@@ -100,12 +105,99 @@ client.onSyncStatusChange.register((status) => {
 });
 ```
 
+### 3. Framework Integration (e.g. React)
+
+TetherDB tables subscribe seamlessly to UI state updates using standard hooks:
+
+```typescript
+import { useEffect, useState } from 'react';
+import type { Table } from 'tetherdb/client';
+
+export function useTableData<T>(table: Table<T>): T[] {
+  const [items, setItems] = useState<T[]>([]);
+
+  useEffect(() => {
+    // Initial fetch
+    table.getAll().then(setItems);
+
+    // Live update subscription
+    const unsubscribe = table.onChange.register(() => {
+      table.getAll().then(setItems);
+    });
+
+    return unsubscribe;
+  }, [table]);
+
+  return items;
+}
+```
+
+## Production Deployment & Reverse Proxy
+
+When deploying in production, run TetherDB behind a reverse proxy (like **Caddy** or **Nginx**) to handle SSL/TLS termination and WebSocket upgrade headers:
+
+### Caddy Configuration (`Caddyfile`)
+
+```caddy
+api.example.com {
+    reverse_proxy localhost:8080
+}
+```
+
+### Nginx Configuration
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name api.example.com;
+
+    ssl_certificate /path/to/cert.pem;
+    ssl_certificate_key /path/to/key.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+
+        # WebSocket Upgrade Headers
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # Forwarded Headers for Rate Limiting
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Disable proxy buffering for real-time streaming
+        proxy_buffering off;
+    }
+}
+```
+
+## Storage Maintenance & Operations
+
+For SQLite backends, TetherDB provides built-in maintenance routines to manage WAL logs and changelog sizes:
+
+```bash
+# Checkpoint WAL logs
+npx tetherdb maintenance checkpoint --sqlite=./data
+
+# Vacuum SQLite database files
+npx tetherdb maintenance vacuum --sqlite=./data
+
+# Prune changelog history (keeping last 1,000 changes per table)
+npx tetherdb maintenance prune --sqlite=./data --keep=1000
+```
+
 ## HTTP Endpoints
 
 The standard server provides authentication and WebSocket sync endpoints:
 
 | Method | Endpoint | Description | Auth Required |
 | :--- | :--- | :--- | :--- |
+| `GET` | `/health` | Server health and uptime check | No |
+| `GET` | `/ready` | Storage readiness check | No |
+| `GET` | `/metrics` | Connected clients and app metrics | No |
 | `POST` | `/auth/register` | Register a new user account | No |
 | `POST` | `/auth/login` | Log in and receive signed session token | No |
 | `WS` | `/sync` | Two-way WebSocket real-time synchronization | Token handshake in auth message |

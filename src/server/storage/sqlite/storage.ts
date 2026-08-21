@@ -141,15 +141,7 @@ export class SqliteStorage implements Storage {
       db.exec('PRAGMA synchronous = NORMAL;');
     }
 
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS users (
-        id TEXT PRIMARY KEY,
-        username TEXT UNIQUE NOT NULL,
-        password_hash TEXT,
-        created_at INTEGER NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_users_username ON users (username);
-    `);
+    initUsersSchema(db);
 
     this.usersHandle = {
       db,
@@ -195,19 +187,7 @@ export class SqliteStorage implements Storage {
       db.exec('PRAGMA synchronous = NORMAL;');
     }
 
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS apps (
-        id TEXT PRIMARY KEY,
-        created_at INTEGER NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS tables (
-        app_id TEXT NOT NULL,
-        name TEXT NOT NULL,
-        created_at INTEGER NOT NULL,
-        PRIMARY KEY (app_id, name)
-      );
-      CREATE INDEX IF NOT EXISTS idx_tables_app ON tables (app_id);
-    `);
+    initAppsSchema(db);
 
     this.appsHandle = {
       db,
@@ -290,41 +270,7 @@ export class SqliteStorage implements Storage {
       db.exec('PRAGMA synchronous = NORMAL;');
     }
 
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS records (
-          table_name TEXT NOT NULL,
-          id TEXT NOT NULL,
-          version INTEGER NOT NULL,
-          timestamp INTEGER NOT NULL,
-          client_id TEXT NOT NULL,
-          deleted INTEGER NOT NULL,
-          data TEXT,
-          PRIMARY KEY (table_name, id)
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_records_lookup
-          ON records (table_name, deleted);
-
-        CREATE TABLE IF NOT EXISTS changelog (
-          seq INTEGER PRIMARY KEY,
-          table_name TEXT NOT NULL,
-          id TEXT NOT NULL,
-          op TEXT NOT NULL,
-          version INTEGER NOT NULL,
-          timestamp INTEGER NOT NULL,
-          client_id TEXT NOT NULL,
-          deleted INTEGER NOT NULL,
-          data TEXT
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_changelog_sync
-          ON changelog (seq);
-
-        CREATE TABLE IF NOT EXISTS user_meta (
-          current_seq INTEGER NOT NULL,
-          min_seq INTEGER NOT NULL
-        );
-      `);
+    initUserAppSchema(db);
 
     handle = {
       db,
@@ -852,5 +798,100 @@ export class SqliteStorage implements Storage {
       }
     }
     this.userAppDbs.clear();
+  }
+}
+
+// -- Private SQLite Schema & Migration Helpers ------------------------------
+
+const USERS_DB_SCHEMA_VERSION = 1;
+const APPS_DB_SCHEMA_VERSION = 1;
+const USER_APP_DB_SCHEMA_VERSION = 1;
+
+function getSchemaVersion(db: DatabaseSync): number {
+  const row = db.prepare('PRAGMA user_version;').get() as
+    | { user_version?: number }
+    | undefined;
+  return row?.user_version ?? 0;
+}
+
+function setSchemaVersion(db: DatabaseSync, version: number): void {
+  db.exec(`PRAGMA user_version = ${version};`);
+}
+
+function initUsersSchema(db: DatabaseSync): void {
+  const currentVersion = getSchemaVersion(db);
+  if (currentVersion < 1) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_users_username ON users (username);
+    `);
+    setSchemaVersion(db, USERS_DB_SCHEMA_VERSION);
+  }
+}
+
+function initAppsSchema(db: DatabaseSync): void {
+  const currentVersion = getSchemaVersion(db);
+  if (currentVersion < 1) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS apps (
+        id TEXT PRIMARY KEY,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS tables (
+        app_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (app_id, name)
+      );
+      CREATE INDEX IF NOT EXISTS idx_tables_app ON tables (app_id);
+    `);
+    setSchemaVersion(db, APPS_DB_SCHEMA_VERSION);
+  }
+}
+
+function initUserAppSchema(db: DatabaseSync): void {
+  const currentVersion = getSchemaVersion(db);
+  if (currentVersion < 1) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS records (
+        table_name TEXT NOT NULL,
+        id TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        timestamp INTEGER NOT NULL,
+        client_id TEXT NOT NULL,
+        deleted INTEGER NOT NULL,
+        data TEXT,
+        PRIMARY KEY (table_name, id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_records_lookup
+        ON records (table_name, deleted);
+
+      CREATE TABLE IF NOT EXISTS changelog (
+        seq INTEGER PRIMARY KEY,
+        table_name TEXT NOT NULL,
+        id TEXT NOT NULL,
+        op TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        timestamp INTEGER NOT NULL,
+        client_id TEXT NOT NULL,
+        deleted INTEGER NOT NULL,
+        data TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_changelog_sync
+        ON changelog (seq);
+
+      CREATE TABLE IF NOT EXISTS user_meta (
+        current_seq INTEGER NOT NULL,
+        min_seq INTEGER NOT NULL
+      );
+    `);
+    setSchemaVersion(db, USER_APP_DB_SCHEMA_VERSION);
   }
 }

@@ -63,6 +63,11 @@ export interface SnapshotRecord<T = unknown> extends StoredRecord<T> {
 }
 
 /**
+ * Current wire protocol version number.
+ */
+export const PROTOCOL_VERSION = 1;
+
+/**
  * Types of messages sent from the client to the server over the WebSocket sync connection.
  */
 export enum ClientMessageType {
@@ -79,6 +84,8 @@ export enum ClientMessageType {
  */
 export interface AuthClientMessage {
   type: ClientMessageType.Auth;
+  /** Wire protocol version number (must equal `PROTOCOL_VERSION`). */
+  protocolVersion: number;
   /** Signed authentication session token. */
   token: string;
   /** Unique client instance identifier. */
@@ -87,6 +94,8 @@ export interface AuthClientMessage {
   lastSyncSeq?: number;
   /** Application namespace identifier. */
   appId: string;
+  /** Optional client capabilities supported by this client session. */
+  capabilities?: string[];
 }
 
 /**
@@ -144,12 +153,16 @@ export enum ServerMessageType {
  */
 export interface AuthSuccessServerMessage {
   type: ServerMessageType.AuthSuccess;
+  /** Wire protocol version number. */
+  protocolVersion: number;
   /** Authenticated user account identifier. */
   userId: string;
   /** Current global sequence number of the user's data on the server. */
   currentSeq: number;
   /** Refreshed session token for sliding session validity. */
   token?: string;
+  /** Optional server capabilities supported by this server instance. */
+  capabilities?: string[];
 }
 
 /**

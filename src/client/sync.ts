@@ -3,6 +3,7 @@ import {
   type ClientMessage,
   ClientMessageType,
   OperationType,
+  PROTOCOL_VERSION,
   type ServerMessage,
   ServerMessageType,
   type SnapshotRecord,
@@ -51,6 +52,8 @@ export interface SyncOptions {
   maxReconnectIntervalMs?: number;
   /** Periodic keepalive ping interval in milliseconds (defaults to 30000). Set to 0 to disable. */
   pingIntervalMs?: number;
+  /** Debounce delay in milliseconds before pushing queued local outbox changes (defaults to 10). */
+  pushDebounceMs?: number;
   /** Custom WebSocket constructor for Node.js environments. */
   webSocketClass?: WebSocketConstructor;
   /** Callback invoked when the server provides a refreshed session token. */
@@ -297,14 +300,15 @@ export class Sync {
   /**
    * Schedules a debounced push of pending outbox mutations.
    *
-   * @param delayMs - Debounce delay in milliseconds (defaults to 10).
+   * @param delayMs - Optional override for debounce delay in milliseconds.
    */
-  schedulePush(delayMs = 10): void {
+  schedulePush(delayMs?: number): void {
+    const delay = delayMs ?? this.options.pushDebounceMs ?? 10;
     if (this.pushTimer) clearTimeout(this.pushTimer);
     this.pushTimer = setTimeout(() => {
       this.pushTimer = null;
       this.pushOutbox();
-    }, delayMs);
+    }, delay);
   }
 
   /**
@@ -442,6 +446,7 @@ export class Sync {
       (await this.storage.getMeta<number>('lastSyncSeq')) ?? 0;
     this.send({
       type: ClientMessageType.Auth,
+      protocolVersion: PROTOCOL_VERSION,
       token: this.token ?? '',
       appId: this.options.appId,
       clientId: this.clientId,

@@ -7,6 +7,7 @@ import { Sync } from '../../src/server/sync.js';
 import {
   ClientMessageType,
   OperationType,
+  PROTOCOL_VERSION,
   type ServerMessage,
   ServerMessageType,
 } from '../../src/shared/types.js';
@@ -35,7 +36,17 @@ class MockServerWebSocket extends EventEmitter {
 
   // Helper to send message from client to server
   emitClientMessage(msg: unknown): void {
-    this.emit('message', typeof msg === 'string' ? msg : JSON.stringify(msg));
+    const payload =
+      typeof msg === 'object' &&
+      msg !== null &&
+      (msg as { type?: string }).type === ClientMessageType.Auth &&
+      !('protocolVersion' in msg)
+        ? { protocolVersion: PROTOCOL_VERSION, ...(msg as object) }
+        : msg;
+    this.emit(
+      'message',
+      typeof payload === 'string' ? payload : JSON.stringify(payload),
+    );
   }
 
   getParsedMessages<T = ServerMessage>(): T[] {
@@ -69,6 +80,28 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
   });
 
   describe('Authentication Handshake (ClientMessageType.Auth)', () => {
+    it('should reject connection if protocolVersion is unsupported', async () => {
+      const ws = new MockServerWebSocket();
+      sync.handleConnection(ws as unknown as WebSocket);
+
+      ws.emitClientMessage({
+        type: ClientMessageType.Auth,
+        protocolVersion: 99,
+        token: validToken,
+        appId: 'todo-app',
+      });
+
+      await new Promise((r) => setTimeout(r, 20));
+
+      const messages = ws.getParsedMessages();
+      expect(messages).toHaveLength(1);
+      expect(messages[0].type).toBe(ServerMessageType.AuthError);
+      if (messages[0].type === ServerMessageType.AuthError) {
+        expect(messages[0].message).toContain('Unsupported protocol version');
+      }
+      expect(ws.isClosed).toBe(true);
+    });
+
     it('should reject connection if token is missing or empty', async () => {
       const ws = new MockServerWebSocket();
       sync.handleConnection(ws as unknown as WebSocket);

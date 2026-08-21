@@ -317,4 +317,39 @@ describe('SqliteStorage', () => {
       /not found/i,
     );
   });
+
+  it('should initialize and maintain PRAGMA user_version across all SQLite databases', async () => {
+    const user = await context.backend.createUser('version_user', 'pass');
+    const app = await context.backend.createApp('version_app');
+    const table = await app.createTable('version_table');
+
+    await table.applyChanges(user, [
+      {
+        table: 'version_table',
+        id: 'rec_1',
+        op: OperationType.Put,
+        data: { test: true },
+        timestamp: 100,
+        clientId: 'c1',
+      },
+    ]);
+
+    const usersDb = context.backend.getUsersDb().db;
+    const appsDb = context.backend.getAppsDb().db;
+    const userAppDb = context.backend.getUserAppDb('version_app', user.id).db;
+
+    const usersVer = usersDb.prepare('PRAGMA user_version;').get() as {
+      user_version: number;
+    };
+    const appsVer = appsDb.prepare('PRAGMA user_version;').get() as {
+      user_version: number;
+    };
+    const userAppVer = userAppDb.prepare('PRAGMA user_version;').get() as {
+      user_version: number;
+    };
+
+    expect(usersVer.user_version).toBe(1);
+    expect(appsVer.user_version).toBe(1);
+    expect(userAppVer.user_version).toBe(1);
+  });
 });
