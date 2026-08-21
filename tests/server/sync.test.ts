@@ -745,5 +745,68 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         'Authentication timeout',
       );
     });
+
+    it('should clean up old user subscriptions when re-authenticating with a different user', async () => {
+      const user2 = await storage.createUser('user-two', 'Password123!');
+      const token2 = await user2.createToken();
+
+      const ws = new MockServerWebSocket();
+      sync.handleConnection(ws as unknown as WebSocket);
+
+      // 1. Authenticate as user 1
+      ws.emitClientMessage({
+        type: ClientMessageType.Auth,
+        token: validToken,
+        appId: 'todo-app',
+        clientId: 'client-reauth',
+      });
+      await new Promise((r) => setTimeout(r, 20));
+
+      // 2. Re-authenticate same socket as user 2
+      ws.emitClientMessage({
+        type: ClientMessageType.Auth,
+        token: token2,
+        appId: 'todo-app',
+        clientId: 'client-reauth',
+      });
+      await new Promise((r) => setTimeout(r, 20));
+
+      // Clear message buffer
+      ws.sentMessages = [];
+
+      // 3. User 1 performs a mutation from another client
+      const wsUser1 = new MockServerWebSocket();
+      sync.handleConnection(wsUser1 as unknown as WebSocket);
+      wsUser1.emitClientMessage({
+        type: ClientMessageType.Auth,
+        token: validToken,
+        appId: 'todo-app',
+        clientId: 'client-other',
+      });
+      await new Promise((r) => setTimeout(r, 20));
+
+      wsUser1.emitClientMessage({
+        type: ClientMessageType.ChangeBatch,
+        batchId: 'batch-1',
+        changes: [
+          {
+            table: 'todos',
+            id: 'todo-secret',
+            op: OperationType.Put,
+            clientId: 'client-other',
+            data: { title: 'User 1 Secret' },
+            timestamp: Date.now(),
+          },
+        ],
+      });
+      await new Promise((r) => setTimeout(r, 30));
+
+      // 4. Verify that ws (now authenticated as user 2) did not receive user 1's broadcast
+      const reauthMsgs = ws.getParsedMessages();
+      const broadcastMsgs = reauthMsgs.filter(
+        (m) => m.type === ServerMessageType.BroadcastChanges,
+      );
+      expect(broadcastMsgs).toHaveLength(0);
+    });
   });
 });

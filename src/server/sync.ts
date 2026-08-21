@@ -260,6 +260,19 @@ export class Sync {
       msg.clientId ?? 'client_anon',
       'clientId',
     );
+    const existingClient = this.webSocketToClient.get(webSocket);
+    if (existingClient) {
+      const oldChannelKey = `${existingClient.appId}:${existingClient.user.id}`;
+      const oldSet = this.userClients.get(oldChannelKey);
+      if (oldSet) {
+        oldSet.delete(existingClient);
+        if (oldSet.size === 0) {
+          this.userClients.delete(oldChannelKey);
+        }
+      }
+      this.webSocketToClient.delete(webSocket);
+    }
+
     const client: ActiveClient = {
       webSocket,
       clientId,
