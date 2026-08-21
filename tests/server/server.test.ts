@@ -633,6 +633,72 @@ describe.each(storageDescriptors)(
         }
       });
 
+      it('should isolate account login lockout per IP to prevent unauthenticated DoS', async () => {
+        const limitedServer = new TetherServer({
+          trustProxy: true,
+          rateLimiting: {
+            ipLoginMaxRequests: 100,
+            userLoginMaxRequests: 2,
+            maxFailures: 2,
+            initialBackoffMs: 10_000,
+          },
+        });
+        await limitedServer.declareUser('target_user', 'correct_password');
+        const httpServer = await limitedServer.listen(0, '127.0.0.1');
+        const port = (httpServer.address() as { port: number }).port;
+
+        try {
+          // Attacker from IP 198.51.100.1 spams failed passwords for target_user
+          for (let i = 0; i < 2; i++) {
+            const res = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Forwarded-For': '198.51.100.1',
+              },
+              body: JSON.stringify({
+                username: 'target_user',
+                password: 'wrong_password',
+              }),
+            });
+            expect(res.status).toBe(401);
+          }
+
+          // Attacker from IP 198.51.100.1 is now locked out (429)
+          const attackerRes = await fetch(
+            `http://127.0.0.1:${port}/auth/login`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Forwarded-For': '198.51.100.1',
+              },
+              body: JSON.stringify({
+                username: 'target_user',
+                password: 'correct_password',
+              }),
+            },
+          );
+          expect(attackerRes.status).toBe(429);
+
+          // Legitimate user from IP 203.0.113.50 can still log in successfully
+          const legitRes = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Forwarded-For': '203.0.113.50',
+            },
+            body: JSON.stringify({
+              username: 'target_user',
+              password: 'correct_password',
+            }),
+          });
+          expect(legitRes.status).toBe(200);
+        } finally {
+          await limitedServer.close();
+        }
+      });
+
       it('should reset failure tracking on valid login', async () => {
         const limitedServer = new TetherServer({
           rateLimiting: {

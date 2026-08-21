@@ -591,7 +591,8 @@ export class TetherServer {
       return;
     }
 
-    if (this.userLoginLimiter && !this.userLoginLimiter.consume(normUsername)) {
+    const userKey = `${ip}:${normUsername}`;
+    if (this.userLoginLimiter && !this.userLoginLimiter.consume(userKey)) {
       this.sendJson(res, 429, {
         error: 'Too many login attempts for this account',
       });
@@ -605,7 +606,7 @@ export class TetherServer {
 
     if (!user || !valid) {
       this.ipLoginLimiter?.recordFailure(ip);
-      this.userLoginLimiter?.recordFailure(normUsername);
+      this.userLoginLimiter?.recordFailure(userKey);
       this.sendJson(res, 401, {
         error: 'Invalid username or password',
       });
@@ -613,7 +614,7 @@ export class TetherServer {
     }
 
     this.ipLoginLimiter?.reset(ip);
-    this.userLoginLimiter?.reset(normUsername);
+    this.userLoginLimiter?.reset(userKey);
 
     const token = await user.createToken();
     this.sendJson(res, 200, {
