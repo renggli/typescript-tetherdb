@@ -50,6 +50,8 @@ export interface TetherServerOptions {
   allowRegistration?: boolean;
   /** Rate limiting options for auth and sync endpoints, or `false` to disable rate limiting (defaults to true). */
   rateLimiting?: boolean | RateLimitOptions;
+  /** Whether to trust the `X-Forwarded-For` header for resolving client IP addresses (defaults to false). */
+  trustProxy?: boolean;
 }
 
 /**
@@ -121,6 +123,7 @@ export class TetherServer {
   readonly basePath: string;
   /** Path for WebSocket upgrade requests. */
   readonly webSocketPath: string;
+  readonly trustProxy: boolean;
   private readonly allowRegistration: boolean;
   private readonly ipLoginLimiter: RateLimiter | null;
   private readonly userLoginLimiter: RateLimiter | null;
@@ -139,6 +142,7 @@ export class TetherServer {
     this.basePath = normalizeBasePath(options.basePath ?? '');
     this.webSocketPath = options.webSocketPath ?? `${this.basePath}/sync`;
     this.allowRegistration = options.allowRegistration ?? true;
+    this.trustProxy = options.trustProxy ?? false;
 
     const rateLimitConfig = options.rateLimiting ?? true;
     if (rateLimitConfig === false) {
@@ -620,10 +624,12 @@ export class TetherServer {
   }
 
   private getClientIp(req: http.IncomingMessage): string {
-    const forwarded = req.headers['x-forwarded-for'];
-    if (typeof forwarded === 'string') {
-      const first = forwarded.split(',')[0].trim();
-      if (first) return first;
+    if (this.trustProxy) {
+      const forwarded = req.headers['x-forwarded-for'];
+      if (typeof forwarded === 'string') {
+        const first = forwarded.split(',')[0].trim();
+        if (first) return first;
+      }
     }
     return req.socket.remoteAddress ?? '127.0.0.1';
   }

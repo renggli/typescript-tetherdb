@@ -681,6 +681,124 @@ describe.each(storageDescriptors)(
           await limitedServer.close();
         }
       });
+
+      it('should ignore X-Forwarded-For when trustProxy is false (default)', async () => {
+        const limitedServer = new TetherServer({
+          rateLimiting: {
+            ipLoginMaxRequests: 2,
+          },
+        });
+        await limitedServer.declareUser('bob_user', 'correct_password');
+        const httpServer = await limitedServer.listen(0, '127.0.0.1');
+        const port = (httpServer.address() as { port: number }).port;
+
+        try {
+          // Attempt 1 with spoofed IP header
+          const res1 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Forwarded-For': '198.51.100.1',
+            },
+            body: JSON.stringify({
+              username: 'bob_user',
+              password: 'wrong_password',
+            }),
+          });
+          expect(res1.status).toBe(401);
+
+          // Attempt 2 with another spoofed IP header
+          const res2 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Forwarded-For': '198.51.100.2',
+            },
+            body: JSON.stringify({
+              username: 'bob_user',
+              password: 'wrong_password',
+            }),
+          });
+          expect(res2.status).toBe(401);
+
+          // Attempt 3 with yet another spoofed IP header: rate limiter (scoped to actual socket IP 127.0.0.1) blocks it
+          const res3 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Forwarded-For': '198.51.100.3',
+            },
+            body: JSON.stringify({
+              username: 'bob_user',
+              password: 'wrong_password',
+            }),
+          });
+          expect(res3.status).toBe(429);
+        } finally {
+          await limitedServer.close();
+        }
+      });
+
+      it('should respect X-Forwarded-For when trustProxy is true', async () => {
+        const proxyServer = new TetherServer({
+          trustProxy: true,
+          rateLimiting: {
+            ipLoginMaxRequests: 2,
+            userLoginMaxRequests: 100,
+          },
+        });
+        await proxyServer.declareUser('charlie_user', 'correct_password');
+        const httpServer = await proxyServer.listen(0, '127.0.0.1');
+        const port = (httpServer.address() as { port: number }).port;
+
+        try {
+          // Send 2 requests from IP A
+          for (let i = 0; i < 2; i++) {
+            const res = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Forwarded-For': '203.0.113.195',
+              },
+              body: JSON.stringify({
+                username: 'charlie_user',
+                password: 'wrong_password',
+              }),
+            });
+            expect(res.status).toBe(401);
+          }
+
+          // 3rd request from IP A is rate limited
+          const resA3 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Forwarded-For': '203.0.113.195',
+            },
+            body: JSON.stringify({
+              username: 'charlie_user',
+              password: 'wrong_password',
+            }),
+          });
+          expect(resA3.status).toBe(429);
+
+          // Request from IP B is allowed
+          const resB = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Forwarded-For': '203.0.113.196',
+            },
+            body: JSON.stringify({
+              username: 'charlie_user',
+              password: 'wrong_password',
+            }),
+          });
+          expect(resB.status).toBe(401);
+        } finally {
+          await proxyServer.close();
+        }
+      });
     });
   },
 );
