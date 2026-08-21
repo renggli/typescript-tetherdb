@@ -52,6 +52,20 @@ describe('Crypto', () => {
     ).toBeNull();
   });
 
+  it('should handle usernames and userIds with colons and special characters safely', () => {
+    const secret = 'super-secret-key-123';
+    const userId = 'usr:org:12345';
+    const username = 'alice:admin:team';
+    const token = createSessionToken(userId, username, secret, 3600);
+
+    const payload = verifySessionToken(token, secret);
+    expect(payload).toEqual({
+      userId: 'usr:org:12345',
+      username: 'alice:admin:team',
+      expiresAt: expect.any(Number),
+    });
+  });
+
   it('should generate and persist keyfile secrets', async () => {
     const fs = await import('node:fs/promises');
     const path = await import('node:path');

@@ -124,7 +124,11 @@ export function createSessionToken(
   expiresInSeconds = DEFAULT_TOKEN_EXPIRES_IN,
 ): string {
   const expiresAt = Math.floor(Date.now() / 1000) + expiresInSeconds;
-  const payload = `${userId}:${username}:${expiresAt}`;
+  const payload = JSON.stringify({
+    userId,
+    username,
+    expiresAt,
+  });
   const payloadB64 = Buffer.from(payload, 'utf-8').toString('base64url');
   const signature = crypto
     .createHmac('sha256', secret)
@@ -166,17 +170,25 @@ export function verifySessionToken(
 
   try {
     const raw = Buffer.from(payloadB64, 'base64url').toString('utf-8');
-    const [userId, username, expiresAtStr] = raw.split(':');
-    const expiresAt = Number.parseInt(expiresAtStr, 10);
+    const parsed = JSON.parse(raw);
     if (
-      !userId ||
-      !username ||
-      Number.isNaN(expiresAt) ||
-      expiresAt < Math.floor(Date.now() / 1000)
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      typeof parsed.userId !== 'string' ||
+      !parsed.userId ||
+      typeof parsed.username !== 'string' ||
+      !parsed.username ||
+      typeof parsed.expiresAt !== 'number' ||
+      !Number.isFinite(parsed.expiresAt) ||
+      parsed.expiresAt < Math.floor(Date.now() / 1000)
     ) {
       return null;
     }
-    return { userId, username, expiresAt };
+    return {
+      userId: parsed.userId,
+      username: parsed.username,
+      expiresAt: parsed.expiresAt,
+    };
   } catch {
     return null;
   }
