@@ -663,38 +663,18 @@ export class TetherServer {
   ): Promise<void> {
     const ip = this.getClientIp(req);
     if (this.ipRegisterLimiter && !this.ipRegisterLimiter.consume(ip)) {
-      this.sendJson(
-        res,
-        429,
-        {
-          error: 'Too many registration requests',
-        },
-        req,
-      );
+      this.sendJson(res, 429, { error: 'Too many registration requests' }, req);
       return;
     }
 
-    const body = await this.readJsonBody(req);
-    const { username, password } = body as {
-      username?: string;
-      password?: string;
-    };
-    const normUsername = normalizeUsername(username ?? '');
-    const normPassword = normalizePassword(password ?? '');
-    if (!normUsername || !normPassword) {
-      this.sendJson(
-        res,
-        400,
-        {
-          error: 'Missing or invalid required field: username and password',
-        },
-        req,
-      );
-      return;
-    }
+    const credentials = await this.readCredentials(req, res);
+    if (!credentials) return;
 
     try {
-      const user = await this.storage.createUser(normUsername, normPassword);
+      const user = await this.storage.createUser(
+        credentials.username,
+        credentials.password,
+      );
       const token = await user.createToken();
       this.sendJson(
         res,
@@ -724,53 +704,28 @@ export class TetherServer {
   ): Promise<void> {
     const ip = this.getClientIp(req);
     if (this.ipLoginLimiter && !this.ipLoginLimiter.consume(ip)) {
-      this.sendJson(
-        res,
-        429,
-        {
-          error: 'Too many login attempts',
-        },
-        req,
-      );
+      this.sendJson(res, 429, { error: 'Too many login attempts' }, req);
       return;
     }
 
-    const body = await this.readJsonBody(req);
-    const { username, password } = body as {
-      username?: string;
-      password?: string;
-    };
-    const normUsername = normalizeUsername(username ?? '');
-    const normPassword = normalizePassword(password ?? '');
-    if (!normUsername || !normPassword) {
-      this.sendJson(
-        res,
-        400,
-        {
-          error: 'Missing required field: username and password',
-        },
-        req,
-      );
-      return;
-    }
+    const credentials = await this.readCredentials(req, res);
+    if (!credentials) return;
 
-    const userKey = `${ip}:${normUsername}`;
+    const userKey = `${ip}:${credentials.username}`;
     if (this.userLoginLimiter && !this.userLoginLimiter.consume(userKey)) {
       this.sendJson(
         res,
         429,
-        {
-          error: 'Too many login attempts for this account',
-        },
+        { error: 'Too many login attempts for this account' },
         req,
       );
       return;
     }
 
-    const user = await this.storage.getUserByUsername(normUsername);
+    const user = await this.storage.getUserByUsername(credentials.username);
     const valid = user
-      ? await user.verifyPassword(normPassword)
-      : await verifyDummyPasswordHash(normPassword);
+      ? await user.verifyPassword(credentials.password)
+      : await verifyDummyPasswordHash(credentials.password);
 
     if (!user || !valid) {
       this.ipLoginLimiter?.recordFailure(ip);
@@ -800,6 +755,31 @@ export class TetherServer {
       },
       req,
     );
+  }
+
+  private async readCredentials(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<{ username: string; password: string } | null> {
+    const body = await this.readJsonBody(req);
+    const { username, password } = body as {
+      username?: string;
+      password?: string;
+    };
+    const normUsername = normalizeUsername(username ?? '');
+    const normPassword = normalizePassword(password ?? '');
+    if (!normUsername || !normPassword) {
+      this.sendJson(
+        res,
+        400,
+        {
+          error: 'Missing or invalid required field: username and password',
+        },
+        req,
+      );
+      return null;
+    }
+    return { username: normUsername, password: normPassword };
   }
 
   private getClientIp(req: http.IncomingMessage): string {

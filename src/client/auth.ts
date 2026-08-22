@@ -202,41 +202,19 @@ export class Auth {
           : DataMode.Local;
       const dataMode = options.dataMode ?? defaultDataMode;
 
-      const res = await this.fetchFn(`${this.baseUrl}/auth/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: options.username,
-          password: options.password,
-        }),
-      });
-
-      const data = (await res.json()) as AuthResult & { error?: string };
-      if (!res.ok) {
-        throw new TetherClientError(
-          TetherClientErrorCode.RegistrationFailed,
-          data.error ?? 'Registration failed',
-        );
-      }
+      const data = await this.sendAuthRequest(
+        '/auth/register',
+        { username: options.username, password: options.password },
+        TetherClientErrorCode.RegistrationFailed,
+        'Registration failed',
+      );
 
       this.currentUserId = data.userId;
       this.currentUsername = data.username;
       this.currentToken = data.token;
 
-      if (dataMode === DataMode.Clear || dataMode === DataMode.Remote) {
-        await this.storage.clearTables(true);
-        await this.storage.setMeta('lastSyncSeq', 0);
-      }
-
-      if (options.remember) {
-        await this.storage.setMeta('auth', {
-          token: data.token,
-          userId: data.userId,
-          username: data.username,
-        });
-      } else {
-        await this.storage.deleteMeta('auth');
-      }
+      await this.applyDataMode(dataMode);
+      await this.updateStoredAuth(options.remember ?? false, data);
 
       this.setStatus(AuthStatus.SignedIn);
       return true;
@@ -260,36 +238,18 @@ export class Auth {
       let userId = this.currentUserId;
 
       if (options.username && options.password) {
-        const res = await this.fetchFn(`${this.baseUrl}/auth/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            username: options.username,
-            password: options.password,
-          }),
-        });
-
-        const data = (await res.json()) as AuthResult & { error?: string };
-        if (!res.ok) {
-          throw new TetherClientError(
-            TetherClientErrorCode.AuthenticationFailed,
-            data.error ?? 'Authentication failed',
-          );
-        }
+        const data = await this.sendAuthRequest(
+          '/auth/login',
+          { username: options.username, password: options.password },
+          TetherClientErrorCode.AuthenticationFailed,
+          'Authentication failed',
+        );
 
         token = data.token;
         username = data.username;
         userId = data.userId;
 
-        if (options.remember) {
-          await this.storage.setMeta('auth', {
-            token: data.token,
-            userId: data.userId,
-            username: data.username,
-          });
-        } else {
-          await this.storage.deleteMeta('auth');
-        }
+        await this.updateStoredAuth(options.remember ?? false, data);
       } else if (!token) {
         const stored = await this.storage.getMeta<StoredAuthSession>('auth');
         if (stored?.token) {
@@ -310,11 +270,7 @@ export class Auth {
       this.currentUsername = username;
       this.currentUserId = userId;
 
-      const dataMode = options.dataMode ?? DataMode.Remote;
-      if (dataMode === DataMode.Clear || dataMode === DataMode.Remote) {
-        await this.storage.clearTables(true);
-        await this.storage.setMeta('lastSyncSeq', 0);
-      }
+      await this.applyDataMode(options.dataMode ?? DataMode.Remote);
 
       this.setStatus(AuthStatus.SignedIn);
       return true;
@@ -333,12 +289,7 @@ export class Auth {
     this.currentToken = undefined;
 
     await this.storage.deleteMeta('auth');
-
-    const dataMode = options.dataMode ?? DataMode.Clear;
-    if (dataMode === DataMode.Clear || dataMode === DataMode.Remote) {
-      await this.storage.clearTables(true);
-      await this.storage.setMeta('lastSyncSeq', 0);
-    }
+    await this.applyDataMode(options.dataMode ?? DataMode.Clear);
 
     this.setStatus(AuthStatus.SignedOut);
     return true;
@@ -374,6 +325,47 @@ export class Auth {
   }
 
   // -- Private Helpers ------------------------------------------------------
+
+  private async sendAuthRequest(
+    path: string,
+    credentials: { username?: string; password?: string },
+    errorCode: TetherClientErrorCode,
+    defaultErrorMessage: string,
+  ): Promise<AuthResult> {
+    const res = await this.fetchFn(`${this.baseUrl}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(credentials),
+    });
+
+    const data = (await res.json()) as AuthResult & { error?: string };
+    if (!res.ok) {
+      throw new TetherClientError(errorCode, data.error ?? defaultErrorMessage);
+    }
+    return data;
+  }
+
+  private async applyDataMode(dataMode: DataMode): Promise<void> {
+    if (dataMode === DataMode.Clear || dataMode === DataMode.Remote) {
+      await this.storage.clearTables(true);
+      await this.storage.setMeta('lastSyncSeq', 0);
+    }
+  }
+
+  private async updateStoredAuth(
+    remember: boolean,
+    auth: AuthResult,
+  ): Promise<void> {
+    if (remember) {
+      await this.storage.setMeta('auth', {
+        token: auth.token,
+        userId: auth.userId,
+        username: auth.username,
+      });
+    } else {
+      await this.storage.deleteMeta('auth');
+    }
+  }
 
   private setStatus(status: AuthStatus): void {
     if (this.currentAuthStatus === status) return;

@@ -1,10 +1,6 @@
-import type {
-  ChangeRecord,
-  SnapshotRecord,
-  StoredRecord,
-} from '../../../shared/types.js';
+import type { SnapshotRecord, StoredRecord } from '../../../shared/types.js';
 import { validateRecordId, validateUserId } from '../../validate.js';
-import type { TableStorage } from '../table.js';
+import { TableBaseStorage } from '../base/table.js';
 import type { UserStorage } from '../user.js';
 import type { AppSqliteStorage } from './app.js';
 
@@ -21,15 +17,12 @@ interface RawRecordRow {
 /**
  * SQLite-backed implementation of `TableStorage`.
  */
-export class TableSqliteStorage implements TableStorage {
-  readonly name: string;
-  readonly app: AppSqliteStorage;
+export class TableSqliteStorage extends TableBaseStorage {
+  declare readonly app: AppSqliteStorage;
 
-  constructor(name: string, app: AppSqliteStorage) {
-    this.name = name;
-    this.app = app;
+  async delete(): Promise<boolean> {
+    return this.app.deleteTable(this.name);
   }
-
   private parseData(raw: string | null): unknown {
     if (raw === null || raw === undefined) return null;
     try {
@@ -77,21 +70,5 @@ export class TableSqliteStorage implements TableStorage {
       clientId: row.client_id ?? '',
       data: this.parseData(row.data),
     }));
-  }
-
-  async applyChanges(
-    user: UserStorage,
-    changes: ChangeRecord[],
-  ): Promise<{ applied: ChangeRecord[]; newSeq: number }> {
-    const targetedChanges = changes.map((c) => ({
-      ...c,
-      table: this.name,
-      appId: this.app.id,
-    }));
-    return this.app.applyChanges(user, targetedChanges);
-  }
-
-  async delete(): Promise<boolean> {
-    return this.app.deleteTable(this.name);
   }
 }

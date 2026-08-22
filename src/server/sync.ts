@@ -12,6 +12,7 @@ import {
 import { TetherServerError, TetherServerErrorCode } from './errors.js';
 import type { RateLimiter } from './rate-limiter.js';
 import type { TetherLogger } from './server.js';
+import type { AppStorage } from './storage/app.js';
 import type { Storage } from './storage/storage.js';
 import type { UserStorage } from './storage/user.js';
 import {
@@ -427,12 +428,7 @@ export class Sync {
     const seq = lastSyncSeq ?? 0;
     if (seq === 0) {
       // Client has no sync point: deliver full snapshot for this app
-      const tables = await app.getTables();
-      const snapshot: SnapshotRecord[] = [];
-      for (const table of tables) {
-        const records = await table.getAllRecords(client.user);
-        snapshot.push(...records);
-      }
+      const snapshot = await this.getAppSnapshot(app, client.user);
       const currentSeq = await app.getCurrentSeq(client.user);
       this.send(client.webSocket, {
         type: ServerMessageType.SyncSnapshot,
@@ -446,12 +442,7 @@ export class Sync {
 
       // If changelog was pruned or compacted, deliver full snapshot
       if (requiresSnapshot) {
-        const tables = await app.getTables();
-        const snapshot: SnapshotRecord[] = [];
-        for (const table of tables) {
-          const records = await table.getAllRecords(client.user);
-          snapshot.push(...records);
-        }
+        const snapshot = await this.getAppSnapshot(app, client.user);
         this.send(client.webSocket, {
           type: ServerMessageType.SyncSnapshot,
           seq: currentSeq,
@@ -466,6 +457,19 @@ export class Sync {
         });
       }
     }
+  }
+
+  private async getAppSnapshot(
+    app: AppStorage,
+    user: UserStorage,
+  ): Promise<SnapshotRecord[]> {
+    const tables = await app.getTables();
+    const snapshot: SnapshotRecord[] = [];
+    for (const table of tables) {
+      const records = await table.getAllRecords(user);
+      snapshot.push(...records);
+    }
+    return snapshot;
   }
 
   private broadcastToAppUser(

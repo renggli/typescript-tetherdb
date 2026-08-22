@@ -172,41 +172,21 @@ export class Table<T = unknown> {
     const ids = entries.map((e) => e.id);
     const existingMap = await this.storage.getRecords<T>(this.tableName, ids);
     const now = Date.now();
-    const clientId = this.clientId;
 
     const mutations: LocalMutationItem<T>[] = [];
     const events: TableChangeEvent<T>[] = [];
     const savedData: T[] = [];
 
     for (const entry of entries) {
-      const existing = existingMap.get(entry.id);
-      const version = (existing?.version ?? 0) + 1;
-      const timestamp = Math.max(now, (existing?.timestamp ?? 0) + 1);
-
-      const change: ChangeRecord<T> = {
-        table: this.tableName,
-        id: entry.id,
-        op: OperationType.Put,
-        data: entry.data,
-        timestamp,
-        clientId,
-        version,
-      };
-
-      mutations.push({
-        id: entry.id,
-        op: OperationType.Put,
-        data: entry.data,
-        change,
-      });
-
-      events.push({
-        op: OperationType.Put,
-        id: entry.id,
-        data: entry.data,
-        isRemote: false,
-      });
-
+      const { mutation, event } = this.createMutationItem(
+        entry.id,
+        OperationType.Put,
+        existingMap.get(entry.id),
+        now,
+        entry.data,
+      );
+      mutations.push(mutation);
+      events.push(event);
       savedData.push(entry.data);
     }
 
@@ -238,7 +218,6 @@ export class Table<T = unknown> {
 
     const existingMap = await this.storage.getRecords<T>(this.tableName, ids);
     const now = Date.now();
-    const clientId = this.clientId;
 
     const mutations: LocalMutationItem<T>[] = [];
     const events: TableChangeEvent<T>[] = [];
@@ -247,28 +226,14 @@ export class Table<T = unknown> {
       const existing = existingMap.get(id);
       if (!existing || existing.deleted) continue;
 
-      const version = (existing.version ?? 0) + 1;
-      const timestamp = Math.max(now, (existing.timestamp ?? 0) + 1);
-      const change: ChangeRecord<T> = {
-        table: this.tableName,
+      const { mutation, event } = this.createMutationItem(
         id,
-        op: OperationType.Delete,
-        timestamp,
-        clientId,
-        version,
-      };
-
-      mutations.push({
-        id,
-        op: OperationType.Delete,
-        change,
-      });
-
-      events.push({
-        op: OperationType.Delete,
-        id,
-        isRemote: false,
-      });
+        OperationType.Delete,
+        existing,
+        now,
+      );
+      mutations.push(mutation);
+      events.push(event);
     }
 
     if (mutations.length > 0) {
@@ -322,5 +287,31 @@ export class Table<T = unknown> {
   notifyRemoteChanges(events: TableChangeEvent<unknown>[]): void {
     if (events.length === 0) return;
     this.onChange.publish(events as TableChangeEvent<T>[]);
+  }
+
+  // -- Private Helpers ------------------------------------------------------
+
+  private createMutationItem(
+    id: string,
+    op: OperationType,
+    existing: StoredRecord<T> | undefined,
+    now: number,
+    data?: T,
+  ): { mutation: LocalMutationItem<T>; event: TableChangeEvent<T> } {
+    const version = (existing?.version ?? 0) + 1;
+    const timestamp = Math.max(now, (existing?.timestamp ?? 0) + 1);
+    const change: ChangeRecord<T> = {
+      table: this.tableName,
+      id,
+      op,
+      data,
+      timestamp,
+      clientId: this.clientId,
+      version,
+    };
+    return {
+      mutation: { id, op, data, change },
+      event: { op, id, data, isRemote: false },
+    };
   }
 }

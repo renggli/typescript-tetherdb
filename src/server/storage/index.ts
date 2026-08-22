@@ -6,6 +6,12 @@
 
 export type { AppStorage } from './app.js';
 export {
+  AppBaseStorage,
+  BaseStorage,
+  TableBaseStorage,
+  UserBaseStorage,
+} from './base/index.js';
+export {
   FileStorage,
   type FileStorageOptions,
 } from './file/storage.js';

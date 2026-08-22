@@ -15,7 +15,7 @@ import {
   validateTimestamp,
   validateUserId,
 } from '../../validate.js';
-import type { AppStorage } from '../app.js';
+import { AppBaseStorage, applyChangeToRecord } from '../base/index.js';
 import type { TableStorage } from '../table.js';
 import type { UserStorage } from '../user.js';
 import {
@@ -40,12 +40,11 @@ interface UserMeta {
 /**
  * Filesystem-backed application namespace storage implementation.
  */
-export class AppFileStorage implements AppStorage {
-  readonly id: string;
+export class AppFileStorage extends AppBaseStorage {
   readonly storage: FileStorage;
 
   constructor(id: string, storage: FileStorage) {
-    this.id = id;
+    super(id);
     this.storage = storage;
   }
 
@@ -153,7 +152,7 @@ export class AppFileStorage implements AppStorage {
     await writeFileAtomic(this.getUserSyncFile(userId), content);
   }
 
-  private async readTableRecords(
+  async readTableRecords(
     userId: string,
     tableName: string,
   ): Promise<Map<string, StoredRecord>> {
@@ -284,31 +283,13 @@ export class AppFileStorage implements AppStorage {
             meta.minSeq = 1;
           }
 
-          const isDeleted = change.op === OperationType.Delete;
-          const nextVersion = (existing?.version ?? 0) + 1;
-
-          const updatedRecord: StoredRecord = {
-            id: recordId,
-            version: nextVersion,
-            timestamp: change.timestamp,
-            clientId: change.clientId,
-            deleted: isDeleted,
-            data: isDeleted ? null : (change.data ?? null),
-          };
+          const { updatedRecord, appliedChange } = applyChangeToRecord(
+            change,
+            existing,
+            assignedSeq,
+          );
 
           tableRecords.set(recordId, updatedRecord);
-
-          const appliedChange: ChangeRecord & { seq: number } = {
-            seq: assignedSeq,
-            table: tableName,
-            id: recordId,
-            op: change.op,
-            version: nextVersion,
-            timestamp: change.timestamp,
-            clientId: change.clientId,
-            data: isDeleted ? undefined : change.data,
-          };
-
           applied.push(appliedChange);
           syncChanges.push(appliedChange);
         }

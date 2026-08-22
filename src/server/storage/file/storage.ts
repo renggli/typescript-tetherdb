@@ -1,11 +1,7 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import {
-  getOrCreateKeyfileSecret,
-  hashPassword,
-  verifySessionToken,
-} from '../../crypto.js';
+import { getOrCreateKeyfileSecret, hashPassword } from '../../crypto.js';
 import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
 import { readServerLock } from '../../lock.js';
 import {
@@ -17,12 +13,8 @@ import {
   validateUsername,
 } from '../../validate.js';
 import type { AppStorage } from '../app.js';
-import type {
-  MaintenanceResult,
-  Storage,
-  StorageOptions,
-  StorageStatus,
-} from '../storage.js';
+import { BaseStorage, filterTargetApps } from '../base/index.js';
+import type { MaintenanceResult, StorageOptions } from '../storage.js';
 import type { UserStorage } from '../user.js';
 import { AppFileStorage } from './app.js';
 import { UserFileStorage } from './user.js';
@@ -46,16 +38,22 @@ export interface FileStorageOptions extends StorageOptions {
 /**
  * Filesystem-backed implementation of `Storage`.
  */
-export class FileStorage implements Storage {
+export class FileStorage extends BaseStorage {
+  readonly backend = 'file';
   readonly baseDir: string;
   readonly options: FileStorageOptions;
   readonly secret: string;
   private userLocks: Map<string, Promise<unknown>> = new Map();
 
   constructor(options: FileStorageOptions = {}) {
+    super(options);
     this.options = options;
     this.baseDir = path.resolve(options.baseDir ?? '.data');
     this.secret = options.secret ?? getOrCreateKeyfileSecret(this.baseDir);
+  }
+
+  protected override getBaseDir(): string | undefined {
+    return this.baseDir;
   }
 
   private get usersFile(): string {
@@ -280,12 +278,6 @@ export class FileStorage implements Storage {
     return undefined;
   }
 
-  async getUserByToken(token: string): Promise<UserStorage | undefined> {
-    const payload = verifySessionToken(token, this.secret);
-    if (!payload) return undefined;
-    return this.getUser(payload.userId);
-  }
-
   async getUsers(): Promise<UserStorage[]> {
     const users = await this.readUsersFile();
     return Array.from(users.values()).map(
@@ -353,38 +345,6 @@ export class FileStorage implements Storage {
     });
   }
 
-  async getStatus(appId?: string): Promise<StorageStatus> {
-    const users = await this.getUsers();
-    const allApps = await this.getApps();
-    const targetApps = appId
-      ? allApps.filter((a) => a.id === validateAppId(appId))
-      : allApps;
-
-    if (appId && targetApps.length === 0) {
-      throw new TetherServerError(
-        TetherServerErrorCode.NotFound,
-        `Application "${appId}" not found`,
-      );
-    }
-
-    const appSummaries: Array<{ id: string; tables: string[] }> = [];
-    for (const app of targetApps) {
-      const tables = await app.getTables();
-      appSummaries.push({
-        id: app.id,
-        tables: tables.map((t) => t.name),
-      });
-    }
-
-    return {
-      backend: 'file',
-      baseDir: this.baseDir,
-      usersCount: users.length,
-      appsCount: allApps.length,
-      apps: appSummaries,
-    };
-  }
-
   async checkpoint(appId?: string): Promise<MaintenanceResult> {
     throw new TetherServerError(
       TetherServerErrorCode.NotSupported,
@@ -402,16 +362,7 @@ export class FileStorage implements Storage {
   async prune(appId?: string, keepCount?: number): Promise<MaintenanceResult> {
     const keep = keepCount ?? this.options.maxChangelogEntries ?? 1000;
     const allApps = await this.getApps();
-    const targetApps = appId
-      ? allApps.filter((a) => a.id === validateAppId(appId))
-      : allApps;
-
-    if (appId && targetApps.length === 0) {
-      throw new TetherServerError(
-        TetherServerErrorCode.NotFound,
-        `Application "${appId}" not found`,
-      );
-    }
+    const targetApps = filterTargetApps(allApps, appId);
 
     const users = await this.getUsers();
     let totalPruned = 0;

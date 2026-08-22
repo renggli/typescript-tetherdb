@@ -524,54 +524,58 @@ export class Sync {
     records: SnapshotRecord[],
     seq: number,
   ): Promise<void> {
-    const tableEvents = new Map<
-      string,
-      Array<{ op: OperationType; id: string; data?: unknown; isRemote: true }>
-    >();
-
-    for (const item of records) {
-      if (!tableEvents.has(item.table)) {
-        tableEvents.set(item.table, []);
-      }
-      tableEvents.get(item.table)?.push({
-        op: item.deleted ? OperationType.Delete : OperationType.Put,
-        id: item.id,
-        data: item.deleted ? undefined : item.data,
-        isRemote: true,
-      });
-    }
-
     await this.storage.applySnapshotBatch(records, seq);
-
-    for (const [tableName, events] of tableEvents.entries()) {
-      const table = this.storage.table(tableName);
-      table.notifyRemoteChanges(events);
-    }
+    this.notifyTableRemoteEvents(
+      records.map((item) => ({
+        table: item.table,
+        id: item.id,
+        isDelete: item.deleted ?? false,
+        data: item.data,
+      })),
+    );
   }
 
   private async handleDiff(
     changes: ChangeRecord[],
     seq: number,
   ): Promise<void> {
+    await this.storage.applyRemoteChangesBatch(changes, seq);
+    this.notifyTableRemoteEvents(
+      changes.map((change) => ({
+        table: change.table,
+        id: change.id,
+        isDelete: change.op === OperationType.Delete,
+        data: change.data,
+      })),
+    );
+  }
+
+  private notifyTableRemoteEvents(
+    items: Array<{
+      table: string;
+      id: string;
+      isDelete: boolean;
+      data?: unknown;
+    }>,
+  ): void {
     const tableEvents = new Map<
       string,
       Array<{ op: OperationType; id: string; data?: unknown; isRemote: true }>
     >();
 
-    for (const change of changes) {
-      if (!tableEvents.has(change.table)) {
-        tableEvents.set(change.table, []);
+    for (const item of items) {
+      let events = tableEvents.get(item.table);
+      if (!events) {
+        events = [];
+        tableEvents.set(item.table, events);
       }
-      const isDelete = change.op === OperationType.Delete;
-      tableEvents.get(change.table)?.push({
-        op: isDelete ? OperationType.Delete : OperationType.Put,
-        id: change.id,
-        data: isDelete ? undefined : change.data,
+      events.push({
+        op: item.isDelete ? OperationType.Delete : OperationType.Put,
+        id: item.id,
+        data: item.isDelete ? undefined : item.data,
         isRemote: true,
       });
     }
-
-    await this.storage.applyRemoteChangesBatch(changes, seq);
 
     for (const [tableName, events] of tableEvents.entries()) {
       const table = this.storage.table(tableName);

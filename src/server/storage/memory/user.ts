@@ -1,12 +1,9 @@
-import {
-  createSessionToken,
-  hashPassword,
-  verifyPasswordHash,
-  verifySessionToken,
-} from '../../crypto.js';
 import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
-import { normalizePassword, validatePassword } from '../../validate.js';
-import type { UserStorage } from '../user.js';
+import {
+  hashUserPassword,
+  UserBaseStorage,
+  verifyUserPassword,
+} from '../base/index.js';
 import type { MemoryStorage } from './storage.js';
 
 export interface MemoryUserData {
@@ -19,17 +16,16 @@ export interface MemoryUserData {
 /**
  * In-memory implementation of `UserStorage`.
  */
-export class UserMemoryStorage implements UserStorage {
-  readonly id: string;
-  readonly username: string;
-  readonly createdAt: number;
+export class UserMemoryStorage extends UserBaseStorage {
   private storage: MemoryStorage;
 
   constructor(data: MemoryUserData, storage: MemoryStorage) {
-    this.id = data.id;
-    this.username = data.username;
-    this.createdAt = data.createdAt;
+    super(data.id, data.username, data.createdAt);
     this.storage = storage;
+  }
+
+  protected getSecret(): string {
+    return this.storage.secret;
   }
 
   private getUserData(): MemoryUserData {
@@ -45,30 +41,12 @@ export class UserMemoryStorage implements UserStorage {
 
   async verifyPassword(password: string): Promise<boolean> {
     const data = this.getUserData();
-    if (!data.passwordHash) return false;
-    const normalized = normalizePassword(password);
-    if (!normalized) return false;
-    return verifyPasswordHash(normalized, data.passwordHash);
+    return verifyUserPassword(password, data.passwordHash);
   }
 
   async changePassword(newPassword: string): Promise<void> {
     const data = this.getUserData();
-    const valid = validatePassword(newPassword);
-    data.passwordHash = await hashPassword(valid);
-  }
-
-  async createToken(expiresInSeconds?: number): Promise<string> {
-    return createSessionToken(
-      this.id,
-      this.username,
-      this.storage.secret,
-      expiresInSeconds,
-    );
-  }
-
-  async verifyToken(token: string): Promise<boolean> {
-    const payload = verifySessionToken(token, this.storage.secret);
-    return payload !== null && payload.userId === this.id;
+    data.passwordHash = await hashUserPassword(newPassword);
   }
 
   async delete(): Promise<boolean> {

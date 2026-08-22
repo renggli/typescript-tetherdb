@@ -11,7 +11,7 @@ import {
   validateTableName,
   validateTimestamp,
 } from '../../validate.js';
-import type { AppStorage } from '../app.js';
+import { AppBaseStorage, applyChangeToRecord } from '../base/index.js';
 import type { TableStorage } from '../table.js';
 import type { UserStorage } from '../user.js';
 import type { MemoryStorage } from './storage.js';
@@ -20,13 +20,12 @@ import { TableMemoryStorage } from './table.js';
 /**
  * In-memory implementation of `AppStorage`.
  */
-export class AppMemoryStorage implements AppStorage {
-  readonly id: string;
+export class AppMemoryStorage extends AppBaseStorage {
   private tables: Map<string, TableMemoryStorage> = new Map();
   private storage: MemoryStorage;
 
   constructor(id: string, storage: MemoryStorage) {
-    this.id = id;
+    super(id);
     this.storage = storage;
   }
 
@@ -123,31 +122,13 @@ export class AppMemoryStorage implements AppStorage {
           stagedMinSeq = 1;
         }
 
-        const isDeleted = change.op === OperationType.Delete;
-        const nextVersion = (existing?.version ?? 0) + 1;
-
-        const updatedRecord: StoredRecord = {
-          id: recordId,
-          version: nextVersion,
-          timestamp: change.timestamp,
-          clientId: change.clientId,
-          deleted: isDeleted,
-          data: isDeleted ? null : (change.data ?? null),
-        };
+        const { updatedRecord, appliedChange } = applyChangeToRecord(
+          change,
+          existing,
+          assignedSeq,
+        );
 
         tableMap.set(recordId, updatedRecord);
-
-        const appliedChange: ChangeRecord & { seq: number } = {
-          seq: assignedSeq,
-          table: tableName,
-          id: recordId,
-          op: change.op,
-          version: nextVersion,
-          timestamp: change.timestamp,
-          clientId: change.clientId,
-          data: isDeleted ? undefined : change.data,
-        };
-
         stagedApplied.push(appliedChange);
       }
     }

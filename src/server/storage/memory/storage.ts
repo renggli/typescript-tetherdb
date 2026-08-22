@@ -1,5 +1,5 @@
 import * as crypto from 'node:crypto';
-import { hashPassword, verifySessionToken } from '../../crypto.js';
+import { hashPassword } from '../../crypto.js';
 import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
 import {
   normalizeUsername,
@@ -9,12 +9,8 @@ import {
   validateUsername,
 } from '../../validate.js';
 import type { AppStorage } from '../app.js';
-import type {
-  MaintenanceResult,
-  Storage,
-  StorageOptions,
-  StorageStatus,
-} from '../storage.js';
+import { BaseStorage, filterTargetApps } from '../base/index.js';
+import type { MaintenanceResult, StorageOptions } from '../storage.js';
 import type { UserStorage } from '../user.js';
 import { AppMemoryStorage } from './app.js';
 import { type MemoryUserData, UserMemoryStorage } from './user.js';
@@ -36,7 +32,8 @@ export interface MemoryStorageOptions extends StorageOptions {}
 /**
  * In-memory implementation of `Storage`.
  */
-export class MemoryStorage implements Storage {
+export class MemoryStorage extends BaseStorage {
+  readonly backend = 'memory';
   private apps: Map<string, AppMemoryStorage> = new Map();
   private userStates: Map<string, UserState> = new Map(); // key = `${appId}:${userId}`
   private users: Map<string, MemoryUserData> = new Map(); // key = userId
@@ -45,6 +42,7 @@ export class MemoryStorage implements Storage {
   readonly options: MemoryStorageOptions;
 
   constructor(options: MemoryStorageOptions = {}) {
+    super(options);
     this.options = options;
     this.secret = options.secret ?? crypto.randomBytes(32).toString('hex');
   }
@@ -167,12 +165,6 @@ export class MemoryStorage implements Storage {
     return undefined;
   }
 
-  async getUserByToken(token: string): Promise<UserStorage | undefined> {
-    const payload = verifySessionToken(token, this.secret);
-    if (!payload) return undefined;
-    return this.getUser(payload.userId);
-  }
-
   async getUsers(): Promise<UserStorage[]> {
     return Array.from(this.users.values()).map(
       (data) => new UserMemoryStorage(data, this),
@@ -197,37 +189,6 @@ export class MemoryStorage implements Storage {
     return this.apps.delete(safeId);
   }
 
-  async getStatus(appId?: string): Promise<StorageStatus> {
-    const users = await this.getUsers();
-    const allApps = await this.getApps();
-    const targetApps = appId
-      ? allApps.filter((a) => a.id === validateAppId(appId))
-      : allApps;
-
-    if (appId && targetApps.length === 0) {
-      throw new TetherServerError(
-        TetherServerErrorCode.NotFound,
-        `Application "${appId}" not found`,
-      );
-    }
-
-    const appSummaries: Array<{ id: string; tables: string[] }> = [];
-    for (const app of targetApps) {
-      const tables = await app.getTables();
-      appSummaries.push({
-        id: app.id,
-        tables: tables.map((t) => t.name),
-      });
-    }
-
-    return {
-      backend: 'memory',
-      usersCount: users.length,
-      appsCount: allApps.length,
-      apps: appSummaries,
-    };
-  }
-
   async checkpoint(appId?: string): Promise<MaintenanceResult> {
     throw new TetherServerError(
       TetherServerErrorCode.NotSupported,
@@ -245,16 +206,7 @@ export class MemoryStorage implements Storage {
   async prune(appId?: string, keepCount?: number): Promise<MaintenanceResult> {
     const keep = keepCount ?? this.options.maxChangelogEntries ?? 1000;
     const allApps = await this.getApps();
-    const targetApps = appId
-      ? allApps.filter((a) => a.id === validateAppId(appId))
-      : allApps;
-
-    if (appId && targetApps.length === 0) {
-      throw new TetherServerError(
-        TetherServerErrorCode.NotFound,
-        `Application "${appId}" not found`,
-      );
-    }
+    const targetApps = filterTargetApps(allApps, appId);
 
     let totalPruned = 0;
     for (const app of targetApps) {

@@ -19,7 +19,9 @@ export {
   type TetherServerOptions,
 } from './server.js';
 export {
+  AppBaseStorage,
   type AppStorage,
+  BaseStorage,
   FileStorage,
   type FileStorageOptions,
   MemoryStorage,
@@ -28,6 +30,8 @@ export {
   type SqliteStorageOptions,
   type Storage,
   type StorageOptions,
+  TableBaseStorage,
   type TableStorage,
+  UserBaseStorage,
   type UserStorage,
 } from './storage/index.js';

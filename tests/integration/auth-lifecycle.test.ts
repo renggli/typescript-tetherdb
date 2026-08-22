@@ -396,10 +396,20 @@ describe.each(storageDescriptors)(
         password: 'password123',
         remember: true,
       });
+      await waitForCondition(() => client.syncStatus === SyncStatus.Connected);
 
       const todos = client.table<{ title: string }>('todos');
       await todos.put('g1', { title: 'Grace todo' });
-      await waitForCondition(() => client.syncStatus === SyncStatus.Connected);
+      await waitForCondition(
+        async () =>
+          (
+            await (
+              client as unknown as {
+                storage: { getPendingOutbox: () => Promise<unknown[]> };
+              }
+            ).storage.getPendingOutbox()
+          ).length === 0,
+      );
 
       // 1. Logout with DataMode.Local preserves data
       await client.logout({ dataMode: DataMode.Local });
@@ -415,6 +425,7 @@ describe.each(storageDescriptors)(
       });
       expect(client.authStatus).toBe(AuthStatus.SignedIn);
       await waitForCondition(() => client.syncStatus === SyncStatus.Connected);
+      await waitForCondition(async () => (await todos.getAll()).length === 1);
 
       // 3. Logout with default (DataMode.Clear) wipes local data
       await client.logout();

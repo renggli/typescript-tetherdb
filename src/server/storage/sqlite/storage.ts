@@ -3,11 +3,7 @@ import * as fs from 'node:fs';
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
-import {
-  getOrCreateKeyfileSecret,
-  hashPassword,
-  verifySessionToken,
-} from '../../crypto.js';
+import { getOrCreateKeyfileSecret, hashPassword } from '../../crypto.js';
 import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
 import {
   getUserBucket,
@@ -18,12 +14,8 @@ import {
   validateUsername,
 } from '../../validate.js';
 import type { AppStorage } from '../app.js';
-import type {
-  MaintenanceResult,
-  Storage,
-  StorageOptions,
-  StorageStatus,
-} from '../storage.js';
+import { BaseStorage, filterTargetApps } from '../base/index.js';
+import type { MaintenanceResult, StorageOptions } from '../storage.js';
 import type { UserStorage } from '../user.js';
 import { AppSqliteStorage } from './app.js';
 import { UserSqliteStorage } from './user.js';
@@ -86,7 +78,8 @@ export interface SqliteStorageOptions extends StorageOptions {
 /**
  * SQLite-backed implementation of `Storage`.
  */
-export class SqliteStorage implements Storage {
+export class SqliteStorage extends BaseStorage {
+  readonly backend = 'sqlite';
   readonly baseDir: string;
   readonly inMemory: boolean;
   readonly maxOpenDatabases: number;
@@ -97,6 +90,7 @@ export class SqliteStorage implements Storage {
   private userAppDbs: Map<string, UserAppDbHandle> = new Map();
 
   constructor(options: SqliteStorageOptions = {}) {
+    super(options);
     this.options = options;
     this.inMemory = Boolean(
       options.inMemory ||
@@ -118,6 +112,10 @@ export class SqliteStorage implements Storage {
         // Ignore directory creation error
       }
     }
+  }
+
+  protected override getBaseDir(): string | undefined {
+    return this.inMemory ? ':memory:' : this.baseDir;
   }
 
   getUsersDb(): UsersDbHandle {
@@ -444,12 +442,6 @@ export class SqliteStorage implements Storage {
     return new UserSqliteStorage(data, this);
   }
 
-  async getUserByToken(token: string): Promise<UserStorage | undefined> {
-    const payload = verifySessionToken(token, this.secret);
-    if (!payload) return undefined;
-    return this.getUser(payload.userId);
-  }
-
   async getUsers(): Promise<UserStorage[]> {
     const usersDb = this.getUsersDb();
     const rows = usersDb.stmtListUsers.all() as Array<{
@@ -585,78 +577,15 @@ export class SqliteStorage implements Storage {
     return true;
   }
 
-  async getStatus(appId?: string): Promise<StorageStatus> {
-    const users = await this.getUsers();
-    const allApps = await this.getApps();
-    const targetApps = appId
-      ? allApps.filter((a) => a.id === validateAppId(appId))
-      : allApps;
-
-    if (appId && targetApps.length === 0) {
-      throw new TetherServerError(
-        TetherServerErrorCode.NotFound,
-        `Application "${appId}" not found`,
-      );
-    }
-
-    const appSummaries: Array<{ id: string; tables: string[] }> = [];
-    for (const app of targetApps) {
-      const tables = await app.getTables();
-      appSummaries.push({
-        id: app.id,
-        tables: tables.map((t) => t.name),
-      });
-    }
-
-    return {
-      backend: 'sqlite',
-      baseDir: this.inMemory ? ':memory:' : this.baseDir,
-      usersCount: users.length,
-      appsCount: allApps.length,
-      apps: appSummaries,
-    };
-  }
-
   async checkpoint(appId?: string): Promise<MaintenanceResult> {
-    let count = 0;
-    const usersDb = this.getUsersDb();
-    usersDb.db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
-    count++;
-
-    const appsDb = this.getAppsDb();
-    appsDb.db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
-    count++;
-
     const allApps = await this.getApps();
-    const targetApps = appId
-      ? allApps.filter((a) => a.id === validateAppId(appId))
-      : allApps;
-
-    if (appId && targetApps.length === 0) {
-      throw new TetherServerError(
-        TetherServerErrorCode.NotFound,
-        `Application "${appId}" not found`,
-      );
-    }
-
+    const targetApps = filterTargetApps(allApps, appId);
     const users = await this.getUsers();
-    for (const app of targetApps) {
-      for (const user of users) {
-        if (!this.inMemory) {
-          const bucket = getUserBucket(user.id);
-          const dbPath = path.join(
-            this.baseDir,
-            app.id,
-            bucket,
-            `${user.id}.sqlite`,
-          );
-          if (!fs.existsSync(dbPath)) continue;
-        }
-        const handle = this.getUserAppDb(app.id, user.id);
-        handle.db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
-        count++;
-      }
-    }
+    const count = this.executeOnAllDbs(
+      'PRAGMA wal_checkpoint(TRUNCATE);',
+      targetApps,
+      users,
+    );
 
     return {
       action: 'checkpoint',
@@ -668,28 +597,31 @@ export class SqliteStorage implements Storage {
   }
 
   async vacuum(appId?: string): Promise<MaintenanceResult> {
-    let count = 0;
-    const usersDb = this.getUsersDb();
-    usersDb.db.exec('VACUUM;');
-    count++;
-
-    const appsDb = this.getAppsDb();
-    appsDb.db.exec('VACUUM;');
-    count++;
-
     const allApps = await this.getApps();
-    const targetApps = appId
-      ? allApps.filter((a) => a.id === validateAppId(appId))
-      : allApps;
-
-    if (appId && targetApps.length === 0) {
-      throw new TetherServerError(
-        TetherServerErrorCode.NotFound,
-        `Application "${appId}" not found`,
-      );
-    }
-
+    const targetApps = filterTargetApps(allApps, appId);
     const users = await this.getUsers();
+    const count = this.executeOnAllDbs('VACUUM;', targetApps, users);
+
+    return {
+      action: 'vacuum',
+      backend: 'sqlite',
+      appId,
+      affectedCount: count,
+      message: `Vacuum completed successfully across ${count} database(s)`,
+    };
+  }
+
+  private executeOnAllDbs(
+    sql: string,
+    targetApps: AppStorage[],
+    users: UserStorage[],
+  ): number {
+    let count = 0;
+    this.getUsersDb().db.exec(sql);
+    count++;
+    this.getAppsDb().db.exec(sql);
+    count++;
+
     for (const app of targetApps) {
       for (const user of users) {
         if (!this.inMemory) {
@@ -703,33 +635,17 @@ export class SqliteStorage implements Storage {
           if (!fs.existsSync(dbPath)) continue;
         }
         const handle = this.getUserAppDb(app.id, user.id);
-        handle.db.exec('VACUUM;');
+        handle.db.exec(sql);
         count++;
       }
     }
-
-    return {
-      action: 'vacuum',
-      backend: 'sqlite',
-      appId,
-      affectedCount: count,
-      message: `Vacuum completed successfully across ${count} database(s)`,
-    };
+    return count;
   }
 
   async prune(appId?: string, keepCount?: number): Promise<MaintenanceResult> {
     const keep = keepCount ?? this.options.maxChangelogEntries ?? 1000;
     const allApps = await this.getApps();
-    const targetApps = appId
-      ? allApps.filter((a) => a.id === validateAppId(appId))
-      : allApps;
-
-    if (appId && targetApps.length === 0) {
-      throw new TetherServerError(
-        TetherServerErrorCode.NotFound,
-        `Application "${appId}" not found`,
-      );
-    }
+    const targetApps = filterTargetApps(allApps, appId);
 
     const users = await this.getUsers();
     let totalPruned = 0;

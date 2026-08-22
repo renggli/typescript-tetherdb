@@ -8,7 +8,7 @@ import {
   validateTimestamp,
   validateUserId,
 } from '../../validate.js';
-import type { AppStorage } from '../app.js';
+import { AppBaseStorage } from '../base/app.js';
 import type { TableStorage } from '../table.js';
 import type { UserStorage } from '../user.js';
 import type { SqliteStorage, UserAppDbHandle } from './storage.js';
@@ -44,12 +44,11 @@ interface RawMetaRow {
 /**
  * SQLite-backed application namespace storage implementation.
  */
-export class AppSqliteStorage implements AppStorage {
-  readonly id: string;
+export class AppSqliteStorage extends AppBaseStorage {
   readonly storage: SqliteStorage;
 
   constructor(id: string, storage: SqliteStorage) {
-    this.id = id;
+    super(id);
     this.storage = storage;
   }
 
