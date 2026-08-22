@@ -1,30 +1,33 @@
-# TetherDB 🚀
+# ⚡ TetherDB
 
-[![NPM Package](https://img.shields.io/npm/v/tetherdb.svg)](https://www.npmjs.com/package/tetherdb)
-[![Build Status](https://github.com/renggli/typescript-tetherdb/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/renggli/typescript-tetherdb/actions)
-[![Code Coverage](https://codecov.io/gh/renggli/typescript-tetherdb/branch/main/graph/badge.svg)](https://codecov.io/gh/renggli/typescript-tetherdb)
-[![GitHub Issues](https://img.shields.io/github/issues/renggli/typescript-tetherdb.svg)](https://github.com/renggli/typescript-tetherdb/issues)
-[![GitHub Forks](https://img.shields.io/github/forks/renggli/typescript-tetherdb.svg)](https://github.com/renggli/typescript-tetherdb/network)
-[![GitHub Stars](https://img.shields.io/github/stars/renggli/typescript-tetherdb.svg)](https://github.com/renggli/typescript-tetherdb/stargazers)
-[![GitHub License](https://img.shields.io/badge/license-MIT-blue.svg)](https://raw.githubusercontent.com/renggli/typescript-tetherdb/main/LICENSE)
+**Lightweight, local-first TypeScript database with reactive IndexedDB storage and real-time two-way WebSocket sync.**
 
-**TetherDB** is a lightweight, offline-first TypeScript library combining a reactive IndexedDB client wrapper with real-time two-way WebSocket synchronization against a server backend.
+[![NPM Version](https://img.shields.io/npm/v/tetherdb.svg?style=flat-square&color=blue)](https://www.npmjs.com/package/tetherdb)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/renggli/typescript-tetherdb/ci.yml?branch=main&style=flat-square)](https://github.com/renggli/typescript-tetherdb/actions)
+[![Code Coverage](https://img.shields.io/codecov/c/github/renggli/typescript-tetherdb?style=flat-square)](https://codecov.io/gh/renggli/typescript-tetherdb)
+[![TypeScript](https://img.shields.io/badge/TypeScript-Strict-blue?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
+
+*Open-source under the [MIT License](LICENSE).*
+
+[Features](#features) •
+[Installation](#installation) •
+[Quick Start](#quick-start) •
+[Framework Integration](#framework-integration) •
+[CLI & Server](#cli--server-administration) •
+[Production Deployment](#production-deployment) •
+[Example App](#example-application)
 
 ## Features
 
-- **Offline-First & Local-First**: Operations are applied to IndexedDB immediately, queued in an outbox, and transparently synced in the background.
-- **Multi-Application on Standard Domain**: Host multiple independent web apps on a single TetherDB server instance (e.g. `store.mysite.com`). Data and real-time broadcasts are isolated by `appId`.
-- **Application & User Management**: Declare apps, active tables, and users programmatically (`declareApp()`, `declareUser()`) or via CLI commands (`apps`, `tables`, `users`).
-- **Zero-Config Server Starter & CLI**: Start in one line with `startServer()` or run directly via `npx tetherdb --sqlite=./data` or `npx tetherdb --file=./data`.
-- **Seamless Local-to-Synced Onboarding**: Start offline with zero-config local storage, then attach cloud sync with a single `client.register()` or `client.login()` call.
-- **Batch-by-Default Architecture**: High-throughput atomic mutations (`putAll`, `deleteAll`, `getAll`) and coalesced WebSocket transmission.
-- **Client-First Synchronization**: On first load or cache-miss, the client receives the complete dataset snapshot. On reconnect, it catches up with delta diffs.
-- **Adaptive Snapshot Delivery & Compaction**: Compacts changelog history and automatically falls back to full snapshots when changelog windows are exceeded.
-- **Last-Write-Wins (LWW) Conflict Resolution**: Monotonic logical clocks and deterministic tie-breaking.
-- **Real-Time Broadcast**: Server broadcasts incoming changes in real-time to all other active client instances belonging to the same app and user.
-- **Pluggable Server Storage**: Persistent SQLite storage (`SqliteStorage`), sharded filesystem storage (`FileStorage`), and ephemeral in-memory storage (`MemoryStorage`).
-- **Simple, Secure Auth**: Built-in account registration, password hashing (scrypt with salt), and HMAC-signed tokens.
-- **Modern Subpath Exports**: Import cleanly via `tetherdb` (client facade), `tetherdb/client`, `tetherdb/server`, and `tetherdb/cli`.
+- **📱 Offline-First & Local-First**: Mutations apply immediately to browser IndexedDB with zero latency and queue in an atomic outbox for background synchronization.
+- **🔄 Real-Time Two-Way Sync**: Fast, bi-directional WebSocket sync with delta diff catch-up on reconnect, adaptive full snapshots, and automatic live broadcast to active sessions.
+- **⚖️ Deterministic Conflict Resolution**: Last-Write-Wins (LWW) conflict handling powered by monotonically increasing logical clocks and deterministic tie-breaking.
+- **🏢 Multi-Tenant & Multi-App**: Host multiple independent web applications on a single domain and server instance. Data and WebSocket streams are strictly isolated by `appId` and user account.
+- **🚀 Seamless Offline-to-Cloud Onboarding**: Start using the local database immediately without an account; attach live cloud sync on demand with a single `client.login()` or `client.register()` call.
+- **🗄️ Pluggable Server Storage**: Built-in persistence engines for SQLite (`SqliteStorage`), sharded filesystem directories (`FileStorage`), and ephemeral testing (`MemoryStorage`).
+- **🔐 Built-in Authentication**: Password hashing using scrypt with salt and HMAC-signed session tokens with automatic session persistence and recovery.
+- **⚡ Batch-by-Default Performance**: High-throughput atomic mutations (`putAll`, `deleteAll`, `getAll`) and coalesced WebSocket frame transmission.
 
 ## Installation
 
@@ -34,16 +37,16 @@ npm install tetherdb
 
 ## Quick Start
 
-### 1. Zero-Config Standard Server
+### 1. Launch a Server (Zero-Config)
 
-You can launch a TetherDB server instantly from the command line:
+You can launch a standalone TetherDB server in seconds using the CLI:
 
 ```bash
-# Run standalone server CLI with SQLite persistence
+# Start server with persistent SQLite storage on port 8080
 npx tetherdb --sqlite=./data --port=8080
 ```
 
-Or programmatically in TypeScript with custom CORS and logging:
+Or embed it programmatically in your Node.js backend:
 
 ```typescript
 import { SqliteStorage, startServer } from 'tetherdb/server';
@@ -51,17 +54,14 @@ import { SqliteStorage, startServer } from 'tetherdb/server';
 const running = await startServer({
   port: 8080,
   storage: new SqliteStorage({ baseDir: './data' }),
-  trustProxy: true, // Enable when running behind Nginx, Caddy, or Cloudflare
-  cors: {
-    origin: ['https://myapp.com', 'https://staging.myapp.com'],
-    credentials: true,
-  },
-  logger: console, // Or custom logger (Pino, Winston)
 });
-console.log(`TetherDB running at http://${running.host}:${running.port}`);
+
+console.log(`TetherDB server listening on http://${running.host}:${running.port}`);
 ```
 
-### 2. Client Usage: Multi-App Offline-First to Real-Time Sync
+### 2. Client Setup: Instant Local-First Storage
+
+TetherDB works out of the box in the browser. Writes are instant and persist offline:
 
 ```typescript
 import { TetherClient } from 'tetherdb/client';
@@ -71,64 +71,75 @@ interface Todo {
   completed: boolean;
 }
 
-// 1. Initialize local client with unified URL connection
-const client = new TetherClient('todo-app', {
-  url: 'http://localhost:8080', // or 'https://api.example.com/db'
+// 1. Initialize client with server endpoint
+const client = new TetherClient('my-todo-app', {
+  url: 'http://localhost:8080',
 });
+
+// 2. Obtain a typed table
 const todos = client.table<Todo>('todos');
 
-// Reactive subscription to local & remote changes
+// 3. React to local and remote data changes
 const unsubscribe = todos.onChange.register((events) => {
   for (const { op, id, data, isRemote } of events) {
-    console.log(`Change (${op}) on ${id}, isRemote: ${isRemote}:`, data);
+    console.log(`Table event [${op}] on ${id} (remote: ${isRemote}):`, data);
   }
 });
 
-// Write locally right away (offline-first)
+// 4. Instant local writes (offline-ready)
 await todos.put('task-1', {
-  title: 'Build awesome app',
+  title: 'Try TetherDB',
   completed: false,
 });
 
-// Bulk put (atomic IDB transaction)
+// Batch operations execute in a single atomic transaction
 await todos.putAll([
-  { id: 'task-2', data: { title: 'Write tests', completed: false } },
-  { id: 'task-3', data: { title: 'Deploy', completed: false } },
+  { id: 'task-2', data: { title: 'Add offline support', completed: true } },
+  { id: 'task-3', data: { title: 'Sync with cloud', completed: false } },
 ]);
 
-// Read items
-const task = await todos.get('task-1');
-const allTasks = await todos.getAll();
+// Read data
+const item = await todos.get('task-1');
+const allItems = await todos.getAll();
+```
 
-// 2. Connect sync seamlessly when user registers or logs in
+### 3. Attach Live Cloud Sync & Authentication
+
+Connect your local data to the cloud whenever the user registers or signs in:
+
+```typescript
+// Register or login to initiate real-time synchronization
 await client.register({
   username: 'alice',
-  password: 'mypassword',
-  remember: true, // Automatically restores session on next page reload
+  password: 'secure-password',
+  remember: true, // Persists session token across browser reloads
 });
 
-// Monitor live synchronization status
+// Monitor live connection and sync status
 client.onSyncStatusChange.register((status) => {
+  // 'disconnected' | 'connecting' | 'connected' | 'syncing' | 'synced'
   console.log('Sync status:', status);
 });
 ```
 
-### 3. Framework Integration (e.g. React)
+## Framework Integration
 
-TetherDB tables subscribe seamlessly to UI state updates using standard hooks:
+### React Hook Example
+
+Bind any TetherDB table to component state with automatic real-time updates:
 
 ```typescript
 import { useEffect, useState } from 'react';
 import type { Table } from 'tetherdb/client';
 
-export function useTableData<T>(table: Table<T>): T[] {
+export function useTable<T>(table: Table<T>): T[] {
   const [items, setItems] = useState<T[]>([]);
 
   useEffect(() => {
-    // Initial fetch
+    // 1. Initial local load
     table.getAll().then(setItems);
 
-    // Live update subscription
+    // 2. Subscribe to live changes (local writes & remote sync broadcasts)
     const unsubscribe = table.onChange.register(() => {
       table.getAll().then(setItems);
     });
@@ -140,11 +151,43 @@ export function useTableData<T>(table: Table<T>): T[] {
 }
 ```
 
-## Production Deployment & Reverse Proxy
+## CLI & Server Administration
 
-When deploying in production, run TetherDB behind a reverse proxy (like **Caddy** or **Nginx**) to handle SSL/TLS termination and WebSocket upgrade headers:
+TetherDB includes a full CLI suite for running servers and managing databases:
 
-### Caddy Configuration (`Caddyfile`)
+```bash
+# Start standalone server with SQLite persistence
+npx tetherdb --sqlite=./data --port=8080
+
+# Start with filesystem storage
+npx tetherdb --file=./data --port=8080
+
+# Manage apps and users
+npx tetherdb apps list --sqlite=./data
+npx tetherdb users create --sqlite=./data --app=my-todo-app --user=alice --password=secret
+
+# Run database maintenance & compaction
+npx tetherdb maintenance checkpoint --sqlite=./data
+npx tetherdb maintenance vacuum --sqlite=./data
+npx tetherdb maintenance prune --sqlite=./data --keep=1000
+```
+
+## HTTP & WebSocket Endpoints
+
+| Method | Endpoint | Description | Authentication |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/health` | Server uptime and health probe | Public |
+| `GET` | `/ready` | Storage backend readiness check | Public |
+| `GET` | `/metrics` | Connected clients and application metrics | Public |
+| `POST` | `/auth/register` | Create a new user account | Public |
+| `POST` | `/auth/login` | Log in and receive a signed session token | Public |
+| `WS` | `/sync` | Bi-directional WebSocket synchronization stream | Token handshake |
+
+## Production Deployment
+
+When deploying to production, place TetherDB behind a reverse proxy (such as **Caddy** or **Nginx**) for SSL/TLS termination and WebSocket proxying:
+
+### Caddy (`Caddyfile`)
 
 ```caddy
 api.example.com {
@@ -152,7 +195,7 @@ api.example.com {
 }
 ```
 
-### Nginx Configuration
+### Nginx
 
 ```nginx
 server {
@@ -166,87 +209,46 @@ server {
         proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
 
-        # WebSocket Upgrade Headers
+        # WebSocket headers
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
 
-        # Forwarded Headers for Rate Limiting
+        # Forwarded headers
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
 
-        # Disable proxy buffering for real-time streaming
         proxy_buffering off;
     }
 }
 ```
 
-## Storage Maintenance & Operations
+## Example Application
 
-For SQLite backends, TetherDB provides built-in maintenance routines to manage WAL logs and changelog sizes:
-
-```bash
-# Checkpoint WAL logs
-npx tetherdb maintenance checkpoint --sqlite=./data
-
-# Vacuum SQLite database files
-npx tetherdb maintenance vacuum --sqlite=./data
-
-# Prune changelog history (keeping last 1,000 changes per table)
-npx tetherdb maintenance prune --sqlite=./data --keep=1000
-```
-
-## HTTP Endpoints
-
-The standard server provides authentication and WebSocket sync endpoints:
-
-| Method | Endpoint | Description | Auth Required |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/health` | Server health and uptime check | No |
-| `GET` | `/ready` | Storage readiness check | No |
-| `GET` | `/metrics` | Connected clients and app metrics | No |
-| `POST` | `/auth/register` | Register a new user account | No |
-| `POST` | `/auth/login` | Log in and receive signed session token | No |
-| `WS` | `/sync` | Two-way WebSocket real-time synchronization | Token handshake in auth message |
-
----
-
-## Architecture & Subpaths
-
-- **`tetherdb` / `tetherdb/client`**: Reactive local-first client layer providing IndexedDB storage, CRUD tables, authentication state, and automatic WebSocket synchronization.
-- **`tetherdb/server`**: Backend server coordinator handling HTTP authentication endpoints, WebSocket sync routing, and pluggable storage engines (memory, file, and SQLite).
-- **`tetherdb/cli`**: Command-line administrative interface and runner for launching servers and managing applications, tables, and user accounts.
-
----
-
-## Example Todo Application
-
-TetherDB includes a full-featured, offline-first collaborative Todo application in `examples/todo/` demonstrating real-time synchronization across multiple browser tabs:
+Check out the included real-time multi-client collaborative Todo app in [`examples/todo/`](examples/todo):
 
 ```bash
-# Build library bundles and start the example server
+# Build packages and start example app
 npm run build
 npm run example:todo
 ```
 
-Then open `http://localhost:3000` in multiple browser tabs or windows to see instant bi-directional updates, offline persistence, and account switching.
+Open `http://localhost:3000` in multiple browser windows or simulate offline mode in DevTools to see seamless local-first persistence and instant background synchronization.
 
----
-
-## Running Tests & Building
+## Development & Testing
 
 ```bash
-# Auto-format and lint checks
+# Format & lint check
 npm run format
 npm run check
 
-# Run unit and end-to-end tests
+# Run unit and integration tests
 npm test
 
-# Typecheck
+# Type check
 npm run typecheck
 
-# Build bundle
+# Build bundle & type definitions
 npm run build
 ```

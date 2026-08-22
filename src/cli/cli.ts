@@ -54,9 +54,6 @@ export async function runCli(
       case 'users':
         await handleUsersCommand(storage, positionalArgs);
         break;
-      case 'help':
-        printHelp();
-        break;
       default:
         throw new TetherServerError(
           TetherServerErrorCode.ConfigurationError,
