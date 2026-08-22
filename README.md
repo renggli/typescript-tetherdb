@@ -170,14 +170,16 @@ npx tetherdb --sqlite=./data --port=8080
 # Start with filesystem storage
 npx tetherdb --file=./data --port=8080
 
-# Manage apps and users
+# Manage apps, tables, and users
 npx tetherdb apps list --sqlite=./data
-npx tetherdb users create --sqlite=./data --app=my-todo-app --user=alice --password=secret
+npx tetherdb apps add my-todo-app --sqlite=./data
+npx tetherdb tables add my-todo-app todos --sqlite=./data
+npx tetherdb users add alice secret --sqlite=./data
 
 # Run database maintenance & compaction
 npx tetherdb maintenance checkpoint --sqlite=./data
 npx tetherdb maintenance vacuum --sqlite=./data
-npx tetherdb maintenance prune --sqlite=./data --keep=1000
+npx tetherdb maintenance prune my-todo-app 1000 --sqlite=./data
 ```
 
 ## HTTP & WebSocket Endpoints
@@ -257,15 +259,18 @@ Open `http://localhost:3000` in multiple browser windows or simulate offline mod
 ## Development & Testing
 
 ```bash
-# Format & lint check
+# Format code & lint fix
 npm run format
-npm run check
+npm run lint
+
+# Type check
+npm run typecheck
 
 # Run unit and integration tests
 npm test
 
-# Type check
-npm run typecheck
+# Run tests with coverage
+npm run test:coverage
 
 # Build bundle & type definitions
 npm run build

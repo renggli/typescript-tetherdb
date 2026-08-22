@@ -84,15 +84,19 @@
   ],
   "scripts": {
     "build": "tsup && tsc --emitDeclarationOnly --outDir dist && node scripts/build-types.js",
-    "prepare": "npm run build",
-    "prepublishOnly": "npm run format && npm run check && npm run typecheck && npm test && npm run build",
-    "publish:package": "npm run format && npm run check && npm run typecheck && npm test && npm run build && npm publish",
+    "clean": "node -e \"['dist', 'coverage'].forEach((d) => fs.rmSync(d, { recursive: true, force: true }))\"",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "lint": "biome check --write .",
+    "lint:check": "biome check .",
+    "check": "npm run format && npm run lint && npm run typecheck",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "check": "biome check --write .",
-    "format": "biome format --write .",
-    "typecheck": "tsc --noEmit",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run typecheck && npm run lint && npm test && npm run build",
+    "postpublish": "node scripts/tag-version.js",
     "example:todo": "npm --workspace=@tetherdb/example-todo run dev"
   },
   "dependencies": {
@@ -109,11 +113,21 @@
     "vitest": "^4.1.11"
   },
   "keywords": [
+    "browser-storage",
+    "conflict-resolution",
+    "data-sync",
+    "database",
+    "embedded-database",
     "indexeddb",
-    "sync",
-    "websocket",
+    "local-first",
+    "multi-tenant",
     "offline-first",
-    "realtime",
-    "database"
+    "reactive",
+    "realtime-sync",
+    "sqlite",
+    "state-management",
+    "typescript",
+    "websocket",
+    "zero-config"
   ]
 }
