@@ -31,8 +31,16 @@
 
 ## Installation
 
+Install from npm:
+
 ```bash
 npm install tetherdb
+```
+
+Or install directly from GitHub:
+
+```bash
+npm install github:renggli/typescript-tetherdb
 ```
 
 ## Quick Start
@@ -185,42 +193,52 @@ npx tetherdb maintenance prune --sqlite=./data --keep=1000
 
 ## Production Deployment
 
-When deploying to production, place TetherDB behind a reverse proxy (such as **Caddy** or **Nginx**) for SSL/TLS termination and WebSocket proxying:
+### Storage Engines
 
-### Caddy (`Caddyfile`)
+TetherDB supports pluggable server storage backends:
+
+| Engine | CLI Flag | Pros | Cons |
+| :--- | :--- | :--- | :--- |
+| **SQLite** (`SqliteStorage`) | `--sqlite=<dir>` | • High throughput & ACID safety<br>• WAL mode concurrency<br>• Built-in compaction (`vacuum`, `prune`) | • Single-node filesystem binding |
+| **Filesystem** (`FileStorage`) | `--file=<dir>` | • Human-readable JSON structure<br>• Zero binary dependencies<br>• Direct inspection & simple backup | • I/O overhead on large tables<br>• Lower concurrent write throughput |
+| **In-Memory** (`MemoryStorage`) | `--memory` | • Zero disk I/O, ultra-fast<br>• Zero configuration | • Ephemeral (data lost on restart) |
+
+#### When to Use Which
+
+- **SQLite (`--sqlite`) — Best for Production (Recommended)**: Ideal for multi-user and high-concurrency apps requiring fast transactional persistence and operational maintenance tools (`vacuum`, `checkpoint`, `prune`).
+- **Filesystem (`--file`) — Best for Lightweight / Embedded**: Ideal for low-traffic apps, resource-constrained environments, or setups where direct inspection and editing of JSON files is desired.
+- **In-Memory (`--memory`) — Best for Testing & CI/CD**: Ideal for automated unit/integration test suites, ephemeral pipelines, and rapid local prototyping.
+
+### Reverse Proxy & SSL Termination
+
+For production, run TetherDB behind a reverse proxy (such as Caddy or Nginx) to handle SSL/TLS and proxy WebSocket connections:
+
+#### Caddy
 
 ```caddy
 api.example.com {
-    reverse_proxy localhost:8080
+  reverse_proxy localhost:8080
 }
 ```
 
-### Nginx
+#### Nginx
 
 ```nginx
 server {
-    listen 443 ssl http2;
-    server_name api.example.com;
+  listen 443 ssl http2;
+  server_name api.example.com;
 
-    ssl_certificate /path/to/cert.pem;
-    ssl_certificate_key /path/to/key.pem;
+  ssl_certificate /path/to/cert.pem;
+  ssl_certificate_key /path/to/key.pem;
 
-    location / {
-        proxy_pass http://127.0.0.1:8080;
-        proxy_http_version 1.1;
-
-        # WebSocket headers
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-
-        # Forwarded headers
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        proxy_buffering off;
-    }
+  location / {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_buffering off;
+  }
 }
 ```
 
