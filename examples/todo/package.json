@@ -10,12 +10,12 @@
   },
   "dependencies": {
     "tetherdb": "file:../..",
-    "ws": "^8.18.0"
+    "ws": "^8.21.3"
   },
   "devDependencies": {
-    "@types/node": "^22.10.2",
-    "@types/ws": "^8.5.13",
+    "@types/node": "^26.2.0",
+    "@types/ws": "^8.18.1",
     "typescript": "^7.0.2",
-    "vite": "^6.2.0"
+    "vite": "^8.2.2"
   }
 }

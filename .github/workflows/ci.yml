@@ -21,8 +21,8 @@ jobs:
     name: "Node CI"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: "npm"
@@ -39,6 +39,6 @@ jobs:
       - name: "Tests & Coverage"
         run: npm run test:coverage
       - name: "Upload coverage"
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
