@@ -195,4 +195,22 @@ describe('MemoryStorage', () => {
       await cleanup();
     }
   });
+
+  it('should throw TetherServerError NotFound when accessing deleted UserMemoryStorage handle', async () => {
+    const { backend, cleanup } = await memoryStorage.createBackend();
+    try {
+      const user = await backend.createUser('to_delete_user', 'password123');
+      expect(await user.delete()).toBe(true);
+
+      // Subsequent operations on stale UserMemoryStorage handle should throw
+      await expect(user.verifyPassword('password123')).rejects.toMatchObject({
+        code: TetherServerErrorCode.NotFound,
+      });
+      await expect(user.changePassword('newpass123')).rejects.toMatchObject({
+        code: TetherServerErrorCode.NotFound,
+      });
+    } finally {
+      await cleanup();
+    }
+  });
 });

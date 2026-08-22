@@ -115,7 +115,12 @@ export const sqliteStorage: StorageDescriptor<
       dir,
       cleanup: async () => {
         await backend.close();
-        await fs.rm(dir, { recursive: true, force: true });
+        await fs.rm(dir, {
+          recursive: true,
+          force: true,
+          maxRetries: 5,
+          retryDelay: 20,
+        });
       },
     };
   },
@@ -145,7 +150,12 @@ export const fileStorage: StorageDescriptor<
       dir,
       cleanup: async () => {
         await backend.close();
-        await fs.rm(dir, { recursive: true, force: true });
+        await fs.rm(dir, {
+          recursive: true,
+          force: true,
+          maxRetries: 5,
+          retryDelay: 20,
+        });
       },
     };
   },

@@ -243,26 +243,26 @@ describe('Table', () => {
       });
 
       // Wait for initial async microtask fetch
-      await new Promise((r) => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, 2));
       expect(snapshots).toHaveLength(1);
       expect(snapshots[0]).toEqual([{ title: 'Initial' }]);
 
       // Trigger put
       await table.put('s2', { title: 'Second' });
-      await new Promise((r) => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, 2));
       expect(snapshots).toHaveLength(2);
       expect(snapshots[1]).toHaveLength(2);
 
       // Trigger delete
       await table.delete('s1');
-      await new Promise((r) => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, 2));
       expect(snapshots).toHaveLength(3);
       expect(snapshots[2]).toEqual([{ title: 'Second' }]);
 
       // Unsubscribe and verify no more calls
       unsubscribe();
       await table.put('s3', { title: 'Third' });
-      await new Promise((r) => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, 2));
       expect(snapshots).toHaveLength(3);
     });
 
@@ -274,7 +274,7 @@ describe('Table', () => {
 
       // Immediately unsubscribe before microtask resolves
       unsubscribe();
-      await new Promise((r) => setTimeout(r, 25));
+      await new Promise((r) => setTimeout(r, 2));
       expect(snapshots).toHaveLength(0);
     });
 
@@ -286,7 +286,7 @@ describe('Table', () => {
       const listener = vi.fn();
       table.subscribeAll(listener);
 
-      await new Promise((r) => setTimeout(r, 25));
+      await new Promise((r) => setTimeout(r, 2));
       expect(listener).not.toHaveBeenCalled();
       getAllSpy.mockRestore();
     });
@@ -302,7 +302,7 @@ describe('Table', () => {
       await table.put('item2', { title: 'Second' });
       await table.put('item3', { title: 'Third' });
 
-      await new Promise((r) => setTimeout(r, 40));
+      await new Promise((r) => setTimeout(r, 2));
 
       const lastSnapshot = snapshots[snapshots.length - 1];
       expect(lastSnapshot).toHaveLength(3);

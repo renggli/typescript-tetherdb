@@ -352,4 +352,75 @@ describe('SqliteStorage', () => {
     expect(appsVer.user_version).toBe(1);
     expect(userAppVer.user_version).toBe(1);
   });
+
+  it('should enforce maxRecordsPerTable limit when configured', async () => {
+    const limitedContext = await sqliteStorage.createBackend({
+      maxRecordsPerTable: 2,
+    });
+    try {
+      const user = await limitedContext.backend.createUser('lim_user', 'pass');
+      const app = await limitedContext.backend.createApp('lim_app');
+      const table = await app.createTable('lim_table');
+
+      await table.applyChanges(user, [
+        {
+          table: 'lim_table',
+          id: 'r1',
+          op: OperationType.Put,
+          data: 'data1',
+          timestamp: 100,
+          clientId: 'c1',
+        },
+        {
+          table: 'lim_table',
+          id: 'r2',
+          op: OperationType.Put,
+          data: 'data2',
+          timestamp: 101,
+          clientId: 'c1',
+        },
+      ]);
+
+      await expect(
+        table.applyChanges(user, [
+          {
+            table: 'lim_table',
+            id: 'r3',
+            op: OperationType.Put,
+            data: 'data3',
+            timestamp: 102,
+            clientId: 'c1',
+          },
+        ]),
+      ).rejects.toThrow('Table record limit reached');
+    } finally {
+      await limitedContext.cleanup();
+    }
+  });
+
+  it('should enforce maxRecordSizeBytes limit when configured', async () => {
+    const limitedContext = await sqliteStorage.createBackend({
+      maxRecordSizeBytes: 20,
+    });
+    try {
+      const user = await limitedContext.backend.createUser('lim_user2', 'pass');
+      const app = await limitedContext.backend.createApp('lim_app2');
+      const table = await app.createTable('lim_table2');
+
+      await expect(
+        table.applyChanges(user, [
+          {
+            table: 'lim_table2',
+            id: 'r1',
+            op: OperationType.Put,
+            data: { longText: 'this is too long for the 20 bytes limit' },
+            timestamp: 100,
+            clientId: 'c1',
+          },
+        ]),
+      ).rejects.toThrow('Record payload exceeds maximum allowed size');
+    } finally {
+      await limitedContext.cleanup();
+    }
+  });
 });

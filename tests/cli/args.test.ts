@@ -46,6 +46,12 @@ describe('parseCliArgs', () => {
     const result2 = parseCliArgs(['-p', '4000', '-H', 'localhost']);
     expect(result2.port).toBe(4000);
     expect(result2.host).toBe('localhost');
+
+    const result3 = parseCliArgs(['-p']);
+    expect(Number.isNaN(result3.port)).toBe(true);
+
+    const result4 = parseCliArgs(['-H']);
+    expect(result4.host).toBe('0.0.0.0');
   });
 
   it('should parse backend options (--memory, --file, --sqlite)', () => {

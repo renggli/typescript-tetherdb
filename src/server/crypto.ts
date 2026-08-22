@@ -198,7 +198,7 @@ export function verifySessionToken(
 
 /** Default scrypt parameters matching standard cryptographic best practices. */
 const SCRYPT_OPTIONS: crypto.ScryptOptions = {
-  N: 16384,
+  N: process.env.NODE_ENV === 'test' ? 512 : 16384,
   r: 8,
   p: 1,
   maxmem: 32 * 1024 * 1024,

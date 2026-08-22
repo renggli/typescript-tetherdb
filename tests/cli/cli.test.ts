@@ -98,5 +98,60 @@ describe('runCli', () => {
     testLogger.clear();
     await runCli(['users', 'add', 'alice', 'secret', `--sqlite=${tmpDir}`]);
     expect(testLogger.hasMessage('Created user: [')).toBe(true);
+
+    // Status command
+    testLogger.clear();
+    await runCli(['status', `--sqlite=${tmpDir}`]);
+    expect(testLogger.hasMessage('TetherDB Storage Status:')).toBe(true);
+
+    // Maintenance command
+    testLogger.clear();
+    await runCli(['maintenance', 'vacuum', `--sqlite=${tmpDir}`]);
+    expect(testLogger.hasMessage('Vacuum completed successfully')).toBe(true);
+
+    // Help command
+    testLogger.clear();
+    await runCli(['help']);
+    expect(testLogger.hasMessage('TetherDB CLI')).toBe(true);
+  });
+
+  it('should use default process.argv when called without arguments', async () => {
+    const originalArgv = process.argv;
+    try {
+      process.argv = ['node', 'cli.js', '--help'];
+      testLogger.clear();
+      await runCli();
+      expect(testLogger.hasMessage('TetherDB CLI')).toBe(true);
+    } finally {
+      process.argv = originalArgv;
+    }
+  });
+
+  it('should cleanly close storage when an error occurs during command execution', async () => {
+    const exitSpy = vi
+      .spyOn(process, 'exit')
+      .mockImplementation((() => {}) as unknown as (
+        code?: string | number | null | undefined,
+      ) => never);
+
+    testLogger.clear();
+    // tables rm on non-existent app throws TetherServerError
+    await runCli([
+      'tables',
+      'rm',
+      'non-existent-app',
+      'users',
+      `--sqlite=${tmpDir}`,
+    ]);
+    expect(testLogger.hasMessage('Command failed:', 'error')).toBe(true);
+    expect(
+      testLogger.hasMessage(
+        'Application "non-existent-app" not found',
+        'error',
+      ),
+    ).toBe(true);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    exitSpy.mockRestore();
   });
 });

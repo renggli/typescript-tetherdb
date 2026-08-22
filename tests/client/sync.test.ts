@@ -74,7 +74,7 @@ describe('Sync', () => {
     }
     syncInstances.length = 0;
     // Allow any pending async sendAuth/pushOutbox to drain before closing storage
-    await new Promise((r) => setTimeout(r, 20));
+    await new Promise((r) => setTimeout(r, 2));
     await storage.close();
   });
 
@@ -177,7 +177,7 @@ describe('Sync', () => {
       ws.triggerOpen();
 
       // Wait for async sendAuth
-      await new Promise((r) => setTimeout(r, 20));
+      await new Promise((r) => setTimeout(r, 2));
 
       const messages = ws.getParsedMessages();
       expect(messages).toHaveLength(1);
@@ -259,7 +259,7 @@ describe('Sync', () => {
 
       ws = MockWebSocket.instances[0];
       ws.triggerOpen();
-      await new Promise((r) => setTimeout(r, 20));
+      await new Promise((r) => setTimeout(r, 2));
     });
 
     it('should handle ServerMessageType.AuthSuccess and update token', async () => {
@@ -268,7 +268,7 @@ describe('Sync', () => {
         userId: 'u1',
         token: 'new-sliding-token',
       });
-      await new Promise((r) => setTimeout(r, 20));
+      await new Promise((r) => setTimeout(r, 2));
 
       expect(sync.status).toBe(SyncStatus.Connected);
       expect(tokenRefreshCallback).toHaveBeenCalledWith('new-sliding-token');
@@ -279,7 +279,7 @@ describe('Sync', () => {
         type: ServerMessageType.AuthError,
         message: 'Invalid signature',
       });
-      await new Promise((r) => setTimeout(r, 20));
+      await new Promise((r) => setTimeout(r, 2));
 
       expect(sync.status).toBe(SyncStatus.Disconnected);
       expect(authErrorCallback).toHaveBeenCalledWith('Invalid signature');
@@ -312,7 +312,7 @@ describe('Sync', () => {
         ],
       });
 
-      await new Promise((r) => setTimeout(r, 25));
+      await new Promise((r) => setTimeout(r, 2));
 
       expect(await table.get('snap-1')).toEqual({ title: 'Snap Todo' });
       expect(await table.get('snap-del')).toBeUndefined();
@@ -350,7 +350,7 @@ describe('Sync', () => {
         ],
       });
 
-      await new Promise((r) => setTimeout(r, 25));
+      await new Promise((r) => setTimeout(r, 2));
 
       expect(await table.get('n1')).toEqual({ text: 'Diff Note' });
       expect(tableEvents).toHaveLength(2);
@@ -377,7 +377,7 @@ describe('Sync', () => {
         ],
       });
 
-      await new Promise((r) => setTimeout(r, 25));
+      await new Promise((r) => setTimeout(r, 2));
 
       expect(await table.get('u1')).toEqual({ name: 'Alice' });
       expect(tableEvents).toHaveLength(1);
@@ -416,7 +416,7 @@ describe('Sync', () => {
           appliedSeq: 105,
         });
 
-        await new Promise((r) => setTimeout(r, 25));
+        await new Promise((r) => setTimeout(r, 2));
 
         const pendingOutbox = await storage.getPendingOutbox();
         expect(pendingOutbox).toHaveLength(0);
@@ -437,14 +437,14 @@ describe('Sync', () => {
         type: ServerMessageType.Error,
         message: 'Something went wrong on server',
       });
-      await new Promise((r) => setTimeout(r, 20));
+      await new Promise((r) => setTimeout(r, 2));
       expect(errors).toHaveLength(1);
       expect(errors[0].code).toBe(TetherClientErrorCode.SyncError);
       expect(errors[0].message).toBe('Something went wrong on server');
 
       // Malformed JSON string
       ws.onmessage?.({ data: '{ not valid json' });
-      await new Promise((r) => setTimeout(r, 20));
+      await new Promise((r) => setTimeout(r, 2));
       expect(errors).toHaveLength(2);
       expect(errors[1].code).toBe(TetherClientErrorCode.SyncError);
 
@@ -519,9 +519,9 @@ describe('Sync', () => {
 
       const ws = MockWebSocket.instances[0];
       ws.triggerOpen();
-      await new Promise((r) => setTimeout(r, 20));
+      await new Promise((r) => setTimeout(r, 2));
       ws.triggerMessage({ type: ServerMessageType.AuthSuccess, userId: 'u1' });
-      await new Promise((r) => setTimeout(r, 20));
+      await new Promise((r) => setTimeout(r, 2));
 
       const pushSpy = vi.spyOn(sync, 'pushOutbox');
 
@@ -556,7 +556,7 @@ describe('Sync', () => {
 
       const ws1 = MockWebSocket.instances[0];
       ws1.triggerOpen();
-      await new Promise((r) => setTimeout(r, 20));
+      await new Promise((r) => setTimeout(r, 2));
 
       // Abnormal close (e.g. 1006)
       ws1.close(1006, 'Abnormal closure');
@@ -575,7 +575,7 @@ describe('Sync', () => {
 
       const ws = MockWebSocket.instances[0];
       ws.triggerOpen();
-      await new Promise((r) => setTimeout(r, 20));
+      await new Promise((r) => setTimeout(r, 2));
 
       await new Promise((r) => setTimeout(r, 60));
 
@@ -591,7 +591,7 @@ describe('Sync', () => {
 
       const ws = MockWebSocket.instances[0];
       ws.triggerOpen();
-      await new Promise((r) => setTimeout(r, 20));
+      await new Promise((r) => setTimeout(r, 2));
 
       sync.destroy();
       expect(sync.status).toBe(SyncStatus.Disconnected);
@@ -622,7 +622,7 @@ describe('Sync', () => {
 
         const ws = MockWebSocket.instances[0];
         ws.triggerOpen();
-        await new Promise((r) => setTimeout(r, 20));
+        await new Promise((r) => setTimeout(r, 2));
 
         // Abnormal close
         ws.close(1006);
@@ -661,7 +661,7 @@ describe('Sync', () => {
 
         const ws = MockWebSocket.instances[0];
         ws.triggerOpen();
-        await new Promise((r) => setTimeout(r, 20));
+        await new Promise((r) => setTimeout(r, 2));
 
         // Disconnect socket
         ws.close(1006);
@@ -669,7 +669,7 @@ describe('Sync', () => {
 
         // Trigger online event on mockWindow
         mockWindow.dispatchEvent(new Event('online'));
-        await new Promise((r) => setTimeout(r, 20));
+        await new Promise((r) => setTimeout(r, 2));
 
         expect(MockWebSocket.instances).toHaveLength(2);
         expect(sync.status).toBe(SyncStatus.Connecting);
@@ -691,7 +691,7 @@ describe('Sync', () => {
 
         const ws = MockWebSocket.instances[0];
         ws.triggerOpen();
-        await new Promise((r) => setTimeout(r, 20));
+        await new Promise((r) => setTimeout(r, 2));
         expect(sync.status).toBe(SyncStatus.Connecting);
 
         // Trigger offline event
@@ -742,7 +742,7 @@ describe('Sync', () => {
         type: ServerMessageType.AuthSuccess,
         userId: 'user-1',
       });
-      await new Promise((r) => setTimeout(r, 20));
+      await new Promise((r) => setTimeout(r, 2));
 
       expect(errors).toHaveLength(1);
       expect(errors[0].code).toBe(TetherClientErrorCode.SyncError);
@@ -765,7 +765,7 @@ describe('Sync', () => {
         type: ServerMessageType.AuthSuccess,
         userId: 'user-1',
       });
-      await new Promise((r) => setTimeout(r, 20));
+      await new Promise((r) => setTimeout(r, 2));
 
       expect(errors).toHaveLength(1);
       expect(errors[0].message).toBe('Failed to push outbox batch to server');
@@ -789,6 +789,46 @@ describe('Sync', () => {
       } finally {
         (globalThis as unknown as { window?: unknown }).window = originalWindow;
       }
+    });
+
+    it('should emit onError when message parsing or processing fails', async () => {
+      const sync = createSync({ token: 'token-1' });
+      const errors: TetherClientError[] = [];
+      sync.onError.register((err) => errors.push(err));
+
+      const ws = MockWebSocket.instances[0];
+      ws.triggerOpen();
+
+      // 1. Invalid JSON string
+      ws.onmessage?.({ data: '{invalid-json' });
+      expect(errors.length).toBeGreaterThan(0);
+      expect(errors[errors.length - 1].code).toBe(
+        TetherClientErrorCode.SyncError,
+      );
+
+      // 2. Storage failure during message handling
+      vi.spyOn(storage, 'applySnapshotBatch').mockRejectedValueOnce(
+        new Error('Disk write failed'),
+      );
+      ws.triggerMessage({
+        type: ServerMessageType.SyncSnapshot,
+        seq: 1,
+        snapshot: [],
+      });
+      await new Promise((r) => setTimeout(r, 2));
+
+      expect(errors.some((e) => e.message === 'Disk write failed')).toBe(true);
+    });
+
+    it('should handle exceptions gracefully during disconnect', () => {
+      const sync = createSync({ token: 'token-1' });
+      const ws = MockWebSocket.instances[0];
+      ws.close = () => {
+        throw new Error('Socket already disposed');
+      };
+
+      expect(() => sync.disconnect()).not.toThrow();
+      expect(sync.status).toBe(SyncStatus.Disconnected);
     });
   });
 });

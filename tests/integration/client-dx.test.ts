@@ -9,6 +9,7 @@ import {
 } from '../../src/client/index.js';
 import { Storage } from '../../src/client/storage.js';
 import { TetherServer } from '../../src/server/server.js';
+import { waitForCondition } from '../helpers.js';
 import {
   type StorageContext,
   storageDescriptors,
@@ -22,9 +23,6 @@ describe.each(storageDescriptors)(
     let httpServer: http.Server;
     let serverPort: number;
     const clientsToClose: TetherClient[] = [];
-
-    const delay = (ms: number) =>
-      new Promise((resolve) => setTimeout(resolve, ms));
 
     beforeEach(async () => {
       storageContext = await createBackend();
@@ -158,15 +156,17 @@ describe.each(storageDescriptors)(
       expect(db.username).toBe('onboard_user');
 
       // Wait for sync to establish and outbox to drain
-      await delay(300);
+      await waitForCondition(() => db.syncStatus === SyncStatus.Connected);
 
       expect(db.syncStatus).toBe(SyncStatus.Connected);
       expect(statuses).toContain(SyncStatus.Connected);
 
       // Outbox should now be completely drained
       const checkStorage = new Storage(dbName);
-      const outboxAfter = await checkStorage.getPendingOutbox();
-      expect(outboxAfter).toHaveLength(0);
+      await waitForCondition(async () => {
+        const outboxAfter = await checkStorage.getPendingOutbox();
+        return outboxAfter.length === 0;
+      });
       await checkStorage.close();
 
       // Server storage should now have the 2 records
@@ -200,7 +200,7 @@ describe.each(storageDescriptors)(
       expect(success).toBe(true);
       expect(db.username).toBe('auto_inferred_user');
 
-      await delay(200);
+      await waitForCondition(() => db.syncStatus === SyncStatus.Connected);
       expect(db.syncStatus).toBe(SyncStatus.Connected);
     });
 
@@ -220,7 +220,7 @@ describe.each(storageDescriptors)(
 
       // Login connects sync
       await db.login({ username: 'dynamic_user', password: 'password123' });
-      await delay(150);
+      await waitForCondition(() => db.syncStatus === SyncStatus.Connected);
       expect(db.syncStatus).toBe(SyncStatus.Connected);
 
       // Logout disconnects sync
@@ -234,12 +234,14 @@ describe.each(storageDescriptors)(
 
       // Re-login connects sync and flushes outbox
       await db.login({ username: 'dynamic_user', password: 'password123' });
-      await delay(200);
+      await waitForCondition(() => db.syncStatus === SyncStatus.Connected);
       expect(db.syncStatus).toBe(SyncStatus.Connected);
 
       const checkStorage = new Storage(dbName);
-      const outbox = await checkStorage.getPendingOutbox();
-      expect(outbox).toHaveLength(0);
+      await waitForCondition(async () => {
+        const outbox = await checkStorage.getPendingOutbox();
+        return outbox.length === 0;
+      });
       await checkStorage.close();
     });
 

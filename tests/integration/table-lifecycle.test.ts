@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
-import { TetherClient } from '../../src/client/client.js';
+import { SyncStatus, TetherClient } from '../../src/client/index.js';
 import { type RunningServer, startServer } from '../../src/server/server.js';
 import type { Storage } from '../../src/server/storage/index.js';
 import {
@@ -17,9 +17,7 @@ interface NoteItem {
   content: string;
 }
 
-function delay(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+import { waitForCondition } from '../helpers.js';
 
 describe.each(storageDescriptors)(
   'Integration: Table Lifecycle and Client Data Reset ($name)',
@@ -82,7 +80,11 @@ describe.each(storageDescriptors)(
       await client1.login({ username: 'alice', password: 'password123' });
       await client2.login({ username: 'alice', password: 'password123' });
 
-      await delay(300);
+      await waitForCondition(
+        () =>
+          client1.syncStatus === SyncStatus.Connected &&
+          client2.syncStatus === SyncStatus.Connected,
+      );
 
       const todos1 = client1.table<TodoItem>('todos');
       const todos2 = client2.table<TodoItem>('todos');
@@ -91,8 +93,7 @@ describe.each(storageDescriptors)(
       await todos1.put('td-1', { text: 'First task', completed: false });
       await todos1.put('td-2', { text: 'Second task', completed: false });
 
-      await delay(400);
-
+      await waitForCondition(async () => (await todos2.getAll()).length === 2);
       expect(await todos2.getAll()).toHaveLength(2);
 
       // Server dynamically adds a new table "notes"
@@ -104,7 +105,10 @@ describe.each(storageDescriptors)(
 
       await notes1.put('note-1', { content: 'Secret project notes' });
 
-      await delay(400);
+      await waitForCondition(
+        async () =>
+          (await notes2.get('note-1'))?.content === 'Secret project notes',
+      );
 
       expect((await notes2.get('note-1'))?.content).toBe(
         'Secret project notes',
@@ -130,14 +134,21 @@ describe.each(storageDescriptors)(
       const client1 = createClient('bobby-client-1', dbName);
 
       await client1.login({ username: 'bobby', password: 'password123' });
-      await delay(300);
+      await waitForCondition(() => client1.syncStatus === SyncStatus.Connected);
 
       const todos = client1.table<TodoItem>('todos');
       await todos.put('t-1', { text: 'Item 1' });
       await todos.put('t-2', { text: 'Item 2' });
 
-      await delay(400);
-      expect(await todos.getAll()).toHaveLength(2);
+      // Wait for server to receive the pushed items
+      const userBobby = await serverStorage.getUserByUsername('bobby');
+      const app = await serverStorage.getApp('lifecycle-app');
+      const todosTable = await app?.getTable('todos');
+      await waitForCondition(async () => {
+        if (!userBobby || !todosTable) return false;
+        const recs = await todosTable.getAllRecords(userBobby);
+        return recs.length === 2;
+      });
 
       // Close client 1
       await client1.close();
@@ -145,7 +156,10 @@ describe.each(storageDescriptors)(
       // Create fresh client with empty new local DB, login, and verify full snapshot restore
       const client2 = createClient('bobby-client-2');
       await client2.login({ username: 'bobby', password: 'password123' });
-      await delay(400);
+      await waitForCondition(
+        async () =>
+          (await client2.table<TodoItem>('todos').getAll()).length === 2,
+      );
 
       const todos2 = client2.table<TodoItem>('todos');
       const records = await todos2.getAll();

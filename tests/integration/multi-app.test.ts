@@ -3,6 +3,7 @@ import { WebSocket as NodeWebSocket } from 'ws';
 import { TetherClient } from '../../src/client/client.js';
 import { startServer, TetherServer } from '../../src/server/server.js';
 import { OperationType } from '../../src/shared/types.js';
+import { waitForCondition } from '../helpers.js';
 import {
   type StorageContext,
   storageDescriptors,
@@ -70,7 +71,13 @@ describe.each(storageDescriptors)(
       await todoTable.put('todo_1', { title: 'First Todo Item' });
 
       // Wait for sync flush
-      await new Promise((r) => setTimeout(r, 100));
+      await waitForCondition(async () => {
+        const user = await server.storage.getUserByUsername('multi_user');
+        if (!user) return false;
+        const todoApp = await server.storage.getApp('todo-app');
+        const todosTable = await todoApp?.getTable('items');
+        return ((await todosTable?.getAllRecords(user)) ?? []).length === 1;
+      });
 
       // 2. Open a separate application database for the same user
       const db2 = new TetherClient(`test_notes_app_${Date.now()}`, {
@@ -91,7 +98,15 @@ describe.each(storageDescriptors)(
       await notesTable.put('note_1', { title: 'First Note Item' });
 
       // Wait for sync flush
-      await new Promise((r) => setTimeout(r, 100));
+      await waitForCondition(async () => {
+        const user = await server.storage.getUserByUsername('multi_user');
+        if (!user) return false;
+        const noteApp = await server.storage.getApp('notes-app');
+        const notesTableServer = await noteApp?.getTable('items');
+        return (
+          ((await notesTableServer?.getAllRecords(user)) ?? []).length === 1
+        );
+      });
 
       // 3. Verify data isolation
       const todoRecords = await todoTable.getAll();
@@ -184,7 +199,7 @@ describe.each(storageDescriptors)(
         .put('f1', { text: 'Alpha Feed 1' });
 
       // Wait for WebSocket broadcast
-      await new Promise((r) => setTimeout(r, 200));
+      await waitForCondition(() => receivedA2.length > 0);
 
       expect(receivedA2).toContain('Alpha Feed 1');
       expect(receivedB1).toHaveLength(0); // Beta received zero events from Alpha!

@@ -521,5 +521,31 @@ describe('Storage', () => {
       await storage.applyRemoteChangesBatch([], 99);
       expect(await storage.getMeta('lastSyncSeq')).toBe(99);
     });
+
+    it('should reset databasePromise and propagate error when openDatabase fails', async () => {
+      const failingStorage = new Storage('failing-db');
+      const originalOpen = indexedDB.open;
+
+      // Mock open failure
+      indexedDB.open = () => {
+        const req = {} as IDBOpenDBRequest;
+        setTimeout(() => {
+          req.error = new DOMException('Disk quota exceeded');
+          req.onerror?.(new Event('error'));
+        }, 10);
+        return req;
+      };
+
+      try {
+        await expect(failingStorage.getDatabase()).rejects.toThrow();
+      } finally {
+        indexedDB.open = originalOpen;
+      }
+
+      // Reopening with restored indexedDB succeeds
+      const db = await failingStorage.getDatabase();
+      expect(db).toBeDefined();
+      await failingStorage.close();
+    });
   });
 });

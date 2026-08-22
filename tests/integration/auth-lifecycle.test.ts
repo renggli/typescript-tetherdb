@@ -8,13 +8,11 @@ import {
 } from '../../src/client/index.js';
 import { Storage } from '../../src/client/storage.js';
 import { type RunningServer, startServer } from '../../src/server/index.js';
-
+import { waitForCondition } from '../helpers.js';
 import {
   type StorageContext,
   storageDescriptors,
 } from '../server/storage/matrix.js';
-
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe.each(storageDescriptors)(
   'TetherClient Authentication & Data Reconciliation Lifecycle ($name)',
@@ -89,7 +87,7 @@ describe.each(storageDescriptors)(
       expect(authStatuses).toContain(AuthStatus.SigningIn);
       expect(authStatuses).toContain(AuthStatus.SignedIn);
 
-      await delay(200);
+      await waitForCondition(() => client.syncStatus === SyncStatus.Connected);
       expect(client.syncStatus).toBe(SyncStatus.Connected);
     });
 
@@ -118,14 +116,17 @@ describe.each(storageDescriptors)(
       // Local item still exists
       expect(await todos.get('t1')).toEqual({ title: 'Local offline todo' });
 
-      await delay(250);
-      // Server should have received the synced item
       const user = await server.server.storage.getUserByUsername('bobby');
       expect(user).toBeDefined();
       if (!user) return;
 
       const app = await server.server.storage.getApp('test-app');
       const table = await app?.getTable('todos');
+      await waitForCondition(async () => {
+        const serverRecords = (await table?.getAllRecords(user)) ?? [];
+        return serverRecords.length === 1;
+      });
+
       const serverRecords = (await table?.getAllRecords(user)) ?? [];
       expect(serverRecords).toHaveLength(1);
       expect(serverRecords[0].data).toEqual({ title: 'Local offline todo' });
@@ -224,7 +225,14 @@ describe.each(storageDescriptors)(
       });
       const todosA = clientA.table<{ title: string }>('todos');
       await todosA.put('r1', { title: 'Remote Item 1' });
-      await delay(200);
+      const userDiana = await server.server.storage.getUserByUsername('diana');
+      const app = await server.server.storage.getApp('test-app');
+      const table = await app?.getTable('todos');
+      if (userDiana) {
+        await waitForCondition(async () => {
+          return ((await table?.getAllRecords(userDiana)) ?? []).length === 1;
+        });
+      }
 
       // 2. Register Client B locally before login, add local items
       const clientB = new TetherClient(
@@ -249,7 +257,7 @@ describe.each(storageDescriptors)(
       });
       expect(success).toBe(true);
 
-      await delay(300);
+      await waitForCondition(async () => (await todosB.getAll()).length === 2);
 
       // Both items should be present on Client B
       const allB = await todosB.getAll();
@@ -279,7 +287,15 @@ describe.each(storageDescriptors)(
       });
       const todosA = clientA.table<{ title: string }>('todos');
       await todosA.put('r1', { title: 'Remote Item' });
-      await delay(200);
+      const userEvelyn =
+        await server.server.storage.getUserByUsername('evelyn');
+      const app = await server.server.storage.getApp('test-app');
+      const table = await app?.getTable('todos');
+      if (userEvelyn) {
+        await waitForCondition(async () => {
+          return ((await table?.getAllRecords(userEvelyn)) ?? []).length === 1;
+        });
+      }
 
       // 2. Client B creates local item then logs in with DataMode.Remote
       const clientB = new TetherClient(
@@ -303,7 +319,7 @@ describe.each(storageDescriptors)(
       });
       expect(success).toBe(true);
 
-      await delay(300);
+      await waitForCondition(async () => (await todosB.getAll()).length === 1);
 
       // Local item was wiped, only remote item received
       const allB = await todosB.getAll();
@@ -336,7 +352,7 @@ describe.each(storageDescriptors)(
 
       const todos1 = client1.table<{ title: string }>('todos');
       await todos1.put('f1', { title: 'Frank task' });
-      await delay(200);
+      await waitForCondition(() => client1.syncStatus === SyncStatus.Connected);
 
       // Close Session 1
       await client1.close();
@@ -351,7 +367,11 @@ describe.each(storageDescriptors)(
       clientsToClose.push(client2);
 
       // Wait for auto-restore
-      await delay(150);
+      await waitForCondition(
+        () =>
+          client2.authStatus === AuthStatus.SignedIn &&
+          client2.syncStatus === SyncStatus.Connected,
+      );
 
       expect(client2.authStatus).toBe(AuthStatus.SignedIn);
       expect(client2.username).toBe('frank');
@@ -379,7 +399,7 @@ describe.each(storageDescriptors)(
 
       const todos = client.table<{ title: string }>('todos');
       await todos.put('g1', { title: 'Grace todo' });
-      await delay(200);
+      await waitForCondition(() => client.syncStatus === SyncStatus.Connected);
 
       // 1. Logout with DataMode.Local preserves data
       await client.logout({ dataMode: DataMode.Local });
@@ -394,7 +414,7 @@ describe.each(storageDescriptors)(
         password: 'password123',
       });
       expect(client.authStatus).toBe(AuthStatus.SignedIn);
-      await delay(200);
+      await waitForCondition(() => client.syncStatus === SyncStatus.Connected);
 
       // 3. Logout with default (DataMode.Clear) wipes local data
       await client.logout();
@@ -425,7 +445,7 @@ describe.each(storageDescriptors)(
       expect(client.authStatus).toBe(AuthStatus.SignedIn);
       expect(client.username).toBe('user_first');
 
-      await delay(200);
+      await waitForCondition(() => client.syncStatus === SyncStatus.Connected);
       expect((await todos.getAll()).length).toBe(1);
 
       // Register User 2 while already SignedIn (defaults to clearing previous user data)
@@ -436,7 +456,7 @@ describe.each(storageDescriptors)(
       expect(client.authStatus).toBe(AuthStatus.SignedIn);
       expect(client.username).toBe('user_second');
 
-      await delay(200);
+      await waitForCondition(() => client.syncStatus === SyncStatus.Connected);
 
       // New user should start with clean local state
       expect(await todos.getAll()).toHaveLength(0);
@@ -465,7 +485,7 @@ describe.each(storageDescriptors)(
       expect(initialSession?.token).toBeDefined();
 
       // Wait for WebSocket sync to connect and receive AuthSuccess with refreshed sliding token
-      await delay(200);
+      await waitForCondition(() => client.syncStatus === SyncStatus.Connected);
 
       expect(client.syncStatus).toBe(SyncStatus.Connected);
 
@@ -496,14 +516,14 @@ describe.each(storageDescriptors)(
       });
       clientsToClose.push(client);
 
-      // Wait for auto session restore and WebSocket sync rejection
-      await delay(200);
+      const checkStorage = new Storage(dbName);
+      await waitForCondition(
+        async () => (await checkStorage.getMeta('auth')) === undefined,
+      );
 
       expect(client.authStatus).toBe(AuthStatus.SignedOut);
       expect(client.username).toBeUndefined();
 
-      // Stored auth meta should have been cleaned up
-      const checkStorage = new Storage(dbName);
       const storedAuth = await checkStorage.getMeta('auth');
       expect(storedAuth).toBeUndefined();
       await checkStorage.close();
@@ -530,7 +550,7 @@ describe.each(storageDescriptors)(
 
       const todos = client.table<{ title: string }>('todos');
       await todos.put('a1', { title: 'User A Todo' });
-      await delay(250);
+      await waitForCondition(() => client.syncStatus === SyncStatus.Connected);
 
       expect((await todos.getAll()).map((t) => t.title)).toEqual([
         'User A Todo',
@@ -563,7 +583,10 @@ describe.each(storageDescriptors)(
       expect(client.username).toBe('user_b');
 
       // Wait for snapshot sync
-      await delay(350);
+      await waitForCondition(async () => {
+        const list = await todos.getAll();
+        return list.length === 1 && list[0].title === 'User B Remote Todo';
+      });
 
       // Client should now have User B's remote data and none of User A's data
       const todosUserB = await todos.getAll();
@@ -578,7 +601,10 @@ describe.each(storageDescriptors)(
       expect(successA).toBe(true);
       expect(client.username).toBe('user_a');
 
-      await delay(350);
+      await waitForCondition(async () => {
+        const list = await todos.getAll();
+        return list.length === 1 && list[0].title === 'User A Todo';
+      });
 
       // Client should now have User A's data restored from server snapshot
       const todosUserA = await todos.getAll();

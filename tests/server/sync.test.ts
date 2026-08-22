@@ -22,6 +22,7 @@ class MockServerWebSocket extends EventEmitter {
 
   send(data: string): void {
     this.sentMessages.push(data);
+    this.emit('sent', data);
   }
 
   close(): void {
@@ -32,6 +33,28 @@ class MockServerWebSocket extends EventEmitter {
 
   terminate(): void {
     this.close();
+  }
+
+  async waitForMessages(count = 1, timeoutMs = 2000): Promise<void> {
+    const start = Date.now();
+    while (this.sentMessages.length < count) {
+      if (Date.now() - start > timeoutMs) {
+        throw new Error(
+          `Timeout waiting for ${count} messages (got ${this.sentMessages.length})`,
+        );
+      }
+      await new Promise((r) => setTimeout(r, 2));
+    }
+  }
+
+  async waitForClose(timeoutMs = 2000): Promise<void> {
+    const start = Date.now();
+    while (!this.isClosed) {
+      if (Date.now() - start > timeoutMs) {
+        throw new Error('Timeout waiting for websocket close');
+      }
+      await new Promise((r) => setTimeout(r, 2));
+    }
   }
 
   // Helper to send message from client to server
@@ -91,7 +114,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         appId: 'todo-app',
       });
 
-      await new Promise((r) => setTimeout(r, 20));
+      await ws.waitForMessages(1);
 
       const messages = ws.getParsedMessages();
       expect(messages).toHaveLength(1);
@@ -112,7 +135,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         appId: 'todo-app',
       });
 
-      await new Promise((r) => setTimeout(r, 20));
+      await ws.waitForMessages(1);
 
       const messages = ws.getParsedMessages();
       expect(messages).toHaveLength(1);
@@ -133,7 +156,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         appId: 'todo-app',
       });
 
-      await new Promise((r) => setTimeout(r, 20));
+      await ws.waitForMessages(1);
 
       const messages = ws.getParsedMessages();
       expect(messages).toHaveLength(1);
@@ -154,7 +177,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         appId: '',
       });
 
-      await new Promise((r) => setTimeout(r, 20));
+      await ws.waitForMessages(1);
 
       const messages = ws.getParsedMessages();
       expect(messages).toHaveLength(1);
@@ -175,7 +198,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         appId: 'non-existent-app',
       });
 
-      await new Promise((r) => setTimeout(r, 20));
+      await ws.waitForMessages(1);
 
       const messages = ws.getParsedMessages();
       expect(messages).toHaveLength(1);
@@ -198,7 +221,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         lastSyncSeq: 0,
       });
 
-      await new Promise((r) => setTimeout(r, 20));
+      await ws.waitForMessages(2);
 
       const messages = ws.getParsedMessages();
       expect(messages).toHaveLength(2);
@@ -249,7 +272,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         lastSyncSeq: 0,
       });
 
-      await new Promise((r) => setTimeout(r, 20));
+      await ws.waitForMessages(2);
 
       const messages = ws.getParsedMessages();
       expect(messages).toHaveLength(2);
@@ -296,7 +319,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         lastSyncSeq: 1,
       });
 
-      await new Promise((r) => setTimeout(r, 20));
+      await ws.waitForMessages(2);
 
       const messages = ws.getParsedMessages();
       expect(messages).toHaveLength(2);
@@ -340,7 +363,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         lastSyncSeq: 1,
       });
 
-      await new Promise((r) => setTimeout(r, 20));
+      await ws.waitForMessages(2);
 
       const messages = ws.getParsedMessages();
       expect(messages).toHaveLength(2);
@@ -364,7 +387,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         batchId: 'b1',
         changes: [],
       });
-      await new Promise((r) => setTimeout(r, 20));
+      await ws.waitForMessages(1);
 
       const messages = ws.getParsedMessages();
       expect(messages).toHaveLength(1);
@@ -397,7 +420,8 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         lastSyncSeq: 0,
       });
 
-      await new Promise((r) => setTimeout(r, 20));
+      await ws1.waitForMessages(2);
+      await ws2.waitForMessages(2);
 
       // Client 1 sends changes
       ws1.emitClientMessage({
@@ -416,7 +440,8 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         ],
       });
 
-      await new Promise((r) => setTimeout(r, 25));
+      await ws1.waitForMessages(3);
+      await ws2.waitForMessages(3);
 
       // ws1 should receive ChangeAck
       const ws1Messages = ws1.getParsedMessages();
@@ -457,7 +482,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         clientId: 'client-1',
         lastSyncSeq: 0,
       });
-      await new Promise((r) => setTimeout(r, 20));
+      await ws.waitForMessages(2);
 
       ws.emitClientMessage({
         type: ClientMessageType.ChangeBatch,
@@ -465,7 +490,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         batchId: 'b1',
         changes: 'not-an-array',
       });
-      await new Promise((r) => setTimeout(r, 20));
+      await ws.waitForMessages(3);
 
       const messages = ws.getParsedMessages();
       const errMsg = messages.find((m) => m.type === ServerMessageType.Error);
@@ -480,7 +505,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       sync.handleConnection(ws as unknown as WebSocket);
 
       ws.emitClientMessage({ type: ClientMessageType.Ping });
-      await new Promise((r) => setTimeout(r, 20));
+      await ws.waitForMessages(1);
 
       const messages = ws.getParsedMessages();
       expect(messages).toEqual([{ type: ServerMessageType.Pong }]);
@@ -492,11 +517,11 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
 
       // 1. Invalid JSON
       ws.emit('message', '{ invalid');
-      await new Promise((r) => setTimeout(r, 20));
+      await ws.waitForMessages(1);
 
       // 2. Unsupported message type
       ws.emitClientMessage({ type: 'UNKNOWN_OP' });
-      await new Promise((r) => setTimeout(r, 20));
+      await ws.waitForMessages(2);
 
       const messages = ws.getParsedMessages();
       expect(messages).toHaveLength(2);
@@ -515,7 +540,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         clientId: 'client-disconnect',
         lastSyncSeq: 0,
       });
-      await new Promise((r) => setTimeout(r, 20));
+      await ws.waitForMessages(2);
 
       // Emit error then close
       ws.emit('error', new Error('Network reset'));
@@ -535,7 +560,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         appId: 'nonexistent-app',
         clientId: 'client-no-app',
       });
-      await new Promise((r) => setTimeout(r, 20));
+      await ws.waitForMessages(1);
 
       const messages = ws.getParsedMessages();
       expect(messages).toHaveLength(1);
@@ -556,7 +581,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         clientId: 'client-app-del',
         lastSyncSeq: 0,
       });
-      await new Promise((r) => setTimeout(r, 20));
+      await ws.waitForMessages(2);
 
       // Now delete the app
       await (await storage.getApp('todo-app'))?.delete();
@@ -575,7 +600,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
           },
         ],
       });
-      await new Promise((r) => setTimeout(r, 20));
+      await ws.waitForMessages(3);
 
       const messages = ws.getParsedMessages();
       const lastMsg = messages[messages.length - 1];
@@ -643,7 +668,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         token: 'bad-token-1',
         appId: 'todo-app',
       });
-      await new Promise((r) => setTimeout(r, 20));
+      await ws1.waitForClose();
       expect(ws1.isClosed).toBe(true);
 
       // 2nd failed token -> triggers backoff
@@ -654,7 +679,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         token: 'bad-token-2',
         appId: 'todo-app',
       });
-      await new Promise((r) => setTimeout(r, 20));
+      await ws2.waitForClose();
       expect(ws2.isClosed).toBe(true);
 
       // 3rd connection during cooldown is rejected on connect
@@ -681,7 +706,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         appId: 'todo-app',
         clientId: 'c1',
       });
-      await new Promise((r) => setTimeout(r, 20));
+      await ws1.waitForMessages(2);
       expect(cappedSync.connectedClientsCount).toBe(1);
 
       // Client 2 connects & auths
@@ -693,7 +718,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         appId: 'todo-app',
         clientId: 'c2',
       });
-      await new Promise((r) => setTimeout(r, 20));
+      await ws2.waitForMessages(2);
       expect(cappedSync.connectedClientsCount).toBe(2);
 
       // Client 3 exceeds maxConcurrentConnectionsPerUser=2
@@ -705,7 +730,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         appId: 'todo-app',
         clientId: 'c3',
       });
-      await new Promise((r) => setTimeout(r, 20));
+      await ws3.waitForClose();
 
       expect(ws3.isClosed).toBe(true);
       const msgs = ws3.getParsedMessages();
@@ -716,6 +741,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
 
       // After client 1 disconnects, client 3 can connect
       ws1.close();
+      await ws1.waitForClose();
       expect(cappedSync.connectedClientsCount).toBe(1);
 
       const ws4 = new MockServerWebSocket();
@@ -726,7 +752,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         appId: 'todo-app',
         clientId: 'c4',
       });
-      await new Promise((r) => setTimeout(r, 20));
+      await ws4.waitForMessages(2);
       expect(cappedSync.connectedClientsCount).toBe(2);
       expect(ws4.isClosed).toBe(false);
     });
@@ -763,7 +789,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         appId: 'todo-app',
         clientId: 'client-reauth',
       });
-      await new Promise((r) => setTimeout(r, 20));
+      await ws.waitForMessages(2);
 
       // 2. Re-authenticate same socket as user 2
       ws.emitClientMessage({
@@ -772,7 +798,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         appId: 'todo-app',
         clientId: 'client-reauth',
       });
-      await new Promise((r) => setTimeout(r, 20));
+      await ws.waitForMessages(4);
 
       // Clear message buffer
       ws.sentMessages = [];
@@ -786,7 +812,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         appId: 'todo-app',
         clientId: 'client-other',
       });
-      await new Promise((r) => setTimeout(r, 20));
+      await wsUser1.waitForMessages(2);
 
       wsUser1.emitClientMessage({
         type: ClientMessageType.ChangeBatch,
@@ -802,7 +828,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
           },
         ],
       });
-      await new Promise((r) => setTimeout(r, 30));
+      await wsUser1.waitForMessages(3);
 
       // 4. Verify that ws (now authenticated as user 2) did not receive user 1's broadcast
       const reauthMsgs = ws.getParsedMessages();
@@ -810,6 +836,77 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         (m) => m.type === ServerMessageType.BroadcastChanges,
       );
       expect(broadcastMsgs).toHaveLength(0);
+    });
+
+    it('should return error when synchronizing an application that was removed or does not exist', async () => {
+      const ws = new MockServerWebSocket();
+      sync.handleConnection(ws as unknown as WebSocket);
+
+      ws.emitClientMessage({
+        type: ClientMessageType.Auth,
+        token: validToken,
+        appId: 'todo-app',
+        clientId: 'client-app-del',
+      });
+      await ws.waitForMessages(2);
+
+      // Delete the app
+      await storage.deleteApp('todo-app');
+      ws.sentMessages = [];
+
+      // Send Sync request
+      ws.emitClientMessage({
+        type: ClientMessageType.Sync,
+        lastSyncSeq: 0,
+      });
+      await ws.waitForMessages(1);
+
+      const msgs = ws.getParsedMessages();
+      expect(msgs.some((m) => m.type === ServerMessageType.Error)).toBe(true);
+    });
+
+    it('should deliver full snapshot when lastSyncSeq is older than pruned changelog', async () => {
+      // Add data to produce changes
+      const app = await storage.getApp('todo-app');
+      const table = await app?.getTable('todos');
+      const user = await storage.getUser(testUserId);
+      if (!app || !table || !user) throw new Error('Setup missing');
+
+      for (let i = 1; i <= 6; i++) {
+        await table.applyChanges(user, [
+          {
+            table: 'todos',
+            id: `item-${i}`,
+            op: OperationType.Put,
+            data: { title: `Item ${i}` },
+            timestamp: 1000 + i,
+            clientId: 'c1',
+          },
+        ]);
+      }
+
+      // Prune to keep only last 2 changes
+      await storage.prune('todo-app', 2);
+
+      const ws = new MockServerWebSocket();
+      sync.handleConnection(ws as unknown as WebSocket);
+
+      // Connect with lastSyncSeq: 1 (which was pruned)
+      ws.emitClientMessage({
+        type: ClientMessageType.Auth,
+        protocolVersion: PROTOCOL_VERSION,
+        token: validToken,
+        appId: 'todo-app',
+        clientId: 'client-pruned',
+        lastSyncSeq: 1,
+      });
+      await ws.waitForMessages(2);
+
+      const msgs = ws.getParsedMessages();
+      const snapshotMsg = msgs.find(
+        (m) => m.type === ServerMessageType.SyncSnapshot,
+      );
+      expect(snapshotMsg).toBeDefined();
     });
   });
 });

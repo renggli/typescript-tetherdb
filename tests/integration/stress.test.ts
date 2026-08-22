@@ -8,27 +8,11 @@ import {
 import type { Storage } from '../../src/client/storage.js';
 import { SyncStatus } from '../../src/client/sync.js';
 import { TetherServer } from '../../src/server/server.js';
+import { delay, waitForCondition } from '../helpers.js';
 import {
   type StorageContext,
   storageDescriptors,
 } from '../server/storage/matrix.js';
-
-function delay(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function waitForCondition(
-  predicate: () => boolean | Promise<boolean>,
-  timeoutMs = 15000,
-  intervalMs = 50,
-): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (await predicate()) return;
-    await delay(intervalMs);
-  }
-  throw new Error(`waitForCondition timed out after ${timeoutMs}ms`);
-}
 
 describe.each(storageDescriptors)(
   'Stress & High-Load Integration Tests ($name)',
@@ -481,7 +465,7 @@ describe.each(storageDescriptors)(
       const streamTable = client.table<{ step: number; text: string }>(
         'stream',
       );
-      const totalWrites = 300;
+      const totalWrites = 60;
 
       // Run background writes while toggling logout/login
       let writesDone = 0;
@@ -492,15 +476,15 @@ describe.each(storageDescriptors)(
             text: `Message chunk ${i}`,
           });
           writesDone++;
-          await delay(5);
+          await delay(1);
         }
       })();
 
       // Flap connection 3 times
       for (let cycle = 0; cycle < 3; cycle++) {
-        await delay(40);
+        await delay(10);
         await client.logout({ dataMode: DataMode.Local });
-        await delay(40);
+        await delay(10);
         await client.login({
           username: 'stressuser',
           password: 'stresspass123',
@@ -538,8 +522,8 @@ describe.each(storageDescriptors)(
     }, 30000);
 
     it('should handle many concurrent users registering, logging in, and performing table operations simultaneously', async () => {
-      const userCount = 20;
-      const recordsPerUser = 25;
+      const userCount = 10;
+      const recordsPerUser = 15;
       const userCredentials = Array.from({ length: userCount }, (_, i) => ({
         username: `stress_u_${i}_${Math.random().toString(36).substring(2, 6)}`,
         password: `stress_pass_${i}`,

@@ -103,4 +103,48 @@ describe('Crypto', () => {
     const result = await verifyDummyPasswordHash('anyPassword123');
     expect(result).toBe(false);
   });
+
+  it('should reject tokens with valid signature but invalid JSON payload structure', () => {
+    const secret = 'super-secret-key-123';
+    const crypto = require('node:crypto');
+
+    const signPayload = (payloadStr: string) => {
+      const b64 = Buffer.from(payloadStr, 'utf-8').toString('base64url');
+      const sig = crypto
+        .createHmac('sha256', secret)
+        .update(b64)
+        .digest('base64url');
+      return `${b64}.${sig}`;
+    };
+
+    // Invalid JSON
+    expect(verifySessionToken(signPayload('not-json'), secret)).toBeNull();
+
+    // Not an object (e.g. primitive number)
+    expect(verifySessionToken(signPayload('12345'), secret)).toBeNull();
+
+    // Missing userId
+    expect(
+      verifySessionToken(
+        signPayload(
+          JSON.stringify({ username: 'alice', expiresAt: Date.now() + 10000 }),
+        ),
+        secret,
+      ),
+    ).toBeNull();
+
+    // Invalid expiresAt
+    expect(
+      verifySessionToken(
+        signPayload(
+          JSON.stringify({
+            userId: 'u1',
+            username: 'alice',
+            expiresAt: 'not-a-number',
+          }),
+        ),
+        secret,
+      ),
+    ).toBeNull();
+  });
 });

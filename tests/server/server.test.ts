@@ -865,6 +865,58 @@ describe.each(storageDescriptors)(
           await proxyServer.close();
         }
       });
+
+      it('should rate limit per target username when userLoginMaxRequests is exceeded', async () => {
+        const userLimiterServer = new TetherServer({
+          storage: storageContext.storage,
+          rateLimiting: {
+            ipLoginMaxRequests: 100,
+            userLoginMaxRequests: 2,
+          },
+        });
+        await userLimiterServer.declareUser('target_user', 'correct_pass');
+        const httpServer = await userLimiterServer.listen(0, '127.0.0.1');
+        const port = (httpServer.address() as { port: number }).port;
+
+        try {
+          // Attempt 1: 401
+          const res1 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: 'target_user',
+              password: 'wrong_password',
+            }),
+          });
+          expect(res1.status).toBe(401);
+
+          // Attempt 2: 401
+          const res2 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: 'target_user',
+              password: 'wrong_password',
+            }),
+          });
+          expect(res2.status).toBe(401);
+
+          // Attempt 3: 429 Too many login attempts for this account
+          const res3 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: 'target_user',
+              password: 'wrong_password',
+            }),
+          });
+          expect(res3.status).toBe(429);
+          const data3 = (await res3.json()) as { error: string };
+          expect(data3.error).toBe('Too many login attempts for this account');
+        } finally {
+          await userLimiterServer.close();
+        }
+      });
     });
 
     describe('CORS Configuration', () => {
@@ -1050,3 +1102,135 @@ describe.each(storageDescriptors)(
     });
   },
 );
+
+describe('TetherServer Standalone Lifecycle & Error Mapping', () => {
+  it('should map TetherServerErrorCode.NotSupported to HTTP 501', async () => {
+    const server = new TetherServer();
+    vi.spyOn(server.storage, 'getApps').mockRejectedValueOnce(
+      new TetherServerError(
+        TetherServerErrorCode.NotSupported,
+        'Feature not implemented',
+      ),
+    );
+
+    const running = await server.listen(0, '127.0.0.1');
+    const port = (running.address() as { port: number }).port;
+
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/metrics`);
+      expect(res.status).toBe(501);
+      const data = (await res.json()) as { error: string };
+      expect(data.error).toBe('Feature not implemented');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('should verify dummy password hash on login when user does not exist', async () => {
+    const server = new TetherServer();
+    const running = await server.listen(0, '127.0.0.1');
+    const port = (running.address() as { port: number }).port;
+
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: 'non_existent_user',
+          password: 'some_password',
+        }),
+      });
+      expect(res.status).toBe(401);
+      const data = (await res.json()) as { error: string };
+      expect(data.error).toBe('Invalid username or password');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('should handle listen errors when port is already occupied', async () => {
+    const server1 = new TetherServer();
+    const running1 = await server1.listen(0, '127.0.0.1');
+    const boundPort = (running1.address() as { port: number }).port;
+
+    const server2 = new TetherServer();
+    try {
+      await expect(server2.listen(boundPort, '127.0.0.1')).rejects.toThrow();
+    } finally {
+      await server1.close();
+      try {
+        await server2.close();
+      } catch {
+        // Expected if server2 never started listening
+      }
+    }
+  });
+
+  it('should return 400 when registration or login request is missing required fields', async () => {
+    const server = new TetherServer();
+    const running = await server.listen(0, '127.0.0.1');
+    const port = (running.address() as { port: number }).port;
+
+    try {
+      // Register missing password
+      const resReg = await fetch(`http://127.0.0.1:${port}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'only_username' }),
+      });
+      expect(resReg.status).toBe(400);
+
+      // Login missing username
+      const resLog = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: 'only_password' }),
+      });
+      expect(resLog.status).toBe(400);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('should return 413 when JSON payload exceeds 1MB limit', async () => {
+    const server = new TetherServer();
+    const running = await server.listen(0, '127.0.0.1');
+    const port = (running.address() as { port: number }).port;
+
+    try {
+      const hugeString = 'a'.repeat(1024 * 1024 + 100);
+      const res = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: 'huge_user',
+          password: hugeString,
+        }),
+      });
+      expect(res.status).toBe(413);
+      const data = (await res.json()) as { error: string };
+      expect(data.error).toBe('Payload exceeds maximum allowed size');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('should support startServer with PORT environment variable fallback', async () => {
+    const { startServer } = await import('../../src/server/server.js');
+    const originalPort = process.env.PORT;
+    process.env.PORT = '0';
+
+    try {
+      const running = await startServer({ host: '127.0.0.1' });
+      expect(running.port).toBeGreaterThan(0);
+      expect(running.host).toBe('127.0.0.1');
+      await running.close();
+    } finally {
+      if (originalPort === undefined) {
+        delete process.env.PORT;
+      } else {
+        process.env.PORT = originalPort;
+      }
+    }
+  });
+});

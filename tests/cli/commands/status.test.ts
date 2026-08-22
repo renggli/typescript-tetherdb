@@ -72,4 +72,19 @@ describe('handleStatusCommand', () => {
 
     expect(testLogger.hasMessage(/Server:\s+Running \(PID:/)).toBe(true);
   });
+
+  it('should display (none) when application has no tables and throw when app is not found', async () => {
+    await storage.createApp('empty-app');
+
+    await handleStatusCommand(storage, ['status', 'empty-app']);
+
+    expect(testLogger.hasMessage('TetherDB Storage Status:')).toBe(true);
+    expect(testLogger.hasMessage('- App: empty-app')).toBe(true);
+    expect(testLogger.hasMessage('Tables (0): (none)')).toBe(true);
+
+    testLogger.clear();
+    await expect(
+      handleStatusCommand(storage, ['status', 'non-existent-app']),
+    ).rejects.toThrow('Application "non-existent-app" not found');
+  });
 });

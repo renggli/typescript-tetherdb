@@ -8,14 +8,11 @@ import { SyncStatus } from '../../src/client/sync.js';
 
 import { TetherServer } from '../../src/server/server.js';
 import { OperationType } from '../../src/shared/types.js';
+import { waitForCondition } from '../helpers.js';
 import {
   type StorageContext,
   storageDescriptors,
 } from '../server/storage/matrix.js';
-
-function delay(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 describe.each(storageDescriptors)(
   'End-to-End WebSocket Sync ($name)',
@@ -78,18 +75,22 @@ describe.each(storageDescriptors)(
     it('should sync local changes from Client A to server', async () => {
       const clientA = createClient('client-a');
       await clientA.login({ username: 'testuser', password: 'password123' });
+      await waitForCondition(() => clientA.syncStatus === SyncStatus.Connected);
 
       const todosA = clientA.table<{ title: string; done: boolean }>('todos');
       await todosA.put('t1', { title: 'Buy groceries', done: false });
-
-      // Wait for sync to flush
-      await delay(400);
 
       const user = await server.storage.getUserByUsername('testuser');
       expect(user).toBeDefined();
       if (!user) return;
       const defaultApp = await server.storage.getApp('default');
       const todosTable = await defaultApp?.getTable('todos');
+
+      await waitForCondition(async () => {
+        const records = (await todosTable?.getAllRecords(user)) ?? [];
+        return records.length === 1;
+      });
+
       const serverRecords = (await todosTable?.getAllRecords(user)) ?? [];
       expect(serverRecords).toHaveLength(1);
       expect(serverRecords[0].data).toEqual({
@@ -101,25 +102,34 @@ describe.each(storageDescriptors)(
     });
 
     it('should perform initial snapshot sync on new client connection', async () => {
+      const user = await server.storage.getUserByUsername('testuser');
+      const defaultApp = await server.storage.getApp('default');
+      const todosTable = await defaultApp?.getTable('todos');
+
       // Client A creates data
       const clientA = createClient('client-a');
       await clientA.login({ username: 'testuser', password: 'password123' });
+      await waitForCondition(() => clientA.syncStatus === SyncStatus.Connected);
 
       const todosA = clientA.table<{ title: string; done: boolean }>('todos');
       await todosA.put('t1', { title: 'Write code', done: false });
       await todosA.put('t2', { title: 'Run tests', done: true });
 
-      await delay(200);
+      if (user) {
+        await waitForCondition(async () => {
+          const records = (await todosTable?.getAllRecords(user)) ?? [];
+          return records.length === 2;
+        });
+      }
       await clientA.close();
 
       // Client B connects from clean state
       const clientB = createClient('client-b');
       await clientB.login({ username: 'testuser', password: 'password123' });
 
-      // Wait for connection and snapshot delivery
-      await delay(200);
-
       const todosB = clientB.table<{ title: string; done: boolean }>('todos');
+      await waitForCondition(async () => (await todosB.getAll()).length === 2);
+
       const allB = await todosB.getAll();
       expect(allB).toHaveLength(2);
       expect(allB.map((t) => t.title).sort()).toEqual([
@@ -137,7 +147,11 @@ describe.each(storageDescriptors)(
       await clientA.login({ username: 'testuser', password: 'password123' });
       await clientB.login({ username: 'testuser', password: 'password123' });
 
-      await delay(150);
+      await waitForCondition(
+        () =>
+          clientA.syncStatus === SyncStatus.Connected &&
+          clientB.syncStatus === SyncStatus.Connected,
+      );
 
       const messagesB = clientB.table<{ text: string }>('messages');
       const receivedEvents: Array<{
@@ -153,7 +167,7 @@ describe.each(storageDescriptors)(
       const messagesA = clientA.table<{ text: string }>('messages');
       await messagesA.put('msg-1', { text: 'Hello from Client A!' });
 
-      await delay(200);
+      await waitForCondition(() => receivedEvents.length === 1);
 
       expect(receivedEvents).toHaveLength(1);
       expect(receivedEvents[0].op).toBe(OperationType.Put);
@@ -168,12 +182,23 @@ describe.each(storageDescriptors)(
     });
 
     it('should catch up with diff sync after being offline', async () => {
+      const user = await server.storage.getUserByUsername('testuser');
+      const defaultApp = await server.storage.getApp('default');
+      const itemsTable = await defaultApp?.getTable('items');
+
       const clientA = createClient('client-a');
       await clientA.login({ username: 'testuser', password: 'password123' });
+      await waitForCondition(() => clientA.syncStatus === SyncStatus.Connected);
 
       const itemsA = clientA.table<{ name: string }>('items');
       await itemsA.put('item-1', { name: 'First' });
-      await delay(200);
+
+      if (user) {
+        await waitForCondition(async () => {
+          const recs = (await itemsTable?.getAllRecords(user)) ?? [];
+          return recs.length === 1;
+        });
+      }
 
       // Client B connects and gets initial sync
       const clientBName = `client-b-${Math.random().toString(36).substring(2, 8)}`;
@@ -185,8 +210,8 @@ describe.each(storageDescriptors)(
       });
       await clientB.login({ username: 'testuser', password: 'password123' });
 
-      await delay(200);
       const itemsB1 = clientB.table<{ name: string }>('items');
+      await waitForCondition(async () => (await itemsB1.getAll()).length === 1);
       expect(await itemsB1.getAll()).toHaveLength(1);
 
       // Client B disconnects (simulating going offline)
@@ -195,7 +220,13 @@ describe.each(storageDescriptors)(
       // Client A makes more changes while B is offline
       await itemsA.put('item-2', { name: 'Second' });
       await itemsA.put('item-3', { name: 'Third' });
-      await delay(200);
+
+      if (user) {
+        await waitForCondition(async () => {
+          const recs = (await itemsTable?.getAllRecords(user)) ?? [];
+          return recs.length === 3;
+        });
+      }
 
       // Client B comes back online with the same IndexedDB database
       clientB = new TetherClient(clientBName, {
@@ -206,9 +237,9 @@ describe.each(storageDescriptors)(
       });
       await clientB.login({ username: 'testuser', password: 'password123' });
 
-      await delay(250);
-
       const itemsB2 = clientB.table<{ name: string }>('items');
+      await waitForCondition(async () => (await itemsB2.getAll()).length === 3);
+
       const all = await itemsB2.getAll();
       expect(all).toHaveLength(3);
       expect(all.map((i) => i.name).sort()).toEqual([
@@ -236,12 +267,24 @@ describe.each(storageDescriptors)(
         password: 'password123',
       });
 
-      await delay(150);
+      await waitForCondition(
+        () =>
+          clientUser1.syncStatus === SyncStatus.Connected &&
+          clientUser2.syncStatus === SyncStatus.Connected,
+      );
 
       const docs1 = clientUser1.table<{ secret: string }>('docs');
       await docs1.put('doc1', { secret: 'top secret 1' });
 
-      await delay(200);
+      const user1 = await server.storage.getUserByUsername('testuser');
+      const defaultApp = await server.storage.getApp('default');
+      const docsTable = await defaultApp?.getTable('docs');
+      if (user1) {
+        await waitForCondition(async () => {
+          const recs = (await docsTable?.getAllRecords(user1)) ?? [];
+          return recs.length === 1;
+        });
+      }
 
       const docs2 = clientUser2.table<{ secret: string }>('docs');
       const all2 = await docs2.getAll();
@@ -277,7 +320,9 @@ describe.each(storageDescriptors)(
       await client.login({ username: 'testuser', password: 'password123' });
 
       const tasksTable = client.table<{ title: string }>('tasks');
-      await delay(300);
+      await waitForCondition(
+        async () => (await tasksTable.getAll()).length === 60,
+      );
 
       const allTasks = await tasksTable.getAll();
       expect(allTasks).toHaveLength(60);
@@ -292,7 +337,11 @@ describe.each(storageDescriptors)(
       await clientA.login({ username: 'testuser', password: 'password123' });
       await clientB.login({ username: 'testuser', password: 'password123' });
 
-      await delay(150);
+      await waitForCondition(
+        () =>
+          clientA.syncStatus === SyncStatus.Connected &&
+          clientB.syncStatus === SyncStatus.Connected,
+      );
 
       const itemsB = clientB.table<{ title: string }>('items');
       const receivedBatches: Array<Array<{ op: OperationType; id: string }>> =
@@ -309,7 +358,7 @@ describe.each(storageDescriptors)(
         { id: 'item-3', data: { title: 'Batch Item 3' } },
       ]);
 
-      await delay(250);
+      await waitForCondition(async () => (await itemsB.getAll()).length === 3);
 
       const allOnB = await itemsB.getAll();
       expect(allOnB).toHaveLength(3);
@@ -325,7 +374,7 @@ describe.each(storageDescriptors)(
       });
       await client.login({ username: 'testuser', password: 'password123' });
 
-      await delay(150);
+      await waitForCondition(() => client.syncStatus === SyncStatus.Connected);
       expect(client.syncStatus).toBe(SyncStatus.Connected);
 
       await client.close();

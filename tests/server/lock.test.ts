@@ -307,4 +307,22 @@ describe('ServerLock', () => {
 
     await sqlite.close();
   });
+
+  it('should return null when lockfile contains invalid or corrupt JSON', async () => {
+    const lockFile = path.join(tmpDir, 'server.lock');
+    await fs.writeFile(lockFile, '{ corrupt-json-content', { mode: 0o600 });
+
+    expect(readServerLock(tmpDir)).toBeNull();
+  });
+
+  it('should be safe to call release multiple times', () => {
+    const handle = acquireServerLock(tmpDir, {
+      port: 9000,
+      host: '127.0.0.1',
+      backend: 'sqlite',
+    });
+
+    handle.release();
+    expect(() => handle.release()).not.toThrow();
+  });
 });

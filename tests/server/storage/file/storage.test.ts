@@ -315,4 +315,94 @@ describe('FileStorage', () => {
       /not found/i,
     );
   });
+
+  it('should enforce maxRecordsPerTable and maxRecordSizeBytes in FileStorage', async () => {
+    const limitedContext = await fileStorage.createBackend({
+      maxRecordsPerTable: 2,
+      maxRecordSizeBytes: 25,
+    });
+    try {
+      const user = await limitedContext.backend.createUser(
+        'lim_file_u',
+        'pass',
+      );
+      const app = await limitedContext.backend.createApp('lim_file_app');
+      const table = await app.createTable('records');
+
+      // Exceed size
+      await expect(
+        table.applyChanges(user, [
+          {
+            table: 'records',
+            id: 'r1',
+            op: OperationType.Put,
+            data: { large: 'this payload is too large for 25 bytes' },
+            timestamp: 100,
+            clientId: 'c1',
+          },
+        ]),
+      ).rejects.toThrow('Record payload exceeds maximum allowed size');
+
+      // Add up to limit
+      await table.applyChanges(user, [
+        {
+          table: 'records',
+          id: 'r1',
+          op: OperationType.Put,
+          data: 'ok1',
+          timestamp: 100,
+          clientId: 'c1',
+        },
+        {
+          table: 'records',
+          id: 'r2',
+          op: OperationType.Put,
+          data: 'ok2',
+          timestamp: 101,
+          clientId: 'c1',
+        },
+      ]);
+
+      // Exceed count
+      await expect(
+        table.applyChanges(user, [
+          {
+            table: 'records',
+            id: 'r3',
+            op: OperationType.Put,
+            data: 'ok3',
+            timestamp: 102,
+            clientId: 'c1',
+          },
+        ]),
+      ).rejects.toThrow('Table record limit reached');
+    } finally {
+      await limitedContext.cleanup();
+    }
+  });
+
+  it('should delete tables and remove table files from user directories', async () => {
+    const user = await context.backend.createUser('del_user', 'pass');
+    const app = await context.backend.createApp('del_app');
+    const table = await app.createTable('to_delete');
+
+    await table.applyChanges(user, [
+      {
+        table: 'to_delete',
+        id: '1',
+        op: OperationType.Put,
+        data: 'item',
+        timestamp: 100,
+        clientId: 'c1',
+      },
+    ]);
+
+    expect(await app.getTable('to_delete')).toBeDefined();
+    const deleted = await app.deleteTable('to_delete');
+    expect(deleted).toBe(true);
+    expect(await app.getTable('to_delete')).toBeUndefined();
+
+    // Deleting again should return false
+    expect(await app.deleteTable('to_delete')).toBe(false);
+  });
 });
