@@ -16,7 +16,8 @@
 [Framework Integration](#framework-integration) •
 [CLI & Server](#cli--server-administration) •
 [Production Deployment](#production-deployment) •
-[Example App](#example-application)
+[Example App](#example-application) •
+[Changelog](CHANGELOG.md)
 
 ## Features
 

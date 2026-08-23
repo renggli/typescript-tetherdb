@@ -79,7 +79,6 @@ The codebase is organized into five decoupled layers with clear subpath exports:
 
 - **Zero Test Side Effects**: Tests must be fully isolated and clean up resources (`afterEach`), including closing server listeners, active WebSockets, IndexedDB connections, and temporary filesystem directories.
 - **Fast Unit Tests**: Test core components (`TetherClient`, `Table`, `Storage`, `MemoryStorage`, `FileStorage`, `SqliteStorage`, `Sync`) in isolation.
-
 - **End-to-End Sync Tests**: End-to-end tests must verify real-time multi-client scenarios:
   - Initial snapshot delivery on fresh client connection.
   - Delta diff catch-up after offline reconnect.
