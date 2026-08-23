@@ -52,6 +52,14 @@
       },
       "import": "./dist/server/index.js",
       "require": "./dist/server/index.cjs"
+    },
+    "./vite": {
+      "types": {
+        "import": "./dist/vite/index.d.ts",
+        "require": "./dist/vite/index.d.cts"
+      },
+      "import": "./dist/vite/index.js",
+      "require": "./dist/vite/index.cjs"
     }
   },
   "typesVersions": {
@@ -64,6 +72,9 @@
       ],
       "server": [
         "./dist/server/index.d.ts"
+      ],
+      "vite": [
+        "./dist/vite/index.d.ts"
       ]
     }
   },
@@ -102,6 +113,14 @@
   "dependencies": {
     "ws": "^8.18.0"
   },
+  "peerDependencies": {
+    "vite": "^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0"
+  },
+  "peerDependenciesMeta": {
+    "vite": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@biomejs/biome": "^2.5.7",
     "@types/node": "^26.2.0",
@@ -110,6 +129,7 @@
     "fake-indexeddb": "^6.0.0",
     "tsup": "^8.3.5",
     "typescript": "^7.0.2",
+    "vite": "^8.2.2",
     "vitest": "^4.1.11"
   },
   "keywords": [

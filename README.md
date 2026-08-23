@@ -80,7 +80,7 @@ interface Todo {
 }
 
 // 1. Initialize client with server endpoint
-const client = new TetherClient('my-todo-app', {
+const client = new TetherClient('todo-app', {
   url: 'http://localhost:8080',
 });
 
@@ -132,6 +132,52 @@ client.onSyncStatusChange.register((status) => {
 
 ## Framework Integration
 
+### Vite Plugin (Zero-Config Development)
+
+Embed TetherDB sync and authentication directly inside your Vite dev and preview servers with `tetherdb/vite`:
+
+```typescript
+// vite.config.ts
+import { defineConfig } from 'vite';
+import { SqliteStorage } from 'tetherdb/server';
+import { tetherPlugin } from 'tetherdb/vite';
+
+export default defineConfig({
+  plugins: [
+    tetherPlugin({
+      // Optional persistent storage (defaults to in-memory)
+      storage: new SqliteStorage({ baseDir: './data' }),
+      // Pre-declare applications and tables
+      apps: [{ appId: 'todo-app', tables: ['todos'] }],
+      // Pre-provision default demo accounts
+      users: [{ username: 'demo', password: 'password123' }],
+    }),
+  ],
+});
+```
+
+Now running `vite` serves frontend assets (HMR), REST authentication endpoints (`/auth/login`, `/auth/register`), and real-time WebSocket sync (`/sync`) all on the same dev port with zero CORS configuration!
+
+### Connect & Express Middleware
+
+Mount TetherDB endpoints into an existing Express or Node.js HTTP application:
+
+```typescript
+import express from 'express';
+import { TetherServer } from 'tetherdb/server';
+
+const app = express();
+const tetherServer = new TetherServer();
+
+// Mount authentication and health REST middleware
+app.use(tetherServer.createMiddleware());
+
+const server = app.listen(8080);
+
+// Attach WebSocket sync handler
+tetherServer.attach(server);
+```
+
 ### React Hook Example
 
 Bind any TetherDB table to component state with automatic real-time updates:
@@ -172,14 +218,14 @@ npx tetherdb --file=./data --port=8080
 
 # Manage apps, tables, and users
 npx tetherdb apps list --sqlite=./data
-npx tetherdb apps add my-todo-app --sqlite=./data
-npx tetherdb tables add my-todo-app todos --sqlite=./data
+npx tetherdb apps add todo-app --sqlite=./data
+npx tetherdb tables add todo-app todos --sqlite=./data
 npx tetherdb users add alice secret --sqlite=./data
 
 # Run database maintenance & compaction
 npx tetherdb maintenance checkpoint --sqlite=./data
 npx tetherdb maintenance vacuum --sqlite=./data
-npx tetherdb maintenance prune my-todo-app 1000 --sqlite=./data
+npx tetherdb maintenance prune todo-app 1000 --sqlite=./data
 ```
 
 ## HTTP & WebSocket Endpoints

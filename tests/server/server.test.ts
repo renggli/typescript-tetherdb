@@ -1233,4 +1233,58 @@ describe('TetherServer Standalone Lifecycle & Error Mapping', () => {
       }
     }
   });
+
+  describe('createMiddleware', () => {
+    it('should handle matching HTTP routes and delegate non-matching routes via next()', async () => {
+      const server = new TetherServer();
+      const middleware = server.createMiddleware();
+      let nextCalled = false;
+
+      // 1. Non-matching route calls next()
+      const reqNonMatching = {
+        url: '/api/other',
+        method: 'GET',
+        headers: { host: 'localhost' },
+      } as unknown as http.IncomingMessage;
+      const resNonMatching = {} as unknown as http.ServerResponse;
+
+      middleware(reqNonMatching, resNonMatching, () => {
+        nextCalled = true;
+      });
+
+      // Wait a tick for promise resolution
+      await new Promise((r) => setTimeout(r, 10));
+      expect(nextCalled).toBe(true);
+
+      // 2. Matching route handles response without calling next()
+      let nextCalledForHealth = false;
+      let writtenStatus = 0;
+      let responseBody = '';
+      const reqHealth = {
+        url: '/health',
+        method: 'GET',
+        headers: { host: 'localhost' },
+      } as unknown as http.IncomingMessage;
+      const resHealth = {
+        writeHead(status: number) {
+          writtenStatus = status;
+          return this;
+        },
+        end(data: string) {
+          responseBody = data;
+        },
+      } as unknown as http.ServerResponse;
+
+      middleware(reqHealth, resHealth, () => {
+        nextCalledForHealth = true;
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+      expect(nextCalledForHealth).toBe(false);
+      expect(writtenStatus).toBe(200);
+      expect(JSON.parse(responseBody).status).toBe('ok');
+
+      await server.close();
+    });
+  });
 });

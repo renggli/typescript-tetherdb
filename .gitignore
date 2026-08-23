@@ -4,6 +4,7 @@
 .stylelintcache
 .vscode/*
 .data/
+data/
 *.local
 *.log
 *.module.css.d.ts

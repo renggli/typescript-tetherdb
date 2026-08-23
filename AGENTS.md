@@ -30,7 +30,7 @@ This document outlines the core architecture, developer rules, TypeScript conven
 
 ## 📂 Architecture Overview
 
-The codebase is organized into four decoupled layers with clear subpath exports:
+The codebase is organized into five decoupled layers with clear subpath exports:
 
 - **Shared / Protocol (`src/shared/`)**:
   - Internal module (not exported publicly).
@@ -59,6 +59,10 @@ The codebase is organized into four decoupled layers with clear subpath exports:
   - **Argument Parsing (`args.ts`)**: Command line option parsing and validation.
   - **Backend Factory (`backend.ts`)**: Storage engine instantiation for memory, file, and sqlite targets.
   - **Commands (`commands/`)**: Modular subcommand handlers (`serve.ts`, `status.ts`, `maintenance.ts`, `apps.ts`, `tables.ts`, `users.ts`, `help.ts`).
+
+- **Vite Layer (`src/vite/`)**:
+  - Exported as `tetherdb/vite`.
+  - **Vite Plugin (`index.ts`)**: Zero-config local development integration (`tetherPlugin`) running embedded WebSocket sync and REST auth directly within Vite dev and preview servers.
 
 ## 🔑 Key TypeScript & Design Conventions
 

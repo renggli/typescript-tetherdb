@@ -6,6 +6,7 @@ export default defineConfig({
     'cli/index': 'src/cli/index.ts',
     'client/index': 'src/client/index.ts',
     'server/index': 'src/server/index.ts',
+    'vite/index': 'src/vite/index.ts',
   },
   format: ['esm', 'cjs'],
   dts: false,

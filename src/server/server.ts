@@ -331,8 +331,6 @@ export class TetherServer {
         this._webSocketServer?.handleUpgrade(req, socket, head, (ws) => {
           this._webSocketServer?.emit('connection', ws, req);
         });
-      } else {
-        socket.destroy();
       }
     });
   }
@@ -434,6 +432,28 @@ export class TetherServer {
         resolve();
       }
     });
+  }
+
+  /**
+   * Creates a Connect- and Express-compatible HTTP middleware handler.
+   *
+   * @returns Middleware function `(req, res, next) => void`.
+   */
+  createMiddleware(): (
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    next: (err?: unknown) => void,
+  ) => void {
+    return (req, res, next) => {
+      this.handleHttpRequest(req, res).then(
+        (handled) => {
+          if (!handled) next();
+        },
+        (err) => {
+          next(err);
+        },
+      );
+    };
   }
 
   /**

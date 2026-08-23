@@ -1,0 +1,97 @@
+/**
+ * TetherDB Vite Plugin — Zero-config local development and preview server integration.
+ *
+ * @module tetherdb/vite
+ */
+
+import type { Plugin, PreviewServer, ViteDevServer } from 'vite';
+import { TetherServer, type TetherServerOptions } from '../server/server.js';
+import { MemoryStorage } from '../server/storage/memory/index.js';
+
+/**
+ * Application and table declaration for automatic provisioning on startup.
+ */
+export interface TetherPluginAppDeclaration {
+  /** Unique application identifier. */
+  appId: string;
+  /** Array of table names to declare within the application. */
+  tables?: string[];
+}
+
+/**
+ * User account declaration for automatic provisioning on startup.
+ */
+export interface TetherPluginUserDeclaration {
+  /** Account username. */
+  username: string;
+  /** Account password. */
+  password: string;
+}
+
+/**
+ * Options for configuring the TetherDB Vite plugin.
+ */
+export interface TetherPluginOptions extends TetherServerOptions {
+  /** Applications and tables to automatically declare on server startup. */
+  apps?: TetherPluginAppDeclaration[];
+  /** Default user accounts to automatically declare or update on server startup. */
+  users?: TetherPluginUserDeclaration[];
+}
+
+/**
+ * Creates a Vite plugin that runs an embedded TetherDB synchronization and REST
+ * authentication backend directly within the Vite dev and preview servers.
+ *
+ * @param options - Configuration options for storage, endpoints, apps, and users.
+ * @returns Vite plugin object.
+ */
+export function tetherPlugin(options: TetherPluginOptions = {}): Plugin {
+  let tetherServer: TetherServer | null = null;
+
+  async function setupServer(
+    server: ViteDevServer | PreviewServer,
+  ): Promise<void> {
+    tetherServer = new TetherServer({
+      storage: options.storage ?? new MemoryStorage(),
+      logger: options.logger ?? false,
+      ...options,
+    });
+
+    if (options.apps) {
+      for (const app of options.apps) {
+        await tetherServer.declareApp(app.appId, app.tables ?? []);
+      }
+    }
+
+    if (options.users) {
+      for (const user of options.users) {
+        await tetherServer.declareUser(user.username, user.password);
+      }
+    }
+
+    if (server.httpServer) {
+      tetherServer.attach(
+        server.httpServer as unknown as import('node:http').Server,
+      );
+      server.httpServer.on('close', () => {
+        tetherServer?.close().catch(() => {
+          // Ignore close errors during server shutdown
+        });
+      });
+    }
+
+    server.middlewares.use(tetherServer.createMiddleware());
+  }
+
+  return {
+    name: 'vite-plugin-tetherdb',
+    configureServer: setupServer,
+    configurePreviewServer: setupServer,
+    async closeBundle() {
+      if (tetherServer) {
+        await tetherServer.close();
+        tetherServer = null;
+      }
+    },
+  };
+}
