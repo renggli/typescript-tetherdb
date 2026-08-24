@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AuthStatus,
   DataMode,
+  Index,
   SyncStatus,
   TetherClient,
   TetherClientError,
@@ -411,6 +412,24 @@ describe('TetherClient', () => {
       // @ts-expect-error - inspecting internal sync
       client.sync.options.onAuthError?.('Session revoked');
       expect(authErrorSpy).toHaveBeenCalledWith('Session revoked');
+    });
+
+    it('should create table with declarative indexes through TetherClient.table()', async () => {
+      const client = new TetherClient(
+        `client-idx-${Math.random().toString(36).substring(2, 8)}`,
+      );
+      clientsToClose.push(client);
+
+      const byEmail = new Index<string>('byEmail', 'email', { unique: true });
+      const users = client.table<{ email: string; name: string }>('users', [
+        byEmail,
+      ]);
+
+      await users.put('u1', { email: 'alice@example.com', name: 'Alice' });
+
+      const indexed = users.index(byEmail);
+      const user = await indexed.get('alice@example.com');
+      expect(user).toEqual({ email: 'alice@example.com', name: 'Alice' });
     });
   });
 });

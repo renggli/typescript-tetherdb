@@ -7,19 +7,11 @@ import {
   type RegisterOptions,
 } from './auth.js';
 import type { TetherClientError } from './errors.js';
+import type { Index } from './indexed-table.js';
 import { EventRegistry } from './shared/event.js';
 import { Storage } from './storage.js';
 import { Sync, type SyncStatus, type WebSocketConstructor } from './sync.js';
 import type { Table } from './table.js';
-
-export {
-  AuthStatus,
-  DataMode,
-  type LoginOptions,
-  type LogoutOptions,
-  type RegisterOptions,
-} from './auth.js';
-export { TetherClientError, TetherClientErrorCode } from './errors.js';
 
 /**
  * Options for configuring a TetherClient database instance.
@@ -115,10 +107,11 @@ export class TetherClient {
    *
    * @typeParam T - Data payload model type for records in this table.
    * @param name - The table name.
+   * @param indexes - Optional array of Index definitions to register on this table.
    * @returns A typed `Table<T>` instance.
    */
-  table<T = unknown>(name: string): Table<T> {
-    return this.storage.table<T>(name);
+  table<T = unknown>(name: string, indexes?: Index[]): Table<T> {
+    return this.storage.table<T>(name, indexes);
   }
 
   /**

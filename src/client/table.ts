@@ -3,6 +3,7 @@ import {
   OperationType,
   type StoredRecord,
 } from '../shared/types.js';
+import { Index, IndexedTable } from './indexed-table.js';
 import { EventRegistry } from './shared/event.js';
 import type { LocalMutationItem, Storage } from './storage.js';
 
@@ -57,16 +58,61 @@ export class Table<T = unknown> {
   readonly onChange = new EventRegistry<TableChangeEvent<T>[]>();
   private tableName: string;
   private storage: Storage;
+  private indexMap = new Map<string, Index>();
 
   /**
    * Creates a new Table instance.
    *
    * @param tableName - Name of the table.
    * @param storage - Local storage coordinator.
+   * @param indexes - Optional array of Index definitions.
    */
-  constructor(tableName: string, storage: Storage) {
+  constructor(tableName: string, storage: Storage, indexes: Index[] = []) {
     this.tableName = tableName;
     this.storage = storage;
+    this.setIndexDefinitions(indexes);
+  }
+
+  /**
+   * Internal storage instance accessor.
+   */
+  get storageInstance(): Storage {
+    return this.storage;
+  }
+
+  /**
+   * The list of Index definitions registered on this table.
+   */
+  get indexes(): ReadonlyArray<Index> {
+    return Array.from(this.indexMap.values());
+  }
+
+  /**
+   * Obtains an IndexedTable view bound to the specified Index.
+   *
+   * @typeParam K - The key type of the index.
+   * @param indexOrName - An Index instance or the string name of an index.
+   * @returns An IndexedTable instance for querying and subscribing.
+   */
+  index<K = IDBValidKey>(indexOrName: Index<K> | string): IndexedTable<T, K> {
+    const idx =
+      typeof indexOrName === 'string'
+        ? (this.indexMap.get(indexOrName) ??
+          new Index<K>(indexOrName, indexOrName))
+        : indexOrName;
+    return new IndexedTable<T, K>(this, idx as Index<K>);
+  }
+
+  /**
+   * Updates registered index definitions on this table instance.
+   *
+   * @param indexes - New array of Index definitions.
+   */
+  setIndexDefinitions(indexes: Index[]): void {
+    this.indexMap.clear();
+    for (const idx of indexes) {
+      this.indexMap.set(idx.name, idx);
+    }
   }
 
   /**

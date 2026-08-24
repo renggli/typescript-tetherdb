@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Index } from '../../src/client/index.js';
 import { Storage } from '../../src/client/storage.js';
 import { type ChangeRecord, OperationType } from '../../src/shared/types.js';
 
@@ -546,6 +547,134 @@ describe('Storage', () => {
       const db = await failingStorage.getDatabase();
       expect(db).toBeDefined();
       await failingStorage.close();
+    });
+  });
+
+  describe('Dynamic Index Schema Migrations', () => {
+    it('should create indexes in IndexedDB during ensureTable with indexes', async () => {
+      const byEmail = new Index<string>('byEmail', 'email', { unique: true });
+      const byAge = new Index<number>('byAge', 'age');
+
+      await storage.ensureTable('accounts', [byEmail, byAge]);
+
+      const db = await storage.getDatabase();
+      const tx = db.transaction('accounts', 'readonly');
+      const store = tx.objectStore('accounts');
+
+      expect(store.indexNames.contains('byEmail')).toBe(true);
+      expect(store.indexNames.contains('byAge')).toBe(true);
+
+      const emailIdx = store.index('byEmail');
+      expect(emailIdx.unique).toBe(true);
+      expect(emailIdx.keyPath).toBe('data.email');
+
+      const ageIdx = store.index('byAge');
+      expect(ageIdx.unique).toBe(false);
+      expect(ageIdx.keyPath).toBe('data.age');
+    });
+
+    it('should dynamically add an index to an existing table with data and index existing records', async () => {
+      // 1. Create table without indexes and insert records
+      const usersTable = storage.table<{ name: string; score: number }>(
+        'players',
+      );
+      await usersTable.put('p1', { name: 'Player 1', score: 100 });
+      await usersTable.put('p2', { name: 'Player 2', score: 200 });
+
+      let db = await storage.getDatabase();
+      const v1 = db.version;
+
+      // 2. Declare new index dynamically
+      const byScore = new Index<number>('byScore', 'score');
+      const tableWithIndex = storage.table<{ name: string; score: number }>(
+        'players',
+        [byScore],
+      );
+
+      // 3. Query via index
+      const rec = await tableWithIndex.index(byScore).get(200);
+      expect(rec).toEqual({ name: 'Player 2', score: 200 });
+
+      db = await storage.getDatabase();
+      expect(db.version).toBeGreaterThan(v1);
+    });
+
+    it('should dynamically update an index definition when properties change', async () => {
+      // Create initial index with unique: false
+      const idxV1 = new Index<string>('byRole', 'role', { unique: false });
+      await storage.ensureTable('members', [idxV1]);
+
+      let db = await storage.getDatabase();
+      let tx = db.transaction('members', 'readonly');
+      let store = tx.objectStore('members');
+      expect(store.index('byRole').unique).toBe(false);
+
+      // Now upgrade with unique: true
+      const idxV2 = new Index<string>('byRole', 'role', { unique: true });
+      await storage.ensureTable('members', [idxV2]);
+
+      db = await storage.getDatabase();
+      tx = db.transaction('members', 'readonly');
+      store = tx.objectStore('members');
+      expect(store.index('byRole').unique).toBe(true);
+    });
+
+    it('should dynamically drop removed indexes while preserving table data', async () => {
+      const idxA = new Index<string>('idxA', 'propA');
+      const idxB = new Index<string>('idxB', 'propB');
+
+      await storage.ensureTable('dataset', [idxA, idxB]);
+      const table = storage.table<{ propA: string; propB: string }>('dataset');
+      await table.put('d1', { propA: 'Alpha', propB: 'Beta' });
+
+      let db = await storage.getDatabase();
+      let tx = db.transaction('dataset', 'readonly');
+      let store = tx.objectStore('dataset');
+      expect(store.indexNames.contains('idxA')).toBe(true);
+      expect(store.indexNames.contains('idxB')).toBe(true);
+
+      // Update schema to keep only idxB
+      await storage.ensureTable('dataset', [idxB]);
+
+      db = await storage.getDatabase();
+      tx = db.transaction('dataset', 'readonly');
+      store = tx.objectStore('dataset');
+      expect(store.indexNames.contains('idxA')).toBe(false);
+      expect(store.indexNames.contains('idxB')).toBe(true);
+
+      // Data is intact
+      const record = await table.get('d1');
+      expect(record).toEqual({ propA: 'Alpha', propB: 'Beta' });
+    });
+
+    it('should normalize root and nested key paths correctly', async () => {
+      const byTs = new Index<number>('byTimestamp', 'timestamp');
+      const byCity = new Index<string>('byCity', 'address.city');
+
+      await storage.ensureTable('locations', [byTs, byCity]);
+
+      const db = await storage.getDatabase();
+      const tx = db.transaction('locations', 'readonly');
+      const store = tx.objectStore('locations');
+
+      // 'timestamp' is a top-level record metadata field so it shouldn't be prefixed with data.
+      expect(store.index('byTimestamp').keyPath).toBe('timestamp');
+      // 'address.city' should be prefixed with data.
+      expect(store.index('byCity').keyPath).toBe('data.address.city');
+    });
+
+    it('should be a no-op if ensureTable is called with matching existing indexes', async () => {
+      const byCode = new Index<string>('byCode', 'code', { unique: true });
+      await storage.ensureTable('coupons', [byCode]);
+
+      const db1 = await storage.getDatabase();
+      const v1 = db1.version;
+
+      // Re-run ensureTable with same index definition
+      await storage.ensureTable('coupons', [byCode]);
+
+      const db2 = await storage.getDatabase();
+      expect(db2.version).toBe(v1);
     });
   });
 });

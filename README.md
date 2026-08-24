@@ -112,7 +112,58 @@ const item = await todos.get('task-1');
 const allItems = await todos.getAll();
 ```
 
-### 3. Attach Live Cloud Sync & Authentication
+### 3. Declarative Indexes & Querying
+
+Define type-safe indexes on tables declaratively and query data with full range, pagination, and reactive subscription support:
+
+```typescript
+import { Index, IndexRange, TetherClient } from 'tetherdb/client';
+
+interface User {
+  username: string;
+  email: string;
+  age: number;
+  tags: string[];
+  department: string;
+  role: string;
+}
+
+const client = new TetherClient('my-app');
+
+// 1. Declare first-class typed indexes
+const byUsername = new Index<string>('byUsername', 'username', { unique: true });
+const byAge = new Index<number>('byAge', 'age');
+const byTags = new Index<string>('byTags', 'tags', { multiEntry: true });
+const byDeptAndRole = new Index<[string, string]>('byDeptRole', ['department', 'role']);
+
+// 2. Register indexes when acquiring the table
+const users = client.table<User>('users', [
+  byUsername,
+  byAge,
+  byTags,
+  byDeptAndRole,
+]);
+
+// 3. Query via typed index accessors
+const user = await users.index(byUsername).get('alice');
+const adults = await users.index(byAge).getAll(IndexRange.lowerBound(18));
+const seniorsInEng = await users.index(byDeptAndRole).getAll(['eng', 'senior']);
+const tsDevs = await users.index(byTags).getAll('typescript');
+
+// 4. Pagination & Sorting
+const topOldest = await users.index(byAge).getAll(undefined, {
+  direction: 'prev',
+  limit: 10,
+  offset: 0,
+});
+
+// 5. Reactive index subscriptions
+const unsubscribe = users.index(byTags).subscribe('typescript', (matchingUsers) => {
+  console.log('TypeScript developers updated:', matchingUsers);
+});
+```
+
+### 4. Attach Live Cloud Sync & Authentication
 
 Connect your local data to the cloud whenever the user registers or signs in:
 

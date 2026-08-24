@@ -21,6 +21,14 @@ export {
   TetherClientErrorCode,
 } from './errors.js';
 export {
+  Index,
+  type IndexDirection,
+  IndexedTable,
+  type IndexOptions,
+  type IndexQueryOptions,
+  IndexRange,
+} from './indexed-table.js';
+export {
   SyncStatus,
   type WebSocketConstructor,
 } from './sync.js';

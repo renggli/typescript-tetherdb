@@ -36,15 +36,14 @@ The codebase is organized into five decoupled layers with clear subpath exports:
   - Internal module (not exported publicly).
   - Single source of truth for protocol message schemas, data structures, logical clocks, and path normalization shared internally across client and server.
   - Pure TypeScript with zero runtime dependencies.
-
 - **Client Layer (`src/client/`)**:
   - Exported as `tetherdb/client`.
   - **TetherClient (`client.ts`)**: Main reactive facade client with local-first storage, multi-app support, auto-session, and auth helpers.
   - **Auth (`auth.ts`)**: Internal authentication coordinator managing sessions, metadata, and auth HTTP endpoints.
   - **Storage (`storage.ts`)**: Atomic transaction coordinator managing user object stores alongside internal outbox and metadata stores.
   - **Tables (`table.ts`)**: Typed table wrappers providing local-first CRUD operations and reactive event subscriptions.
+  - **Indexes (`indexed-table.ts`)**: First-class declarative `Index` definitions and typed `IndexedTable` query and subscription views.
   - **Sync (`sync.ts`)**: Two-way WebSocket sync coordinator managing initial snapshot / diff downloads, outbox queue flushing, acknowledgments, and auto-reconnect backoff.
-
 - **Server Layer (`src/server/`)**:
   - Exported as `tetherdb/server`.
   - **Server (`server.ts`)**: Unified HTTP and WebSocket server (`TetherServer`, `startServer`) handling authentication endpoints, health/readiness/metrics, and real-time synchronization.
@@ -52,14 +51,12 @@ The codebase is organized into five decoupled layers with clear subpath exports:
   - **Locking (`lock.ts`)**: Exclusive server process lockfile management (`server.lock`) and stale PID crash recovery.
   - **Authentication (`crypto.ts`)**: Internal token signing, password hashing, and persistent keyfile management.
   - **Sync (`sync.ts`)**: Internal WebSocket connection hub and broadcast engine.
-
 - **CLI Layer (`src/cli/`)**:
   - Exported as `tetherdb/cli` (`runCli`).
   - **CLI Runner (`cli.ts`)**: Main dispatch entry point for command line execution.
   - **Argument Parsing (`args.ts`)**: Command line option parsing and validation.
   - **Backend Factory (`backend.ts`)**: Storage engine instantiation for memory, file, and sqlite targets.
   - **Commands (`commands/`)**: Modular subcommand handlers (`serve.ts`, `status.ts`, `maintenance.ts`, `apps.ts`, `tables.ts`, `users.ts`, `help.ts`).
-
 - **Vite Layer (`src/vite/`)**:
   - Exported as `tetherdb/vite`.
   - **Vite Plugin (`index.ts`)**: Zero-config local development integration (`tetherPlugin`) running embedded WebSocket sync and REST auth directly within Vite dev and preview servers.
@@ -79,6 +76,7 @@ The codebase is organized into five decoupled layers with clear subpath exports:
 
 - **Zero Test Side Effects**: Tests must be fully isolated and clean up resources (`afterEach`), including closing server listeners, active WebSockets, IndexedDB connections, and temporary filesystem directories.
 - **Fast Unit Tests**: Test core components (`TetherClient`, `Table`, `Storage`, `MemoryStorage`, `FileStorage`, `SqliteStorage`, `Sync`) in isolation.
+- **Describe & It Blocks**: `describe` blocks must never contain filenames or generic module names, only class, component, or function/method names. `it` blocks must concisely describe what is under test and the expected behavior, without repeating the class or function name.
 - **End-to-End Sync Tests**: End-to-end tests must verify real-time multi-client scenarios:
   - Initial snapshot delivery on fresh client connection.
   - Delta diff catch-up after offline reconnect.

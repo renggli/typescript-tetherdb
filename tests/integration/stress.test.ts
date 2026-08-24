@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import {
   DataMode,
+  SyncStatus,
   TetherClient,
   type TetherClientOptions,
-} from '../../src/client/client.js';
+} from '../../src/client/index.js';
 import type { Storage } from '../../src/client/storage.js';
-import { SyncStatus } from '../../src/client/sync.js';
 import { TetherServer } from '../../src/server/server.js';
 import { delay, waitForCondition } from '../helpers.js';
 import {
