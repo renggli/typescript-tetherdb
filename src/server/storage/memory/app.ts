@@ -29,8 +29,8 @@ export class AppMemoryStorage extends AppBaseStorage {
     this.storage = storage;
   }
 
-  async createTable(name: string): Promise<TableStorage> {
-    const safeName = validateTableName(name);
+  async createTable(tableName: string): Promise<TableStorage> {
+    const safeName = validateTableName(tableName);
     if (this.tables.has(safeName)) {
       throw new TetherServerError(
         TetherServerErrorCode.AlreadyExists,
@@ -42,8 +42,8 @@ export class AppMemoryStorage extends AppBaseStorage {
     return table;
   }
 
-  async getTable(name: string): Promise<TableStorage | undefined> {
-    const safeName = validateTableName(name);
+  async getTable(tableName: string): Promise<TableStorage | undefined> {
+    const safeName = validateTableName(tableName);
     return this.tables.get(safeName);
   }
 

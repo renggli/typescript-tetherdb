@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  Index,
+  IndexDirection,
   IndexRange,
   type Table,
   type TableChangeEvent,
@@ -382,43 +382,46 @@ describe('Table', () => {
     });
   });
 
-  describe('Index and IndexedTable', () => {
+  describe('Index', () => {
     it('should expose index configuration properties correctly', () => {
-      const byTitle = new Index<string>('byTitle', 'title', { unique: true });
-      const byTags = new Index<string>('byTags', 'tags', { multiEntry: true });
-      const byCatPriority = new Index<[string, number]>('byCatPriority', [
+      const customTable = storage.table<TestItem>('prop_tests');
+      const byTitle = customTable.index<string>('title', { unique: true });
+      const byTags = customTable.index<string>('tags', { multiEntry: true });
+      const byCatPriority = customTable.index<[string, number]>([
         'category',
         'priority',
       ]);
 
-      expect(byTitle.name).toBe('byTitle');
+      expect(byTitle.name).toBe('title');
       expect(byTitle.keyPath).toBe('title');
       expect(byTitle.unique).toBe(true);
       expect(byTitle.multiEntry).toBe(false);
+      expect(byTitle.table).toBe(customTable);
 
+      expect(byTags.name).toBe('tags');
       expect(byTags.multiEntry).toBe(true);
+      expect(byCatPriority.name).toBe('category,priority');
       expect(byCatPriority.keyPath).toEqual(['category', 'priority']);
     });
 
     it('should register indexes on table and expose them via table.indexes', () => {
-      const byTitle = new Index<string>('byTitle', 'title');
-      const byCount = new Index<number>('byCount', 'count');
-      const customTable = storage.table<TestItem>('custom', [byTitle, byCount]);
+      const customTable = storage.table<TestItem>('custom');
+      customTable.index<string>('title');
+      customTable.index<number>('count');
 
       expect(customTable.indexes).toHaveLength(2);
-      expect(customTable.indexes[0].name).toBe('byTitle');
-      expect(customTable.indexes[1].name).toBe('byCount');
+      expect(customTable.indexes[0].name).toBe('title');
+      expect(customTable.indexes[1].name).toBe('count');
     });
 
     it('should retrieve records using index.get and index.getWithMetadata', async () => {
-      const byTitle = new Index<string>('byTitle', 'title');
-      const itemsTable = storage.table<TestItem>('indexed_items', [byTitle]);
+      const itemsTable = storage.table<TestItem>('indexed_items');
+      const indexed = itemsTable.index<string>('title');
 
       await itemsTable.put('id-1', { title: 'Apple', count: 5 });
       await itemsTable.put('id-2', { title: 'Banana', count: 10 });
 
-      const indexed = itemsTable.index(byTitle);
-      expect(indexed.name).toBe('byTitle');
+      expect(indexed.name).toBe('title');
       expect(indexed.keyPath).toBe('title');
 
       const found = await indexed.get('Banana');
@@ -434,8 +437,8 @@ describe('Table', () => {
     });
 
     it('should retrieve all records using index.getAll and index.getAllWithMetadata', async () => {
-      const byCategory = new Index<string>('byCat', 'category');
-      const catTable = storage.table<TestItem>('categories', [byCategory]);
+      const catTable = storage.table<TestItem>('categories');
+      const indexed = catTable.index<string>('category');
 
       await catTable.putAll([
         { id: '1', data: { title: 'Book 1', category: 'books' } },
@@ -443,7 +446,6 @@ describe('Table', () => {
         { id: '3', data: { title: 'Book 2', category: 'books' } },
       ]);
 
-      const indexed = catTable.index(byCategory);
       const books = await indexed.getAll('books');
       expect(books).toHaveLength(2);
       expect(books.map((b) => b.title).sort()).toEqual(['Book 1', 'Book 2']);
@@ -457,8 +459,8 @@ describe('Table', () => {
     });
 
     it('should support pagination, limit, offset, and direction on index queries', async () => {
-      const byCount = new Index<number>('byCount', 'count');
-      const rankedTable = storage.table<TestItem>('ranked', [byCount]);
+      const rankedTable = storage.table<TestItem>('ranked');
+      const indexed = rankedTable.index<number>('count');
 
       await rankedTable.putAll([
         { id: '1', data: { title: 'A', count: 10 } },
@@ -467,8 +469,6 @@ describe('Table', () => {
         { id: '4', data: { title: 'D', count: 40 } },
         { id: '5', data: { title: 'E', count: 50 } },
       ]);
-
-      const indexed = rankedTable.index(byCount);
 
       // Limit only
       const limited = await indexed.getAll(undefined, { limit: 2 });
@@ -480,7 +480,7 @@ describe('Table', () => {
 
       // Reverse direction
       const reversed = await indexed.getAll(undefined, {
-        direction: 'prev',
+        direction: IndexDirection.Prev,
         limit: 3,
       });
       expect(reversed.map((i) => i.count)).toEqual([50, 40, 30]);
@@ -490,15 +490,15 @@ describe('Table', () => {
       expect(keys).toEqual([10, 20, 30]);
 
       const pkeys = await indexed.getPrimaryKeys(undefined, {
-        direction: 'prev',
+        direction: IndexDirection.Prev,
         limit: 2,
       });
       expect(pkeys).toEqual(['5', '4']);
     });
 
     it('should count records matching query or range', async () => {
-      const byCategory = new Index<string>('byCat', 'category');
-      const countTable = storage.table<TestItem>('counts', [byCategory]);
+      const countTable = storage.table<TestItem>('counts');
+      const indexed = countTable.index<string>('category');
 
       await countTable.putAll([
         { id: '1', data: { title: 'Item 1', category: 'electronics' } },
@@ -506,7 +506,6 @@ describe('Table', () => {
         { id: '3', data: { title: 'Item 3', category: 'electronics' } },
       ]);
 
-      const indexed = countTable.index(byCategory);
       expect(await indexed.count('electronics')).toBe(2);
       expect(await indexed.count('furniture')).toBe(1);
       expect(await indexed.count('clothing')).toBe(0);
@@ -514,8 +513,8 @@ describe('Table', () => {
     });
 
     it('should query ranges using IndexRange helpers', async () => {
-      const byTitle = new Index<string>('byTitle', 'title');
-      const rangeTable = storage.table<TestItem>('range_items', [byTitle]);
+      const rangeTable = storage.table<TestItem>('range_items');
+      const indexed = rangeTable.index<string>('title');
 
       await rangeTable.putAll([
         { id: '1', data: { title: 'Alice' } },
@@ -523,8 +522,6 @@ describe('Table', () => {
         { id: '3', data: { title: 'Bob' } },
         { id: '4', data: { title: 'Charlie' } },
       ]);
-
-      const indexed = rangeTable.index(byTitle);
 
       // Prefix match
       const alPrefix = await indexed.getAll(IndexRange.startsWith('Al'));
@@ -544,8 +541,8 @@ describe('Table', () => {
     });
 
     it('should support multi-entry indexes for array properties', async () => {
-      const byTags = new Index<string>('byTags', 'tags', { multiEntry: true });
-      const tagTable = storage.table<TestItem>('tagged_items', [byTags]);
+      const tagTable = storage.table<TestItem>('tagged_items');
+      const indexed = tagTable.index<string>('tags', { multiEntry: true });
 
       await tagTable.putAll([
         { id: '1', data: { title: 'Post 1', tags: ['news', 'tech'] } },
@@ -553,7 +550,6 @@ describe('Table', () => {
         { id: '3', data: { title: 'Post 3', tags: ['cooking'] } },
       ]);
 
-      const indexed = tagTable.index(byTags);
       const techPosts = await indexed.getAll('tech');
       expect(techPosts.map((p) => p.title).sort()).toEqual([
         'Post 1',
@@ -568,12 +564,10 @@ describe('Table', () => {
     });
 
     it('should support compound indexes', async () => {
-      const byCatPriority = new Index<[string, number]>('byCatPriority', [
+      const compTable = storage.table<TestItem>('compound_items');
+      const indexed = compTable.index<[string, number]>([
         'category',
         'priority',
-      ]);
-      const compTable = storage.table<TestItem>('compound_items', [
-        byCatPriority,
       ]);
 
       await compTable.putAll([
@@ -582,7 +576,6 @@ describe('Table', () => {
         { id: '3', data: { title: 'Task 3', category: 'home', priority: 1 } },
       ]);
 
-      const indexed = compTable.index(byCatPriority);
       const workP1 = await indexed.getAll(['work', 1]);
       expect(workP1.map((t) => t.title)).toEqual(['Task 1']);
 
@@ -598,11 +591,8 @@ describe('Table', () => {
         { id: '2', data: { title: 'Echo', count: 200 } },
       ]);
 
-      // Re-acquire table with new index declared
-      const byCount = new Index<number>('byCount', 'count');
-      const tableWithIndex = storage.table<TestItem>('dynamic_test', [byCount]);
-
-      const indexed = tableWithIndex.index(byCount);
+      // Acquire index on table
+      const indexed = dynamicTable.index<number>('count');
       const found = await indexed.get(200);
       expect(found).toEqual({ title: 'Echo', count: 200 });
 
@@ -610,35 +600,9 @@ describe('Table', () => {
       expect(all).toHaveLength(2);
     });
 
-    it('should dynamically update an index and remove deleted indexes', async () => {
-      const idx1 = new Index<string>('idx1', 'title');
-      const idx2 = new Index<number>('idx2', 'count');
-
-      const t1 = storage.table<TestItem>('migration_test', [idx1, idx2]);
-      await t1.put('1', { title: 'First', count: 1 });
-
-      // Query with idx1
-      expect(await t1.index(idx1).get('First')).toBeDefined();
-
-      // Now update schema to remove idx1 and keep idx2
-      const t2 = storage.table<TestItem>('migration_test', [idx2]);
-      await t2.put('2', { title: 'Second', count: 2 });
-
-      // idx2 still works
-      expect(await t2.index(idx2).get(2)).toEqual({
-        title: 'Second',
-        count: 2,
-      });
-
-      // Data is intact
-      expect(await t2.getAll()).toHaveLength(2);
-    });
-
-    it('should reactively subscribe to index queries via indexedTable.subscribe', async () => {
-      const byCategory = new Index<string>('byCat', 'category');
-      const reactiveTable = storage.table<TestItem>('reactive_test', [
-        byCategory,
-      ]);
+    it('should reactively subscribe to index queries via index.subscribe', async () => {
+      const reactiveTable = storage.table<TestItem>('reactive_test');
+      const indexed = reactiveTable.index<string>('category');
 
       await reactiveTable.put('1', {
         title: 'Initial Tech',
@@ -646,11 +610,9 @@ describe('Table', () => {
       });
 
       const snapshots: TestItem[][] = [];
-      const unsubscribe = reactiveTable
-        .index(byCategory)
-        .subscribe('tech', (items) => {
-          snapshots.push(items);
-        });
+      const unsubscribe = indexed.subscribe('tech', (items) => {
+        snapshots.push(items);
+      });
 
       // Wait for initial fetch
       await new Promise((r) => setTimeout(r, 2));

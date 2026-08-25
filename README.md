@@ -117,7 +117,7 @@ const allItems = await todos.getAll();
 Define type-safe indexes on tables declaratively and query data with full range, pagination, and reactive subscription support:
 
 ```typescript
-import { Index, IndexRange, TetherClient } from 'tetherdb/client';
+import { IndexDirection, IndexRange, TetherClient } from 'tetherdb/client';
 
 interface User {
   username: string;
@@ -130,35 +130,31 @@ interface User {
 
 const client = new TetherClient('my-app');
 
-// 1. Declare first-class typed indexes
-const byUsername = new Index<string>('byUsername', 'username', { unique: true });
-const byAge = new Index<number>('byAge', 'age');
-const byTags = new Index<string>('byTags', 'tags', { multiEntry: true });
-const byDeptAndRole = new Index<[string, string]>('byDeptRole', ['department', 'role']);
+// 1. Acquire table reference
+const users = client.table<User>('users');
 
-// 2. Register indexes when acquiring the table
-const users = client.table<User>('users', [
-  byUsername,
-  byAge,
-  byTags,
-  byDeptAndRole,
-]);
+// 2. Define or acquire indexes directly on the table
+const email = users.index<string>('email', { unique: true });
+const age = users.index<number>('age');
+const tags = users.index<string>('tags', { multiEntry: true });
+const deptRole = users.index<[string, string]>(['department', 'role']);
 
 // 3. Query via typed index accessors
-const user = await users.index(byUsername).get('alice');
-const adults = await users.index(byAge).getAll(IndexRange.lowerBound(18));
-const seniorsInEng = await users.index(byDeptAndRole).getAll(['eng', 'senior']);
-const tsDevs = await users.index(byTags).getAll('typescript');
+const user = await email.get('alice@example.com');
+const adults = await age.getAll(IndexRange.greaterThan(18, true));
+const twenties = await age.getAll(IndexRange.between(20, 29));
+const seniorsInEng = await deptRole.getAll(['eng', 'senior']);
+const devCount = await tags.count('typescript');
 
 // 4. Pagination & Sorting
-const topOldest = await users.index(byAge).getAll(undefined, {
-  direction: 'prev',
+const topOldest = await age.getAll(undefined, {
+  direction: IndexDirection.Prev,
   limit: 10,
   offset: 0,
 });
 
 // 5. Reactive index subscriptions
-const unsubscribe = users.index(byTags).subscribe('typescript', (matchingUsers) => {
+const unsubscribe = tags.subscribe('typescript', (matchingUsers) => {
   console.log('TypeScript developers updated:', matchingUsers);
 });
 ```
@@ -252,6 +248,20 @@ export function useTable<T>(table: Table<T>): T[] {
 
     return unsubscribe;
   }, [table]);
+
+  return items;
+}
+
+export function useIndex<T, K extends IDBValidKey = IDBValidKey>(
+  index: Index<T, K>,
+  query?: K | IDBKeyRange,
+  options?: IndexQueryOptions,
+): T[] {
+  const [items, setItems] = useState<T[]>([]);
+
+  useEffect(() => {
+    return index.subscribe(query, setItems, options);
+  }, [index, query, options?.limit, options?.offset, options?.direction]);
 
   return items;
 }

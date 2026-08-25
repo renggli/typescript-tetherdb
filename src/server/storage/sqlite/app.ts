@@ -71,8 +71,8 @@ export class AppSqliteStorage extends AppBaseStorage {
     return JSON.stringify(data);
   }
 
-  async createTable(name: string): Promise<TableStorage> {
-    const safeName = validateTableName(name);
+  async createTable(tableName: string): Promise<TableStorage> {
+    const safeName = validateTableName(tableName);
     const appsDb = this.storage.getAppsDb();
     const existing = appsDb.stmtFindTable.get(this.id, safeName);
     if (existing) {
@@ -85,8 +85,8 @@ export class AppSqliteStorage extends AppBaseStorage {
     return new TableSqliteStorage(safeName, this);
   }
 
-  async getTable(name: string): Promise<TableStorage | undefined> {
-    const safeName = validateTableName(name);
+  async getTable(tableName: string): Promise<TableStorage | undefined> {
+    const safeName = validateTableName(tableName);
     const appsDb = this.storage.getAppsDb();
     const row = appsDb.stmtFindTable.get(this.id, safeName);
     if (row) {

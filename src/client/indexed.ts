@@ -1,11 +1,13 @@
 import type { StoredRecord } from '../shared/types.js';
 import type { Storage } from './storage.js';
-import type { Table } from './table.js';
+import { getTableStorage, type Table } from './table.js';
 
 /**
  * Options for configuring an index on a table.
  */
 export interface IndexOptions {
+  /** Optional custom name for the index. Defaults to the string representation of `keyPath`. */
+  name?: string;
   /** Whether values in this index must be unique. Defaults to `false`. */
   unique?: boolean;
   /** For array properties, whether to index each array element separately. Defaults to `false`. */
@@ -15,7 +17,16 @@ export interface IndexOptions {
 /**
  * Direction for cursor iteration over an index.
  */
-export type IndexDirection = 'next' | 'nextunique' | 'prev' | 'prevunique';
+export enum IndexDirection {
+  /** Forward order iteration. */
+  Next = 'next',
+  /** Forward order iteration skipping duplicate index keys. */
+  NextUnique = 'nextunique',
+  /** Reverse order iteration. */
+  Prev = 'prev',
+  /** Reverse order iteration skipping duplicate index keys. */
+  PrevUnique = 'prevunique',
+}
 
 /**
  * Query options for pagination and direction when reading from an index.
@@ -62,6 +73,44 @@ export const IndexRange = {
   },
 
   /**
+   * Creates a key range between `lower` and `upper` with configurable inclusivity.
+   *
+   * @param lower - Lower bound key.
+   * @param upper - Upper bound key.
+   * @param inclusive - Whether both bounds are inclusive (defaults to `true`).
+   * @returns An `IDBKeyRange` instance.
+   */
+  between<K extends IDBValidKey>(
+    lower: K,
+    upper: K,
+    inclusive = true,
+  ): IDBKeyRange {
+    return IDBKeyRange.bound(lower, upper, !inclusive, !inclusive);
+  },
+
+  /**
+   * Creates a key range matching values greater than `lower`.
+   *
+   * @param lower - Lower bound key.
+   * @param inclusive - Whether the bound is inclusive (defaults to `false`).
+   * @returns An `IDBKeyRange` instance.
+   */
+  greaterThan<K extends IDBValidKey>(lower: K, inclusive = false): IDBKeyRange {
+    return IDBKeyRange.lowerBound(lower, !inclusive);
+  },
+
+  /**
+   * Creates a key range matching values less than `upper`.
+   *
+   * @param upper - Upper bound key.
+   * @param inclusive - Whether the bound is inclusive (defaults to `false`).
+   * @returns An `IDBKeyRange` instance.
+   */
+  lessThan<K extends IDBValidKey>(upper: K, inclusive = false): IDBKeyRange {
+    return IDBKeyRange.upperBound(upper, !inclusive);
+  },
+
+  /**
    * Creates a key range with a lower bound.
    *
    * @param lower - Lower bound key.
@@ -95,13 +144,17 @@ export const IndexRange = {
 };
 
 /**
- * First-class index definition representing a single index schema on a table.
+ * First-class index definition and query view on a Table.
  *
+ * @typeParam T - The data type of records stored in the parent table.
  * @typeParam K - The key type of the indexed property.
  */
-export class Index<K = IDBValidKey> {
+export class Index<T = unknown, K = IDBValidKey> {
   /** Phantom type marker preserving the index key type `K`. */
   declare readonly _keyType: K;
+  /** Phantom type marker preserving the table record type `T`. */
+  declare readonly _dataType: T;
+
   /** Unique name identifier for the index. */
   readonly name: string;
   /** Property path (or array of paths for compound indexes) to index. */
@@ -110,75 +163,27 @@ export class Index<K = IDBValidKey> {
   readonly unique: boolean;
   /** For array properties, whether to index each element separately. */
   readonly multiEntry: boolean;
+  /** The parent table this index is bound to. */
+  readonly table: Table<T>;
 
   /**
-   * Creates a new Index definition.
+   * Creates a new bound Index instance for a Table.
    *
-   * @param name - Index name identifier.
-   * @param keyPath - Field path (e.g. `'email'`, `'profile.age'`) or compound paths (e.g. `['status', 'createdAt']`).
-   * @param options - Additional index configuration options (unique, multiEntry).
+   * @param keyPath - Field path (e.g. `'email'`, `'profile.age'`) or compound paths (e.g. `['department', 'role']`).
+   * @param options - Additional index configuration options (unique, multiEntry, custom name).
+   * @param table - Parent Table instance.
    */
   constructor(
-    name: string,
     keyPath: string | string[],
-    options: IndexOptions = {},
+    options: IndexOptions,
+    table: Table<T>,
   ) {
-    this.name = name;
     this.keyPath = keyPath;
+    this.name =
+      options.name ?? (Array.isArray(keyPath) ? keyPath.join(',') : keyPath);
     this.unique = options.unique ?? false;
     this.multiEntry = options.multiEntry ?? false;
-  }
-}
-
-/**
- * Bound indexed view on a Table providing index-aware queries and reactive subscriptions.
- *
- * @typeParam T - The data type of records stored in the parent table.
- * @typeParam K - The key type of the index.
- */
-export class IndexedTable<T = unknown, K = IDBValidKey> {
-  /** The parent table reference. */
-  readonly table: Table<T>;
-  /** The underlying index definition. */
-  readonly index: Index<K>;
-
-  /**
-   * Creates a new IndexedTable view.
-   *
-   * @param table - Parent Table instance.
-   * @param index - Index definition.
-   */
-  constructor(table: Table<T>, index: Index<K>) {
     this.table = table;
-    this.index = index;
-  }
-
-  /**
-   * The name of the index.
-   */
-  get name(): string {
-    return this.index.name;
-  }
-
-  /**
-   * The key path of the index.
-   */
-  get keyPath(): string | string[] {
-    return this.index.keyPath;
-  }
-
-  /**
-   * Whether the index enforces unique constraints.
-   */
-  get unique(): boolean {
-    return this.index.unique;
-  }
-
-  /**
-   * Whether multi-entry is enabled for array values.
-   */
-  get multiEntry(): boolean {
-    return this.index.multiEntry;
   }
 
   /**
@@ -188,11 +193,7 @@ export class IndexedTable<T = unknown, K = IDBValidKey> {
    * @returns A promise resolving to the record data payload, or `undefined` if not found.
    */
   async get(query: K | IDBKeyRange): Promise<T | undefined> {
-    const record = await this.storage.getFromIndex<T>(
-      this.table.name,
-      this.index.name,
-      query as unknown as IDBValidKey | IDBKeyRange,
-    );
+    const record = await this.getWithMetadata(query);
     return record?.data;
   }
 
@@ -206,8 +207,8 @@ export class IndexedTable<T = unknown, K = IDBValidKey> {
     query: K | IDBKeyRange,
   ): Promise<StoredRecord<T> | undefined> {
     return this.storage.getFromIndex<T>(
-      this.table.name,
-      this.index.name,
+      this.tableName,
+      this.name,
       query as unknown as IDBValidKey | IDBKeyRange,
     );
   }
@@ -223,12 +224,7 @@ export class IndexedTable<T = unknown, K = IDBValidKey> {
     query?: K | IDBKeyRange,
     options?: IndexQueryOptions,
   ): Promise<T[]> {
-    const records = await this.storage.getAllFromIndex<T>(
-      this.table.name,
-      this.index.name,
-      query as unknown as IDBValidKey | IDBKeyRange | undefined,
-      options,
-    );
+    const records = await this.getAllWithMetadata(query, options);
     return records.map((r) => r.data);
   }
 
@@ -244,8 +240,8 @@ export class IndexedTable<T = unknown, K = IDBValidKey> {
     options?: IndexQueryOptions,
   ): Promise<StoredRecord<T>[]> {
     return this.storage.getAllFromIndex<T>(
-      this.table.name,
-      this.index.name,
+      this.tableName,
+      this.name,
       query as unknown as IDBValidKey | IDBKeyRange | undefined,
       options,
     );
@@ -259,8 +255,8 @@ export class IndexedTable<T = unknown, K = IDBValidKey> {
    */
   async count(query?: K | IDBKeyRange): Promise<number> {
     return this.storage.countFromIndex(
-      this.table.name,
-      this.index.name,
+      this.tableName,
+      this.name,
       query as unknown as IDBValidKey | IDBKeyRange | undefined,
     );
   }
@@ -277,8 +273,8 @@ export class IndexedTable<T = unknown, K = IDBValidKey> {
     options?: IndexQueryOptions,
   ): Promise<IDBValidKey[]> {
     return this.storage.getKeysFromIndex(
-      this.table.name,
-      this.index.name,
+      this.tableName,
+      this.name,
       query as unknown as IDBValidKey | IDBKeyRange | undefined,
       options,
     );
@@ -296,8 +292,8 @@ export class IndexedTable<T = unknown, K = IDBValidKey> {
     options?: IndexQueryOptions,
   ): Promise<string[]> {
     return this.storage.getPrimaryKeysFromIndex(
-      this.table.name,
-      this.index.name,
+      this.tableName,
+      this.name,
       query as unknown as IDBValidKey | IDBKeyRange | undefined,
       options,
     );
@@ -318,6 +314,7 @@ export class IndexedTable<T = unknown, K = IDBValidKey> {
     listener: (items: T[]) => void,
     options?: IndexQueryOptions,
   ): () => void {
+    const table = this.table;
     let isActive = true;
     let currentVersion = 0;
     const fetchAndNotify = () => {
@@ -334,7 +331,7 @@ export class IndexedTable<T = unknown, K = IDBValidKey> {
     };
 
     fetchAndNotify();
-    const unsubscribe = this.table.onChange.register(() => {
+    const unsubscribe = table.onChange.register(() => {
       fetchAndNotify();
     });
 
@@ -346,7 +343,11 @@ export class IndexedTable<T = unknown, K = IDBValidKey> {
 
   // -- Private Helpers ------------------------------------------------------
 
+  private get tableName(): string {
+    return this.table.name;
+  }
+
   private get storage(): Storage {
-    return this.table.storageInstance;
+    return getTableStorage(this.table);
   }
 }

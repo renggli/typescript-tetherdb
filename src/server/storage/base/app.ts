@@ -18,10 +18,10 @@ export abstract class AppBaseStorage implements AppStorage {
   }
 
   /** Creates/registers a new table within this application. */
-  abstract createTable(name: string): Promise<TableStorage>;
+  abstract createTable(tableName: string): Promise<TableStorage>;
 
   /** Retrieves a table handle if it exists. */
-  abstract getTable(name: string): Promise<TableStorage | undefined>;
+  abstract getTable(tableName: string): Promise<TableStorage | undefined>;
 
   /** Lists all registered tables in this application. */
   abstract getTables(): Promise<TableStorage[]>;

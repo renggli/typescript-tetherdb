@@ -22,12 +22,11 @@ export {
 } from './errors.js';
 export {
   Index,
-  type IndexDirection,
-  IndexedTable,
+  IndexDirection,
   type IndexOptions,
   type IndexQueryOptions,
   IndexRange,
-} from './indexed-table.js';
+} from './indexed.js';
 export {
   SyncStatus,
   type WebSocketConstructor,

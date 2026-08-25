@@ -3,7 +3,7 @@ import {
   OperationType,
   type StoredRecord,
 } from '../shared/types.js';
-import { Index, IndexedTable } from './indexed-table.js';
+import { Index, type IndexOptions } from './indexed.js';
 import { EventRegistry } from './shared/event.js';
 import type { LocalMutationItem, Storage } from './storage.js';
 
@@ -47,6 +47,13 @@ export type TableChangeListener<T = unknown> = (
 ) => void;
 
 /**
+ * Package-internal storage accessor for Table instances.
+ */
+export function getTableStorage<T>(table: Table<T>): Storage {
+  return (table as unknown as { storage: Storage }).storage;
+}
+
+/**
  * Typed table wrapper providing local-first CRUD operations and reactive event subscriptions
  * against an underlying IndexedDB table.
  * Operations are batched by default for maximum performance.
@@ -58,61 +65,54 @@ export class Table<T = unknown> {
   readonly onChange = new EventRegistry<TableChangeEvent<T>[]>();
   private tableName: string;
   private storage: Storage;
-  private indexMap = new Map<string, Index>();
 
   /**
    * Creates a new Table instance.
    *
    * @param tableName - Name of the table.
    * @param storage - Local storage coordinator.
-   * @param indexes - Optional array of Index definitions.
    */
-  constructor(tableName: string, storage: Storage, indexes: Index[] = []) {
+  constructor(tableName: string, storage: Storage) {
     this.tableName = tableName;
     this.storage = storage;
-    this.setIndexDefinitions(indexes);
-  }
-
-  /**
-   * Internal storage instance accessor.
-   */
-  get storageInstance(): Storage {
-    return this.storage;
   }
 
   /**
    * The list of Index definitions registered on this table.
    */
   get indexes(): ReadonlyArray<Index> {
-    return Array.from(this.indexMap.values());
+    return this.storage.tableIndexes(this.tableName);
   }
 
   /**
-   * Obtains an IndexedTable view bound to the specified Index.
+   * Obtains or registers a bound Index view on this table by property path and options.
    *
    * @typeParam K - The key type of the index.
-   * @param indexOrName - An Index instance or the string name of an index.
-   * @returns An IndexedTable instance for querying and subscribing.
+   * @param keyPath - Field path (e.g. `'email'`, `'profile.age'`) or compound paths (e.g. `['department', 'role']`).
+   * @param options - Additional index configuration options (unique, multiEntry, custom name).
+   * @returns An Index instance bound to this table for querying and subscribing.
    */
-  index<K = IDBValidKey>(indexOrName: Index<K> | string): IndexedTable<T, K> {
-    const idx =
-      typeof indexOrName === 'string'
-        ? (this.indexMap.get(indexOrName) ??
-          new Index<K>(indexOrName, indexOrName))
-        : indexOrName;
-    return new IndexedTable<T, K>(this, idx as Index<K>);
-  }
-
-  /**
-   * Updates registered index definitions on this table instance.
-   *
-   * @param indexes - New array of Index definitions.
-   */
-  setIndexDefinitions(indexes: Index[]): void {
-    this.indexMap.clear();
-    for (const idx of indexes) {
-      this.indexMap.set(idx.name, idx);
+  index<K = IDBValidKey>(
+    keyPath: string | string[],
+    options: IndexOptions = {},
+  ): Index<T, K> {
+    const indexName =
+      options.name ?? (Array.isArray(keyPath) ? keyPath.join(',') : keyPath);
+    let indexDef = this.storage.tableIndex(this.tableName, indexName);
+    if (
+      !indexDef ||
+      options.unique !== undefined ||
+      options.multiEntry !== undefined ||
+      options.name !== undefined
+    ) {
+      indexDef = new Index(
+        keyPath,
+        options,
+        this as unknown as Table<unknown>,
+      ) as Index;
+      this.storage.registerIndex(this.tableName, indexDef);
     }
+    return indexDef as unknown as Index<T, K>;
   }
 
   /**

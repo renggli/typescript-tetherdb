@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   Index,
-  IndexedTable,
+  IndexDirection,
   IndexRange,
   type Table,
 } from '../../src/client/index.js';
@@ -16,39 +16,35 @@ interface UserProfile {
   role?: string;
   salary?: number;
   metadata?: {
-    country?: string;
-    city?: string;
+    country: string;
+    city: string;
   };
 }
 
-describe('Index & IndexedTable', () => {
+describe('Index', () => {
   let storage: Storage;
   let table: Table<UserProfile>;
 
-  const byUsername = new Index<string>('byUsername', 'username', {
-    unique: true,
-  });
-  const byEmail = new Index<string>('byEmail', 'email', { unique: true });
-  const byAge = new Index<number>('byAge', 'age');
-  const byTags = new Index<string>('byTags', 'tags', { multiEntry: true });
-  const byDeptAndRole = new Index<[string, string]>('byDeptRole', [
-    'department',
-    'role',
-  ]);
-  const byCountry = new Index<string>('byCountry', 'metadata.country');
+  let byUsername: Index<UserProfile, string>;
+  let byEmail: Index<UserProfile, string>;
+  let byAge: Index<UserProfile, number>;
+  let byTags: Index<UserProfile, string>;
+  let byDeptAndRole: Index<UserProfile, [string, string]>;
+  let byCountry: Index<UserProfile, string>;
+  let byCity: Index<UserProfile, string>;
 
   beforeEach(async () => {
     storage = new Storage(
       `test-idx-${Math.random().toString(36).substring(2, 8)}`,
     );
-    table = storage.table<UserProfile>('users', [
-      byUsername,
-      byEmail,
-      byAge,
-      byTags,
-      byDeptAndRole,
-      byCountry,
-    ]);
+    table = storage.table<UserProfile>('users');
+    byUsername = table.index<string>('username', { unique: true });
+    byEmail = table.index<string>('email', { unique: true });
+    byAge = table.index<number>('age');
+    byTags = table.index<string>('tags', { multiEntry: true });
+    byDeptAndRole = table.index<[string, string]>(['department', 'role']);
+    byCountry = table.index<string>('metadata.country');
+    byCity = table.index<string>('metadata.city');
   });
 
   afterEach(async () => {
@@ -56,40 +52,80 @@ describe('Index & IndexedTable', () => {
   });
 
   describe('Index Definition & Properties', () => {
-    it('should initialize with provided and default values', () => {
-      const idxSimple = new Index('simple', 'title');
-      expect(idxSimple.name).toBe('simple');
+    it('should initialize with keyPath and infer default name', () => {
+      const idxSimple = table.index('title');
+      expect(idxSimple.name).toBe('title');
       expect(idxSimple.keyPath).toBe('title');
       expect(idxSimple.unique).toBe(false);
       expect(idxSimple.multiEntry).toBe(false);
+      expect(idxSimple.table).toBe(table);
 
-      const idxComplex = new Index('complex', ['a', 'b'], {
+      const idxComplex = table.index(['a', 'b'], {
         unique: true,
         multiEntry: false,
       });
-      expect(idxComplex.name).toBe('complex');
+      expect(idxComplex.name).toBe('a,b');
       expect(idxComplex.keyPath).toEqual(['a', 'b']);
       expect(idxComplex.unique).toBe(true);
       expect(idxComplex.multiEntry).toBe(false);
+
+      const idxCustomName = table.index('email_field', {
+        name: 'customEmail',
+        unique: true,
+      });
+      expect(idxCustomName.name).toBe('customEmail');
+      expect(idxCustomName.keyPath).toBe('email_field');
+      expect(idxCustomName.unique).toBe(true);
     });
 
-    it('should expose properties on IndexedTable', () => {
-      const view = table.index(byUsername);
-      expect(view).toBeInstanceOf(IndexedTable);
-      expect(view.table).toBe(table);
-      expect(view.index).toBe(byUsername);
-      expect(view.name).toBe('byUsername');
-      expect(view.keyPath).toBe('username');
-      expect(view.unique).toBe(true);
-      expect(view.multiEntry).toBe(false);
+    it('should expose properties on Index', () => {
+      expect(byUsername).toBeInstanceOf(Index);
+      expect(byUsername.table).toBe(table);
+      expect(byUsername.name).toBe('username');
+      expect(byUsername.keyPath).toBe('username');
+      expect(byUsername.unique).toBe(true);
+      expect(byUsername.multiEntry).toBe(false);
     });
 
-    it('should fall back to constructing an Index instance if string is passed to table.index()', () => {
-      const view = table.index('unknownIndex');
-      expect(view.name).toBe('unknownIndex');
-      expect(view.keyPath).toBe('unknownIndex');
-      expect(view.unique).toBe(false);
-      expect(view.multiEntry).toBe(false);
+    it('should register and return bound Index by keyPath and options', async () => {
+      const emailIndex = table.index<string>('email', { unique: true });
+      expect(emailIndex).toBeInstanceOf(Index);
+      expect(emailIndex.name).toBe('email');
+      expect(emailIndex.unique).toBe(true);
+      expect(emailIndex.table).toBe(table);
+
+      // Subsequent call retrieves existing index
+      const sameIndex = table.index<string>('email');
+      expect(sameIndex.unique).toBe(true);
+    });
+
+    it('should support fluent user pattern: table -> index -> query/subscribe', async () => {
+      const freshTable = storage.table<UserProfile>('fluent_users');
+      const email = freshTable.index<string>('email', { unique: true });
+      const age = freshTable.index<number>('age');
+
+      await freshTable.put('u1', {
+        username: 'alice',
+        email: 'alice@example.com',
+        age: 21,
+      });
+
+      const adult = await age.get(21);
+      expect(adult?.username).toBe('alice');
+
+      const allAdults = await age.getAll(IndexRange.greaterThan(18));
+      expect(allAdults).toHaveLength(1);
+
+      const count = await age.count();
+      expect(count).toBe(1);
+
+      const listener = vi.fn();
+      const unsubscribe = email.subscribe('alice@example.com', listener);
+      await new Promise((r) => setTimeout(r, 5));
+      expect(listener).toHaveBeenCalledWith([
+        expect.objectContaining({ username: 'alice' }),
+      ]);
+      unsubscribe();
     });
   });
 
@@ -124,25 +160,23 @@ describe('Index & IndexedTable', () => {
     });
 
     it('should retrieve record payload by exact key', async () => {
-      const alice = await table.index(byUsername).get('alice');
+      const alice = await byUsername.get('alice');
       expect(alice).toBeDefined();
       expect(alice?.email).toBe('alice@example.com');
       expect(alice?.age).toBe(28);
 
-      const bob = await table.index(byEmail).get('bob@example.com');
+      const bob = await byEmail.get('bob@example.com');
       expect(bob).toBeDefined();
       expect(bob?.username).toBe('bob');
     });
 
     it('should return undefined when key is not found', async () => {
-      const result = await table.index(byUsername).get('charlie');
+      const result = await byUsername.get('charlie');
       expect(result).toBeUndefined();
     });
 
     it('should retrieve stored record with metadata', async () => {
-      const record = await table
-        .index(byEmail)
-        .getWithMetadata('alice@example.com');
+      const record = await byEmail.getWithMetadata('alice@example.com');
       expect(record).toBeDefined();
       expect(record?.id).toBe('u1');
       expect(record?.version).toBe(1);
@@ -152,9 +186,13 @@ describe('Index & IndexedTable', () => {
     });
 
     it('should query nested properties', async () => {
-      const swissUser = await table.index(byCountry).get('CH');
+      const swissUser = await byCountry.get('CH');
       expect(swissUser).toBeDefined();
       expect(swissUser?.username).toBe('alice');
+
+      const zurichUser = await byCity.get('Zurich');
+      expect(zurichUser).toBeDefined();
+      expect(zurichUser?.username).toBe('alice');
     });
   });
 
@@ -220,38 +258,34 @@ describe('Index & IndexedTable', () => {
     });
 
     it('should return all records when query is omitted', async () => {
-      const all = await table.index(byAge).getAll();
+      const all = await byAge.getAll();
       expect(all).toHaveLength(5);
       expect(all.map((u) => u.age)).toEqual([20, 25, 30, 35, 40]);
     });
 
     it('should return empty array when query does not match any record', async () => {
-      const matched = await table.index(byAge).getAll(99);
+      const matched = await byAge.getAll(99);
       expect(matched).toEqual([]);
     });
 
     it('should retrieve records matching compound index key', async () => {
-      const seniors = await table
-        .index(byDeptAndRole)
-        .getAll(['eng', 'senior']);
+      const seniors = await byDeptAndRole.getAll(['eng', 'senior']);
       expect(seniors).toHaveLength(2);
       expect(seniors.map((u) => u.username).sort()).toEqual(['b', 'd']);
     });
 
     it('should retrieve records matching multi-entry array index', async () => {
-      const tsDevs = await table.index(byTags).getAll('ts');
+      const tsDevs = await byTags.getAll('ts');
       expect(tsDevs).toHaveLength(3);
       expect(tsDevs.map((u) => u.username).sort()).toEqual(['a', 'b', 'd']);
 
-      const crmUsers = await table.index(byTags).getAll('crm');
+      const crmUsers = await byTags.getAll('crm');
       expect(crmUsers).toHaveLength(2);
       expect(crmUsers.map((u) => u.username).sort()).toEqual(['c', 'e']);
     });
 
     it('should retrieve records with storage metadata', async () => {
-      const records = await table
-        .index(byDeptAndRole)
-        .getAllWithMetadata(['eng', 'senior']);
+      const records = await byDeptAndRole.getAllWithMetadata(['eng', 'senior']);
       expect(records).toHaveLength(2);
       expect(records.map((r) => r.id).sort()).toEqual(['2', '4']);
       expect(records.every((r) => r.version === 1)).toBe(true);
@@ -277,60 +311,72 @@ describe('Index & IndexedTable', () => {
 
     it('should construct and query IndexRange.only', async () => {
       const range = IndexRange.only(25);
-      const results = await table.index(byAge).getAll(range);
+      const results = await byAge.getAll(range);
       expect(results).toHaveLength(1);
       expect(results[0].username).toBe('albert');
     });
 
     it('should query bounded ranges inclusive and exclusive', async () => {
       // Inclusive [25, 35]
-      const inclusive = await table
-        .index(byAge)
-        .getAll(IndexRange.bound(25, 35, false, false));
+      const inclusive = await byAge.getAll(
+        IndexRange.bound(25, 35, false, false),
+      );
       expect(inclusive.map((u) => u.age)).toEqual([25, 30, 35]);
 
       // Exclusive (25, 35)
-      const exclusive = await table
-        .index(byAge)
-        .getAll(IndexRange.bound(25, 35, true, true));
+      const exclusive = await byAge.getAll(
+        IndexRange.bound(25, 35, true, true),
+      );
       expect(exclusive.map((u) => u.age)).toEqual([30]);
     });
 
     it('should query lower and upper bounds', async () => {
-      const lower = await table
-        .index(byAge)
-        .getAll(IndexRange.lowerBound(35, false));
+      const lower = await byAge.getAll(IndexRange.lowerBound(35, false));
       expect(lower.map((u) => u.age)).toEqual([35, 40]);
 
-      const lowerOpen = await table
-        .index(byAge)
-        .getAll(IndexRange.lowerBound(35, true));
+      const lowerOpen = await byAge.getAll(IndexRange.lowerBound(35, true));
       expect(lowerOpen.map((u) => u.age)).toEqual([40]);
 
-      const upper = await table
-        .index(byAge)
-        .getAll(IndexRange.upperBound(25, false));
+      const upper = await byAge.getAll(IndexRange.upperBound(25, false));
       expect(upper.map((u) => u.age)).toEqual([20, 25]);
     });
 
     it('should query string prefixes with IndexRange.startsWith', async () => {
-      const alPrefix = await table
-        .index(byUsername)
-        .getAll(IndexRange.startsWith('al'));
+      const alPrefix = await byUsername.getAll(IndexRange.startsWith('al'));
       expect(alPrefix.map((u) => u.username).sort()).toEqual([
         'albert',
         'alice',
       ]);
 
-      const dPrefix = await table
-        .index(byUsername)
-        .getAll(IndexRange.startsWith('d'));
+      const dPrefix = await byUsername.getAll(IndexRange.startsWith('d'));
       expect(dPrefix.map((u) => u.username)).toEqual(['david']);
 
-      const zPrefix = await table
-        .index(byUsername)
-        .getAll(IndexRange.startsWith('z'));
+      const zPrefix = await byUsername.getAll(IndexRange.startsWith('z'));
       expect(zPrefix).toEqual([]);
+    });
+
+    it('should query ranges using between, greaterThan, and lessThan helper methods', async () => {
+      // between inclusive
+      const betweenInc = await byAge.getAll(IndexRange.between(25, 35, true));
+      expect(betweenInc.map((u) => u.age)).toEqual([25, 30, 35]);
+
+      // between exclusive
+      const betweenExc = await byAge.getAll(IndexRange.between(25, 35, false));
+      expect(betweenExc.map((u) => u.age)).toEqual([30]);
+
+      // greaterThan inclusive vs exclusive
+      const gtInc = await byAge.getAll(IndexRange.greaterThan(35, true));
+      expect(gtInc.map((u) => u.age)).toEqual([35, 40]);
+
+      const gtExc = await byAge.getAll(IndexRange.greaterThan(35, false));
+      expect(gtExc.map((u) => u.age)).toEqual([40]);
+
+      // lessThan inclusive vs exclusive
+      const ltInc = await byAge.getAll(IndexRange.lessThan(25, true));
+      expect(ltInc.map((u) => u.age)).toEqual([20, 25]);
+
+      const ltExc = await byAge.getAll(IndexRange.lessThan(25, false));
+      expect(ltExc.map((u) => u.age)).toEqual([20]);
     });
   });
 
@@ -351,65 +397,68 @@ describe('Index & IndexedTable', () => {
     });
 
     it('should limit result count', async () => {
-      const results = await table.index(byAge).getAll(undefined, { limit: 3 });
+      const results = await byAge.getAll(undefined, { limit: 3 });
       expect(results.map((u) => u.age)).toEqual([10, 20, 30]);
     });
 
     it('should apply offset and limit together for pagination', async () => {
-      const page1 = await table
-        .index(byAge)
-        .getAll(undefined, { offset: 0, limit: 3 });
+      const page1 = await byAge.getAll(undefined, { offset: 0, limit: 3 });
       expect(page1.map((u) => u.age)).toEqual([10, 20, 30]);
 
-      const page2 = await table
-        .index(byAge)
-        .getAll(undefined, { offset: 3, limit: 3 });
+      const page2 = await byAge.getAll(undefined, { offset: 3, limit: 3 });
       expect(page2.map((u) => u.age)).toEqual([40, 50, 60]);
 
-      const page4 = await table
-        .index(byAge)
-        .getAll(undefined, { offset: 9, limit: 3 });
+      const page4 = await byAge.getAll(undefined, { offset: 9, limit: 3 });
       expect(page4.map((u) => u.age)).toEqual([100]);
 
-      const outOfBounds = await table
-        .index(byAge)
-        .getAll(undefined, { offset: 20, limit: 5 });
+      const outOfBounds = await byAge.getAll(undefined, {
+        offset: 20,
+        limit: 5,
+      });
       expect(outOfBounds).toEqual([]);
     });
 
-    it('should iterate in reverse with direction: "prev"', async () => {
-      const reversed = await table
-        .index(byAge)
-        .getAll(undefined, { direction: 'prev', limit: 4 });
+    it('should expose IndexDirection enum values properly', () => {
+      expect(IndexDirection.Next).toBe('next');
+      expect(IndexDirection.NextUnique).toBe('nextunique');
+      expect(IndexDirection.Prev).toBe('prev');
+      expect(IndexDirection.PrevUnique).toBe('prevunique');
+    });
+
+    it('should iterate in reverse with IndexDirection.Prev', async () => {
+      const reversed = await byAge.getAll(undefined, {
+        direction: IndexDirection.Prev,
+        limit: 4,
+      });
       expect(reversed.map((u) => u.age)).toEqual([100, 90, 80, 70]);
 
-      const reversedPaged = await table
-        .index(byAge)
-        .getAll(undefined, { direction: 'prev', offset: 2, limit: 3 });
+      const reversedPaged = await byAge.getAll(undefined, {
+        direction: IndexDirection.Prev,
+        offset: 2,
+        limit: 3,
+      });
       expect(reversedPaged.map((u) => u.age)).toEqual([80, 70, 60]);
     });
 
     it('should retrieve index keys with pagination and direction', async () => {
-      const keys = await table
-        .index(byAge)
-        .getKeys(undefined, { offset: 1, limit: 3 });
+      const keys = await byAge.getKeys(undefined, { offset: 1, limit: 3 });
       expect(keys).toEqual([20, 30, 40]);
 
-      const reversedKeys = await table
-        .index(byAge)
-        .getKeys(undefined, { direction: 'prev', limit: 3 });
+      const reversedKeys = await byAge.getKeys(undefined, {
+        direction: IndexDirection.Prev,
+        limit: 3,
+      });
       expect(reversedKeys).toEqual([100, 90, 80]);
     });
 
     it('should retrieve primary record IDs with pagination and direction', async () => {
-      const pkeys = await table
-        .index(byAge)
-        .getPrimaryKeys(undefined, { limit: 3 });
+      const pkeys = await byAge.getPrimaryKeys(undefined, { limit: 3 });
       expect(pkeys).toEqual(['id-1', 'id-2', 'id-3']);
 
-      const reversedPKeys = await table
-        .index(byAge)
-        .getPrimaryKeys(undefined, { direction: 'prev', limit: 3 });
+      const reversedPKeys = await byAge.getPrimaryKeys(undefined, {
+        direction: IndexDirection.Prev,
+        limit: 3,
+      });
       expect(reversedPKeys).toEqual(['id-10', 'id-9', 'id-8']);
     });
   });
@@ -438,17 +487,17 @@ describe('Index & IndexedTable', () => {
     });
 
     it('should return total count when query is omitted', async () => {
-      const total = await table.index(byAge).count();
+      const total = await byAge.count();
       expect(total).toBe(3);
     });
 
     it('should count exact matches', async () => {
-      const count = await table.index(byAge).count(25);
+      const count = await byAge.count(25);
       expect(count).toBe(1);
     });
 
     it('should count range matches', async () => {
-      const count = await table.index(byAge).count(IndexRange.lowerBound(25));
+      const count = await byAge.count(IndexRange.lowerBound(25));
       expect(count).toBe(2);
     });
   });
@@ -463,7 +512,7 @@ describe('Index & IndexedTable', () => {
       });
 
       const snapshots: UserProfile[][] = [];
-      const unsubscribe = table.index(byTags).subscribe('eng', (items) => {
+      const unsubscribe = byTags.subscribe('eng', (items) => {
         snapshots.push(items);
       });
 
@@ -519,10 +568,10 @@ describe('Index & IndexedTable', () => {
       const devSnapshots: UserProfile[][] = [];
       const opsSnapshots: UserProfile[][] = [];
 
-      const unsubDev = table.index(byTags).subscribe('dev', (items) => {
+      const unsubDev = byTags.subscribe('dev', (items) => {
         devSnapshots.push(items);
       });
-      const unsubOps = table.index(byTags).subscribe('ops', (items) => {
+      const unsubOps = byTags.subscribe('ops', (items) => {
         opsSnapshots.push(items);
       });
 
@@ -550,6 +599,103 @@ describe('Index & IndexedTable', () => {
 
       unsubDev();
       unsubOps();
+    });
+
+    it('should update subscribers when table is cleared via table.clear()', async () => {
+      await table.putAll([
+        {
+          id: '1',
+          data: { username: 'u1', email: 'u1@x.com', age: 20, tags: ['ts'] },
+        },
+        {
+          id: '2',
+          data: { username: 'u2', email: 'u2@x.com', age: 25, tags: ['ts'] },
+        },
+      ]);
+
+      const snapshots: UserProfile[][] = [];
+      const unsubscribe = byTags.subscribe('ts', (items) => {
+        snapshots.push(items);
+      });
+
+      await new Promise((r) => setTimeout(r, 2));
+      expect(snapshots[snapshots.length - 1]).toHaveLength(2);
+
+      await table.clear();
+      await new Promise((r) => setTimeout(r, 2));
+
+      expect(snapshots[snapshots.length - 1]).toHaveLength(0);
+      unsubscribe();
+    });
+
+    it('should not invoke listener if unsubscribed before initial async fetch completes', async () => {
+      await table.put('1', { username: 'alice', email: 'a@x.com', age: 20 });
+
+      const listener = vi.fn();
+      const unsubscribe = byUsername.subscribe('alice', listener);
+      unsubscribe();
+
+      await new Promise((r) => setTimeout(r, 5));
+      expect(listener).not.toHaveBeenCalled();
+    });
+
+    it('should silently handle error if getAll fails inside subscribe without calling listener', async () => {
+      const getAllSpy = vi
+        .spyOn(byUsername, 'getAll')
+        .mockRejectedValue(new Error('Index storage failure'));
+
+      const listener = vi.fn();
+      const unsub = byUsername.subscribe('alice', listener);
+
+      await new Promise((r) => setTimeout(r, 5));
+      expect(listener).not.toHaveBeenCalled();
+      unsub();
+      getAllSpy.mockRestore();
+    });
+  });
+
+  describe('Edge Cases & Metadata Retrieval Options', () => {
+    it('should retrieve records with metadata using pagination and reverse direction', async () => {
+      await table.putAll([
+        { id: '1', data: { username: 'a', email: 'a@x.com', age: 10 } },
+        { id: '2', data: { username: 'b', email: 'b@x.com', age: 20 } },
+        { id: '3', data: { username: 'c', email: 'c@x.com', age: 30 } },
+        { id: '4', data: { username: 'd', email: 'd@x.com', age: 40 } },
+      ]);
+
+      const pagedMeta = await byAge.getAllWithMetadata(undefined, {
+        direction: IndexDirection.Prev,
+        offset: 1,
+        limit: 2,
+      });
+      expect(pagedMeta).toHaveLength(2);
+      expect(pagedMeta[0].id).toBe('3');
+      expect(pagedMeta[0].data.age).toBe(30);
+      expect(pagedMeta[1].id).toBe('2');
+      expect(pagedMeta[1].data.age).toBe(20);
+    });
+
+    it('should handle lookups on completely empty tables', async () => {
+      const single = await byUsername.get('missing');
+      expect(single).toBeUndefined();
+
+      const meta = await byUsername.getWithMetadata('missing');
+      expect(meta).toBeUndefined();
+
+      const all = await byUsername.getAll();
+      expect(all).toEqual([]);
+
+      const allMeta = await byUsername.getAllWithMetadata();
+      expect(allMeta).toEqual([]);
+
+      const keys = await byUsername.getKeys();
+      expect(keys).toEqual([]);
+
+      const pkeys = await byUsername.getPrimaryKeys();
+      expect(pkeys).toEqual([]);
+
+      const count = await byUsername.count();
+      expect(count).toBe(0);
     });
   });
 });

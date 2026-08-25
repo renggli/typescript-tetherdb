@@ -5,7 +5,7 @@ This document outlines the core architecture, developer rules, TypeScript conven
 > [!IMPORTANT]
 > **Backward Compatibility Policy**:
 >
-> - **Must Preserve**: Maintain backward compatibility for all **public APIs** (exported types, classes, methods, and events) and **persistent storage layers** (IndexedDB client schemas, SQLite/File server persistence formats, and database schemas). When evolving schemas or public APIs, ensure seamless migration paths and compatibility.
+> - **Must Preserve**: Maintain backward compatibility for all **public APIs** (exported types, classes, methods, and events) and **persistent storage layers** (IndexedDB client schemas, SQLite/File server persistence formats, and database schemas) since the last public release (tagged with git). When evolving schemas or public APIs, ensure seamless migration paths and compatibility.
 > - **No Backward Compatibility Needed**: Internal APIs, private helpers, transient in-memory data structures, internal wire message details, and test harnesses do not require backward compatibility. Directly refactor and clean internal code without accumulating cruft or legacy shims.
 
 ## 🚨 Developer Rules & Quality Checks
@@ -17,7 +17,7 @@ This document outlines the core architecture, developer rules, TypeScript conven
 - **Reusability & Duplication**: Reuse logic, types, and utility functions across modules. Refactor shared functions into utility modules (`src/shared/`). Do not duplicate code.
 - **Nullish Coalescing (`??`) for Fallbacks**: Always use the nullish coalescing operator (`??`) when assigning default fallback values for `null` or `undefined`. Reserve `||` exclusively for boolean logical condition checks.
 - **No Loose Object Records (`Record<string, any>`)**: Prefer explicit typed interfaces, `Map` / `ReadonlyMap`, and `Set` / `ReadonlySet` over generic object records (`Record<string, string>` or `Record<string, any>`).
-- **Backward Compatibility Boundaries**: Preserve backward compatibility for public APIs and persistent storage layers. For internal code, transient data structures, and test suites, refactor directly without retaining legacy aliases or wrapper cruft.
+- **Backward Compatibility Boundaries**: Preserve backward compatibility for public APIs and persistent storage layers against the last public release (tagged with git). For internal code, transient data structures, and test suites, refactor directly without retaining legacy aliases or wrapper cruft.
 - **Immediate Cleanup**: Clean up after yourself immediately. Delete unused methods, properties, variables, types, and imports during refactoring.
 - **Indentation**: Always use 2 spaces for indentation across all code and configuration files.
 - **Quality Loop**: Before submitting or after making any code change, execute the validation loop:
@@ -42,7 +42,7 @@ The codebase is organized into five decoupled layers with clear subpath exports:
   - **Auth (`auth.ts`)**: Internal authentication coordinator managing sessions, metadata, and auth HTTP endpoints.
   - **Storage (`storage.ts`)**: Atomic transaction coordinator managing user object stores alongside internal outbox and metadata stores.
   - **Tables (`table.ts`)**: Typed table wrappers providing local-first CRUD operations and reactive event subscriptions.
-  - **Indexes (`indexed-table.ts`)**: First-class declarative `Index` definitions and typed `IndexedTable` query and subscription views.
+  - **Indexes (`indexed.ts`)**: First-class declarative `Index` definitions, query methods, and reactive subscription views.
   - **Sync (`sync.ts`)**: Two-way WebSocket sync coordinator managing initial snapshot / diff downloads, outbox queue flushing, acknowledgments, and auto-reconnect backoff.
 - **Server Layer (`src/server/`)**:
   - Exported as `tetherdb/server`.

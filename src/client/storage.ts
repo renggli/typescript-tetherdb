@@ -5,7 +5,7 @@ import {
   type SnapshotRecord,
   type StoredRecord,
 } from '../shared/types.js';
-import type { Index, IndexQueryOptions } from './indexed-table.js';
+import type { Index, IndexQueryOptions } from './indexed.js';
 import { EventRegistry } from './shared/event.js';
 import { randomUUID } from './shared/id.js';
 import { Table } from './table.js';
@@ -51,8 +51,8 @@ export class Storage {
   readonly onLocalChange = new EventRegistry<void>();
   private databasePromise: Promise<IDBDatabase> | null = null;
   private schemaMutex: Promise<void> = Promise.resolve();
-  private tables: Map<string, Table<unknown>> = new Map();
-  private tableIndexes: Map<string, Index[]> = new Map();
+  private registeredTables: Map<string, Table<unknown>> = new Map();
+  private registeredIndexes: Map<string, Index[]> = new Map();
 
   /**
    * Creates a new Storage instance.
@@ -69,26 +69,55 @@ export class Storage {
    * Tables are created dynamically on-demand if not already declared.
    *
    * @typeParam T - Data payload model type for records in this table.
-   * @param name - The table name.
-   * @param indexes - Optional array of Index definitions to register on this table.
+   * @param tableName - The table name.
    * @returns A typed `Table<T>` instance.
    */
-  table<T = unknown>(name: string, indexes?: Index[]): Table<T> {
-    if (indexes !== undefined) {
-      this.tableIndexes.set(name, indexes);
-    }
-    let table = this.tables.get(name);
+  table<T = unknown>(tableName: string): Table<T> {
+    let table = this.registeredTables.get(tableName);
     if (!table) {
-      table = new Table(
-        name,
-        this,
-        this.tableIndexes.get(name) ?? [],
-      ) as Table<unknown>;
-      this.tables.set(name, table);
-    } else if (indexes !== undefined) {
-      table.setIndexDefinitions(indexes);
+      table = new Table(tableName, this) as Table<unknown>;
+      this.registeredTables.set(tableName, table);
     }
     return table as unknown as Table<T>;
+  }
+
+  /**
+   * Returns registered index definitions for the given table.
+   *
+   * @param tableName - Table name.
+   */
+  tableIndexes(tableName: string): ReadonlyArray<Index> {
+    return this.registeredIndexes.get(tableName) ?? [];
+  }
+
+  /**
+   * Returns a specific registered index definition by name.
+   *
+   * @param tableName - Table name.
+   * @param indexName - Index name.
+   */
+  tableIndex(tableName: string, indexName: string): Index | undefined {
+    return this.registeredIndexes
+      .get(tableName)
+      ?.find((i) => i.name === indexName);
+  }
+
+  /**
+   * Registers an index definition on a table.
+   *
+   * @param tableName - Table name.
+   * @param index - Index definition.
+   */
+  registerIndex(tableName: string, index: Index): void {
+    const list = this.registeredIndexes.get(tableName) ?? [];
+    const indexIdx = list.findIndex((i) => i.name === index.name);
+    if (indexIdx >= 0) {
+      const updated = [...list];
+      updated[indexIdx] = index;
+      this.registeredIndexes.set(tableName, updated);
+    } else {
+      this.registeredIndexes.set(tableName, [...list, index]);
+    }
   }
 
   /**
@@ -124,13 +153,13 @@ export class Storage {
 
       if (!needsUpgrade) {
         const checkTables = Array.from(
-          new Set([...tableNames, ...this.tableIndexes.keys()]),
+          new Set([...tableNames, ...this.registeredIndexes.keys()]),
         ).filter((name) => database.objectStoreNames.contains(name));
 
         if (checkTables.length > 0) {
           const tx = database.transaction(checkTables, 'readonly');
           for (const name of checkTables) {
-            const desired = this.tableIndexes.get(name) ?? [];
+            const desired = this.registeredIndexes.get(name) ?? [];
             const store = tx.objectStore(name);
             if (storeNeedsIndexMigration(store, desired)) {
               needsUpgrade = true;
@@ -164,11 +193,7 @@ export class Storage {
    */
   async ensureTable(tableName: string, indexes?: Index[]): Promise<void> {
     if (indexes !== undefined) {
-      this.tableIndexes.set(tableName, indexes);
-      const table = this.tables.get(tableName);
-      if (table) {
-        table.setIndexDefinitions(indexes);
-      }
+      this.registeredIndexes.set(tableName, indexes);
     }
     await this.ensureTables([tableName]);
   }
@@ -394,18 +419,15 @@ export class Storage {
    * @param query - The key value or `IDBKeyRange` to search for.
    * @returns Stored record or `undefined` if not found.
    */
+
   async getFromIndex<T = unknown>(
     tableName: string,
     indexName: string,
     query: IDBValidKey | IDBKeyRange,
   ): Promise<StoredRecord<T> | undefined> {
-    await this.ensureTable(tableName);
-    return this.withDatabase(async (database) => {
-      const tx = database.transaction(tableName, 'readonly');
-      const store = tx.objectStore(tableName);
-      const index = store.index(indexName);
-      return promisifyRequest<StoredRecord<T> | undefined>(index.get(query));
-    });
+    return this.withIndex(tableName, indexName, (index) =>
+      promisifyRequest<StoredRecord<T> | undefined>(index.get(query)),
+    );
   }
 
   /**
@@ -424,58 +446,20 @@ export class Storage {
     query?: IDBValidKey | IDBKeyRange,
     options?: IndexQueryOptions,
   ): Promise<StoredRecord<T>[]> {
-    await this.ensureTable(tableName);
-    return this.withDatabase(async (database) => {
-      const tx = database.transaction(tableName, 'readonly');
-      const store = tx.objectStore(tableName);
-      const index = store.index(indexName);
-
-      const limit = options?.limit;
-      const offset = options?.offset ?? 0;
-      const direction = options?.direction;
-
-      if (!direction && !offset && limit === undefined) {
-        const req = query !== undefined ? index.getAll(query) : index.getAll();
-        const records = await promisifyRequest<StoredRecord<T>[]>(req);
-        return records ?? [];
-      }
-
-      if (!direction && !offset && limit !== undefined) {
+    return this.withIndex(tableName, indexName, async (index) => {
+      if (!options?.direction && !options?.offset) {
         const req =
           query !== undefined
-            ? index.getAll(query, limit)
-            : index.getAll(null, limit);
+            ? index.getAll(query, options?.limit)
+            : index.getAll(null, options?.limit);
         const records = await promisifyRequest<StoredRecord<T>[]>(req);
         return records ?? [];
       }
-
-      return new Promise<StoredRecord<T>[]>((resolve, reject) => {
-        const results: StoredRecord<T>[] = [];
-        let advanced = false;
-        const req = direction
-          ? index.openCursor(query, direction)
-          : index.openCursor(query);
-
-        req.onsuccess = () => {
-          const cursor = req.result;
-          if (!cursor) {
-            resolve(results);
-            return;
-          }
-          if (offset > 0 && !advanced) {
-            advanced = true;
-            cursor.advance(offset);
-            return;
-          }
-          results.push(cursor.value as StoredRecord<T>);
-          if (limit !== undefined && results.length >= limit) {
-            resolve(results);
-            return;
-          }
-          cursor.continue();
-        };
-        req.onerror = () => reject(req.error);
-      });
+      return collectFromCursor(
+        index.openCursor(query, options.direction),
+        (c) => c.value as StoredRecord<T>,
+        options,
+      );
     });
   }
 
@@ -492,14 +476,11 @@ export class Storage {
     indexName: string,
     query?: IDBValidKey | IDBKeyRange,
   ): Promise<number> {
-    await this.ensureTable(tableName);
-    return this.withDatabase(async (database) => {
-      const tx = database.transaction(tableName, 'readonly');
-      const store = tx.objectStore(tableName);
-      const index = store.index(indexName);
-      const req = query !== undefined ? index.count(query) : index.count();
-      return promisifyRequest<number>(req);
-    });
+    return this.withIndex(tableName, indexName, (index) =>
+      promisifyRequest<number>(
+        query !== undefined ? index.count(query) : index.count(),
+      ),
+    );
   }
 
   /**
@@ -517,44 +498,13 @@ export class Storage {
     query?: IDBValidKey | IDBKeyRange,
     options?: IndexQueryOptions,
   ): Promise<IDBValidKey[]> {
-    await this.ensureTable(tableName);
-    return this.withDatabase(async (database) => {
-      const tx = database.transaction(tableName, 'readonly');
-      const store = tx.objectStore(tableName);
-      const index = store.index(indexName);
-
-      const limit = options?.limit;
-      const offset = options?.offset ?? 0;
-      const direction = options?.direction;
-
-      return new Promise<IDBValidKey[]>((resolve, reject) => {
-        const results: IDBValidKey[] = [];
-        let advanced = false;
-        const req = direction
-          ? index.openKeyCursor(query, direction)
-          : index.openKeyCursor(query);
-
-        req.onsuccess = () => {
-          const cursor = req.result;
-          if (!cursor) {
-            resolve(results);
-            return;
-          }
-          if (offset > 0 && !advanced) {
-            advanced = true;
-            cursor.advance(offset);
-            return;
-          }
-          results.push(cursor.key);
-          if (limit !== undefined && results.length >= limit) {
-            resolve(results);
-            return;
-          }
-          cursor.continue();
-        };
-        req.onerror = () => reject(req.error);
-      });
-    });
+    return this.withIndex(tableName, indexName, (index) =>
+      collectFromCursor(
+        index.openKeyCursor(query, options?.direction),
+        (c) => c.key,
+        options,
+      ),
+    );
   }
 
   /**
@@ -572,59 +522,20 @@ export class Storage {
     query?: IDBValidKey | IDBKeyRange,
     options?: IndexQueryOptions,
   ): Promise<string[]> {
-    await this.ensureTable(tableName);
-    return this.withDatabase(async (database) => {
-      const tx = database.transaction(tableName, 'readonly');
-      const store = tx.objectStore(tableName);
-      const index = store.index(indexName);
-
-      const limit = options?.limit;
-      const offset = options?.offset ?? 0;
-      const direction = options?.direction;
-
-      if (!direction && !offset && limit === undefined) {
-        const req =
-          query !== undefined ? index.getAllKeys(query) : index.getAllKeys();
-        const keys = await promisifyRequest<IDBValidKey[]>(req);
-        return (keys as string[]) ?? [];
-      }
-
-      if (!direction && !offset && limit !== undefined) {
+    return this.withIndex(tableName, indexName, async (index) => {
+      if (!options?.direction && !options?.offset) {
         const req =
           query !== undefined
-            ? index.getAllKeys(query, limit)
-            : index.getAllKeys(null, limit);
+            ? index.getAllKeys(query, options?.limit)
+            : index.getAllKeys(null, options?.limit);
         const keys = await promisifyRequest<IDBValidKey[]>(req);
         return (keys as string[]) ?? [];
       }
-
-      return new Promise<string[]>((resolve, reject) => {
-        const results: string[] = [];
-        let advanced = false;
-        const req = direction
-          ? index.openKeyCursor(query, direction)
-          : index.openKeyCursor(query);
-
-        req.onsuccess = () => {
-          const cursor = req.result;
-          if (!cursor) {
-            resolve(results);
-            return;
-          }
-          if (offset > 0 && !advanced) {
-            advanced = true;
-            cursor.advance(offset);
-            return;
-          }
-          results.push(String(cursor.primaryKey));
-          if (limit !== undefined && results.length >= limit) {
-            resolve(results);
-            return;
-          }
-          cursor.continue();
-        };
-        req.onerror = () => reject(req.error);
-      });
+      return collectFromCursor(
+        index.openKeyCursor(query, options.direction),
+        (c) => String(c.primaryKey),
+        options,
+      );
     });
   }
 
@@ -714,6 +625,18 @@ export class Storage {
     return this.schemaMutex.then(async () => {
       const db = await this.getDatabase();
       return fn(db);
+    });
+  }
+
+  private async withIndex<R>(
+    tableName: string,
+    indexName: string,
+    fn: (index: IDBIndex) => Promise<R>,
+  ): Promise<R> {
+    await this.ensureTable(tableName);
+    return this.withDatabase(async (database) => {
+      const tx = database.transaction(tableName, 'readonly');
+      return fn(tx.objectStore(tableName).index(indexName));
     });
   }
 
@@ -825,7 +748,7 @@ export class Storage {
           }
         }
 
-        for (const [tableName, desiredIndexes] of this.tableIndexes) {
+        for (const [tableName, desiredIndexes] of this.registeredIndexes) {
           if (!database.objectStoreNames.contains(tableName)) {
             database.createObjectStore(tableName, { keyPath: 'id' });
           }
@@ -838,20 +761,8 @@ export class Storage {
           for (let i = store.indexNames.length - 1; i >= 0; i--) {
             const indexName = store.indexNames[i];
             const desired = desiredMap.get(indexName);
-            if (!desired) {
+            if (!desired || !isIndexEqual(store.index(indexName), desired)) {
               store.deleteIndex(indexName);
-            } else {
-              const existing = store.index(indexName);
-              if (
-                !isKeyPathEqual(
-                  existing.keyPath,
-                  normalizeKeyPath(desired.keyPath),
-                ) ||
-                existing.unique !== desired.unique ||
-                existing.multiEntry !== desired.multiEntry
-              ) {
-                store.deleteIndex(indexName);
-              }
             }
           }
 
@@ -891,6 +802,13 @@ export class Storage {
 
 const OUTBOX_STORE = '__tether_outbox';
 const META_STORE = '__tether_meta';
+const RESERVED_METADATA_FIELDS = new Set([
+  'id',
+  'timestamp',
+  'version',
+  'clientId',
+  'deleted',
+]);
 
 function promisifyRequest<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -908,30 +826,24 @@ function promisifyTransaction(tx: IDBTransaction): Promise<void> {
   });
 }
 
+function isIndexEqual(existing: IDBIndex, desired: Index): boolean {
+  return (
+    isKeyPathEqual(existing.keyPath, normalizeKeyPath(desired.keyPath)) &&
+    existing.unique === desired.unique &&
+    existing.multiEntry === desired.multiEntry
+  );
+}
+
 function storeNeedsIndexMigration(
   store: IDBObjectStore,
   desiredIndexes: Index[],
 ): boolean {
+  if (store.indexNames.length !== desiredIndexes.length) return true;
   const desiredMap = new Map(desiredIndexes.map((idx) => [idx.name, idx]));
-
   for (let i = 0; i < store.indexNames.length; i++) {
     const name = store.indexNames[i];
     const desired = desiredMap.get(name);
-    if (!desired) {
-      return true;
-    }
-    const existing = store.index(name);
-    if (
-      !isKeyPathEqual(existing.keyPath, normalizeKeyPath(desired.keyPath)) ||
-      existing.unique !== desired.unique ||
-      existing.multiEntry !== desired.multiEntry
-    ) {
-      return true;
-    }
-  }
-
-  for (const desired of desiredIndexes) {
-    if (!store.indexNames.contains(desired.name)) {
+    if (!desired || !isIndexEqual(store.index(name), desired)) {
       return true;
     }
   }
@@ -953,15 +865,39 @@ function normalizeKeyPath(path: string | string[]): string | string[] {
 }
 
 function normalizeSingleKeyPath(path: string): string {
-  if (
-    path === 'id' ||
-    path === 'timestamp' ||
-    path === 'version' ||
-    path === 'clientId' ||
-    path === 'deleted' ||
-    path.startsWith('data.')
-  ) {
-    return path;
-  }
-  return `data.${path}`;
+  return RESERVED_METADATA_FIELDS.has(path) || path.startsWith('data.')
+    ? path
+    : `data.${path}`;
+}
+
+function collectFromCursor<R, C extends IDBCursor>(
+  req: IDBRequest<C | null>,
+  extract: (cursor: C) => R,
+  options?: IndexQueryOptions,
+): Promise<R[]> {
+  const limit = options?.limit;
+  const offset = options?.offset ?? 0;
+  return new Promise<R[]>((resolve, reject) => {
+    const results: R[] = [];
+    let advanced = false;
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (!cursor) {
+        resolve(results);
+        return;
+      }
+      if (offset > 0 && !advanced) {
+        advanced = true;
+        cursor.advance(offset);
+        return;
+      }
+      results.push(extract(cursor));
+      if (limit !== undefined && results.length >= limit) {
+        resolve(results);
+        return;
+      }
+      cursor.continue();
+    };
+    req.onerror = () => reject(req.error);
+  });
 }

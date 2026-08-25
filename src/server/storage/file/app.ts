@@ -183,9 +183,9 @@ export class AppFileStorage extends AppBaseStorage {
     );
   }
 
-  async createTable(name: string): Promise<TableStorage> {
+  async createTable(tableName: string): Promise<TableStorage> {
     assertNoActiveServerLock(this.storage.baseDir);
-    const safeName = validateTableName(name);
+    const safeName = validateTableName(tableName);
     const manifest = await this.readManifest();
     if (manifest.tables.includes(safeName)) {
       throw new TetherServerError(
@@ -199,8 +199,8 @@ export class AppFileStorage extends AppBaseStorage {
     return new TableFileStorage(safeName, this);
   }
 
-  async getTable(name: string): Promise<TableStorage | undefined> {
-    const safeName = validateTableName(name);
+  async getTable(tableName: string): Promise<TableStorage | undefined> {
+    const safeName = validateTableName(tableName);
     const manifest = await this.readManifest();
     if (manifest.tables.includes(safeName)) {
       return new TableFileStorage(safeName, this);
