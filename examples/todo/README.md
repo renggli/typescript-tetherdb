@@ -2,7 +2,7 @@
 
 A real-time, local-first Todo application demonstrating two-way synchronization and offline persistence with TetherDB.
 
-The application reads and writes directly to browser IndexedDB for zero-latency local operations, while a background WebSocket connection streams mutations across active clients and devices in real time. When offline, changes queue locally in IndexedDB and reconcile automatically with the server upon reconnection using deterministic Last-Write-Wins conflict resolution.
+The application reads and writes directly to browser IndexedDB for zero-latency local operations, using TetherDB indexes (`todosTable.index('status')`) for fast status filtering, active counts, and primary key lookups, while a background WebSocket connection streams mutations across active clients and devices in real time. When offline, changes queue locally in IndexedDB and reconcile automatically with the server upon reconnection using deterministic Last-Write-Wins conflict resolution.
 
 ## Zero-Config Vite Integration
 

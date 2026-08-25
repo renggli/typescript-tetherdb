@@ -1,5 +1,7 @@
 import {
   AuthStatus,
+  type Index,
+  type StoredRecord,
   SyncStatus,
   type Table,
   type TableChangeEvent,
@@ -7,11 +9,19 @@ import {
 } from 'tetherdb/client';
 
 /**
+ * Status of a todo item.
+ */
+enum TodoStatus {
+  Active = 'active',
+  Completed = 'completed',
+}
+
+/**
  * Todo record data model.
  */
 interface TodoItem {
   title: string;
-  completed: boolean;
+  status: TodoStatus;
 }
 
 /**
@@ -45,6 +55,8 @@ const db = new TetherClient('todo-example', {
   url: window.location.origin,
 });
 const todosTable: Table<TodoItem> = db.table<TodoItem>('todos');
+const statusIndex: Index<TodoItem, TodoStatus> =
+  todosTable.index<TodoStatus>('status');
 
 let currentFilter: FilterMode = FilterMode.All;
 let authMode: AuthMode = AuthMode.Login;
@@ -160,36 +172,38 @@ function updateSyncStatusUI(status: SyncStatus): void {
  * Reads records from IndexedDB and renders the list.
  */
 async function renderTodos(): Promise<void> {
-  const allTodos = await todosTable.getAllWithMetadata();
-  allTodos.sort((a, b) => a.timestamp - b.timestamp);
+  let todos: StoredRecord<TodoItem>[];
+  if (currentFilter === FilterMode.Active) {
+    todos = await statusIndex.getAllWithMetadata(TodoStatus.Active);
+  } else if (currentFilter === FilterMode.Completed) {
+    todos = await statusIndex.getAllWithMetadata(TodoStatus.Completed);
+  } else {
+    todos = await todosTable.getAllWithMetadata();
+  }
+  todos.sort((a, b) => a.timestamp - b.timestamp);
 
-  const filtered = allTodos.filter((item) => {
-    if (currentFilter === FilterMode.Active) return !item.data.completed;
-    if (currentFilter === FilterMode.Completed) return item.data.completed;
-    return true;
-  });
-
-  const activeCount = allTodos.filter((t) => !t.data.completed).length;
+  const activeCount = await statusIndex.count(TodoStatus.Active);
   itemCountEl.textContent = `${activeCount} ${activeCount === 1 ? 'item' : 'items'} left`;
 
   todoList.innerHTML = '';
 
-  if (filtered.length === 0) {
+  if (todos.length === 0) {
     emptyState.style.display = 'block';
     emptyState.textContent =
-      allTodos.length === 0
+      currentFilter === FilterMode.All
         ? 'No todos yet. Add one above!'
         : `No ${currentFilter} todos found.`;
   } else {
     emptyState.style.display = 'none';
 
     const MAX_RENDER_ITEMS = 100;
-    const itemsToRender = filtered.slice(0, MAX_RENDER_ITEMS);
-    const remainingCount = filtered.length - MAX_RENDER_ITEMS;
+    const itemsToRender = todos.slice(0, MAX_RENDER_ITEMS);
+    const remainingCount = todos.length - MAX_RENDER_ITEMS;
 
     for (const item of itemsToRender) {
+      const isCompleted = item.data.status === TodoStatus.Completed;
       const li = document.createElement('li');
-      li.className = `todo-item ${item.data.completed ? 'completed' : ''}`;
+      li.className = `todo-item ${isCompleted ? 'completed' : ''}`;
       li.dataset.id = item.id;
 
       const todoLeft = document.createElement('div');
@@ -198,11 +212,11 @@ async function renderTodos(): Promise<void> {
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
       checkbox.className = 'todo-checkbox';
-      checkbox.checked = item.data.completed;
+      checkbox.checked = isCompleted;
       checkbox.addEventListener('change', async () => {
         await todosTable.put(item.id, {
           title: item.data.title,
-          completed: checkbox.checked,
+          status: checkbox.checked ? TodoStatus.Completed : TodoStatus.Active,
         });
       });
 
@@ -250,7 +264,7 @@ newTodoForm.addEventListener('submit', async (e: SubmitEvent) => {
   const id = `todo_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   await todosTable.put(id, {
     title,
-    completed: false,
+    status: TodoStatus.Active,
   });
 
   newTodoInput.value = '';
@@ -268,12 +282,9 @@ filterBtns.forEach((btn: HTMLButtonElement) => {
   });
 });
 
-// Clear completed todos using batched deleteAll
+// Clear completed todos using batched deleteAll via statusIndex primary keys
 clearCompletedBtn.addEventListener('click', async () => {
-  const allTodos = await todosTable.getAllWithMetadata();
-  const completedIds = allTodos
-    .filter((item) => item.data.completed)
-    .map((item) => item.id);
+  const completedIds = await statusIndex.getPrimaryKeys(TodoStatus.Completed);
 
   if (completedIds.length > 0) {
     await todosTable.deleteAll(completedIds);
