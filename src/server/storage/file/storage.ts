@@ -291,23 +291,11 @@ export class FileStorage extends BaseStorage {
         await writeFileAtomic(metaFile, JSON.stringify(meta, null, 2));
 
         // Auto-pruning with hysteresis buffer (+50)
-        try {
-          const content = await fs.readFile(syncFile, 'utf-8');
-          const lines = content
-            .split('\n')
-            .map((l) => l.trim())
-            .filter(Boolean);
-          if (lines.length > defaultMaxHistory + 50) {
-            const pruneCount = lines.length - defaultMaxHistory;
-            const keptLines = lines.slice(pruneCount);
-            const firstKept = JSON.parse(keptLines[0]) as { seq: number };
-            await writeFileAtomic(syncFile, `${keptLines.join('\n')}\n`);
-            meta.minSeq = firstKept.seq;
-            await writeFileAtomic(metaFile, JSON.stringify(meta, null, 2));
-          }
-        } catch {
-          // Ignore
-        }
+        await this.prunePartitionSyncFile(
+          partitionDir,
+          defaultMaxHistory,
+          defaultMaxHistory + 50,
+        );
       }
 
       return { applied: appliedList, newSeq: maxNewSeq };
@@ -433,36 +421,8 @@ export class FileStorage extends BaseStorage {
     for (const partitionId of partitions) {
       await this.withLock(partitionId, async () => {
         const partitionDir = this.resolvePartitionDir(partitionId);
-        const syncFile = path.join(partitionDir, 'sync.jsonl');
-        const metaFile = path.join(partitionDir, 'meta.json');
-
-        try {
-          const content = await fs.readFile(syncFile, 'utf-8');
-          const lines = content
-            .split('\n')
-            .map((l) => l.trim())
-            .filter(Boolean);
-          if (lines.length > keep) {
-            const pruneCount = lines.length - keep;
-            const keptLines = lines.slice(pruneCount);
-            const firstKept = JSON.parse(keptLines[0]) as { seq: number };
-            await writeFileAtomic(syncFile, `${keptLines.join('\n')}\n`);
-            try {
-              const metaContent = await fs.readFile(metaFile, 'utf-8');
-              const meta = JSON.parse(metaContent) as {
-                currentSeq: number;
-                minSeq: number;
-              };
-              meta.minSeq = firstKept.seq;
-              await writeFileAtomic(metaFile, JSON.stringify(meta, null, 2));
-            } catch {
-              // Ignore
-            }
-            totalPruned += pruneCount;
-          }
-        } catch {
-          // Ignore
-        }
+        const pruned = await this.prunePartitionSyncFile(partitionDir, keep);
+        totalPruned += pruned;
       });
     }
 
@@ -511,6 +471,46 @@ export class FileStorage extends BaseStorage {
         this.locks.delete(key);
       }
     }
+  }
+
+  private async prunePartitionSyncFile(
+    partitionDir: string,
+    maxHistory: number,
+    threshold = maxHistory,
+  ): Promise<number> {
+    try {
+      const syncFile = path.join(partitionDir, 'sync.jsonl');
+      const metaFile = path.join(partitionDir, 'meta.json');
+
+      const content = await fs.readFile(syncFile, 'utf-8');
+      const lines = content
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
+
+      if (lines.length > threshold) {
+        const pruneCount = lines.length - maxHistory;
+        const keptLines = lines.slice(pruneCount);
+        const firstKept = JSON.parse(keptLines[0]) as { seq: number };
+        await writeFileAtomic(syncFile, `${keptLines.join('\n')}\n`);
+
+        try {
+          const metaContent = await fs.readFile(metaFile, 'utf-8');
+          const meta = JSON.parse(metaContent) as {
+            currentSeq: number;
+            minSeq: number;
+          };
+          meta.minSeq = firstKept.seq;
+          await writeFileAtomic(metaFile, JSON.stringify(meta, null, 2));
+        } catch {
+          // Ignore
+        }
+        return pruneCount;
+      }
+    } catch {
+      // Ignore
+    }
+    return 0;
   }
 
   private async readUsersFile(): Promise<Map<string, FileUserData>> {
