@@ -69,24 +69,21 @@ export class TetherClient {
    * Initializes a new TetherClient instance and wires reactive auth & sync coordination.
    *
    * @param nameOrOptions - Optional database name string or TetherClientOptions configuration object.
-   * @param maybeOptions - Optional TetherClientOptions configuration object when name is supplied as first parameter.
+   * @param options - Optional configuration options when name is supplied as first parameter.
    */
   constructor(
     nameOrOptions?: string | TetherClientOptions,
-    maybeOptions?: TetherClientOptions,
+    options?: TetherClientOptions,
   ) {
-    const name =
+    const opts =
       typeof nameOrOptions === 'string'
-        ? nameOrOptions
-        : (nameOrOptions?.name ?? 'tetherdb');
-    const options =
-      typeof nameOrOptions === 'object' && nameOrOptions !== null
-        ? nameOrOptions
-        : (maybeOptions ?? {});
+        ? { ...options, name: nameOrOptions }
+        : (nameOrOptions ?? {});
+    const name = opts.name ?? 'tetherdb';
 
     this.storage = this.createStorage(name);
-    this.auth = this.createAuth(options, this.storage);
-    this.sync = this.createSync(options, this.storage);
+    this.auth = this.createAuth(opts, this.storage);
+    this.sync = this.createSync(opts, this.storage);
 
     // Push local changes reactively.
     this.storage.onLocalChange.register(() => {

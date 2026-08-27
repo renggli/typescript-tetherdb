@@ -123,14 +123,16 @@ export interface StartServerOptions extends TetherServerOptions {
  * Result returned when launching a server using `startServer()`.
  */
 export interface RunningServer {
-  /** Bound host address. */
-  host: string;
-  /** Bound port number. */
-  port: number;
   /** The TetherServer instance. */
   server: TetherServer;
   /** The running Node.js HTTP server instance. */
   httpServer: http.Server;
+  /** Bound host address. */
+  host: string;
+  /** Bound port number. */
+  port: number;
+  /** Root URL for the running server (e.g. 'http://127.0.0.1:8080'). */
+  url: string;
   /** Closes both HTTP and WebSocket server cleanly. */
   close(): Promise<void>;
 }
@@ -153,12 +155,15 @@ export async function startServer(
   const httpServer = await server.listen(port, host);
   const addr = httpServer.address();
   const boundPort = typeof addr === 'object' && addr ? addr.port : port;
+  const hostLabel = host === '0.0.0.0' ? '127.0.0.1' : host;
+  const url = `http://${hostLabel}:${boundPort}${server.basePath}`;
 
   return {
     server,
     httpServer,
     port: boundPort,
     host,
+    url,
     close: async () => {
       await server.close();
     },
@@ -488,6 +493,20 @@ export class TetherServer {
         },
       );
     };
+  }
+
+  /**
+   * Handles incoming HTTP requests for authentication, discovery, and administration endpoints.
+   *
+   * @param req - Incoming HTTP request.
+   * @param res - Server HTTP response.
+   * @returns `true` if the request was handled by TetherDB; `false` if the path did not match.
+   */
+  async handleRequest(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<boolean> {
+    return this.handleHttpRequest(req, res);
   }
 
   /**

@@ -44,9 +44,9 @@ describe('TetherClient', () => {
 
   describe('Constructor & State', () => {
     it('should initialize with default states and empty credentials', () => {
-      const client = new TetherClient(
-        `init-test-${Math.random().toString(36).substring(2, 8)}`,
-      );
+      const client = new TetherClient({
+        name: `init-test-${Math.random().toString(36).substring(2, 8)}`,
+      });
       clientsToClose.push(client);
 
       expect(client.authStatus).toBe(AuthStatus.SignedOut);
@@ -65,16 +65,14 @@ describe('TetherClient', () => {
 
   describe('URL & Host Resolution', () => {
     it('should resolve Node.js host, port, basePath, and webSocketPath correctly', () => {
-      const client = new TetherClient(
-        `url-test-${Math.random().toString(36).substring(2, 8)}`,
-        {
-          host: 'api.example.com',
-          port: 8443,
-          secure: true,
-          basePath: '/api/v1/',
-          webSocketPath: '/custom/sync',
-        },
-      );
+      const client = new TetherClient({
+        name: `url-test-${Math.random().toString(36).substring(2, 8)}`,
+        host: 'api.example.com',
+        port: 8443,
+        secure: true,
+        basePath: '/api/v1/',
+        webSocketPath: '/custom/sync',
+      });
       clientsToClose.push(client);
 
       // @ts-expect-error - inspecting internal auth
@@ -84,13 +82,11 @@ describe('TetherClient', () => {
     });
 
     it('should handle host already containing port without duplicating port', () => {
-      const client = new TetherClient(
-        `port-test-${Math.random().toString(36).substring(2, 8)}`,
-        {
-          host: '127.0.0.1:9090',
-          port: 9090,
-        },
-      );
+      const client = new TetherClient({
+        name: `port-test-${Math.random().toString(36).substring(2, 8)}`,
+        host: '127.0.0.1:9090',
+        port: 9090,
+      });
       clientsToClose.push(client);
 
       // @ts-expect-error - inspecting internal auth
@@ -98,9 +94,9 @@ describe('TetherClient', () => {
     });
 
     it('should handle default local-only client when host is omitted', () => {
-      const client = new TetherClient(
-        `local-only-${Math.random().toString(36).substring(2, 8)}`,
-      );
+      const client = new TetherClient({
+        name: `local-only-${Math.random().toString(36).substring(2, 8)}`,
+      });
       clientsToClose.push(client);
 
       // @ts-expect-error - inspecting internal auth
@@ -110,7 +106,8 @@ describe('TetherClient', () => {
     });
 
     it('should parse http url and derive base and websocket URLs', () => {
-      const client = new TetherClient('test-http-url', {
+      const client = new TetherClient({
+        name: 'test-http-url',
         url: 'http://localhost:8080',
       });
       clientsToClose.push(client);
@@ -122,7 +119,8 @@ describe('TetherClient', () => {
     });
 
     it('should parse https url with path and derive companion websocket URL', () => {
-      const client = new TetherClient('test-https-url', {
+      const client = new TetherClient({
+        name: 'test-https-url',
         url: 'https://api.example.com/db',
       });
       clientsToClose.push(client);
@@ -134,7 +132,8 @@ describe('TetherClient', () => {
     });
 
     it('should parse wss url and derive companion http base URL', () => {
-      const client = new TetherClient('test-wss-url', {
+      const client = new TetherClient({
+        name: 'test-wss-url',
         url: 'wss://api.example.com:8443/custom/sync',
       });
       clientsToClose.push(client);
@@ -146,7 +145,8 @@ describe('TetherClient', () => {
     });
 
     it('should parse ws url with path and derive sync endpoint', () => {
-      const client = new TetherClient('test-ws-url', {
+      const client = new TetherClient({
+        name: 'test-ws-url',
         url: 'ws://127.0.0.1:5000/api',
       });
       clientsToClose.push(client);
@@ -158,7 +158,8 @@ describe('TetherClient', () => {
     });
 
     it('should allow explicit options to override properties extracted from url', () => {
-      const client = new TetherClient('test-override-url', {
+      const client = new TetherClient({
+        name: 'test-override-url',
         url: 'http://localhost:8080/api',
         port: 9000,
         basePath: '/v2',
@@ -172,7 +173,8 @@ describe('TetherClient', () => {
     });
 
     it('should handle pushDebounceMs configuration option', () => {
-      const client = new TetherClient('test-push-debounce', {
+      const client = new TetherClient({
+        name: 'test-push-debounce',
         pushDebounceMs: 50,
       });
       clientsToClose.push(client);
@@ -182,7 +184,8 @@ describe('TetherClient', () => {
     });
 
     it('should safely ignore invalid url strings without crashing', () => {
-      const client = new TetherClient('test-invalid-url', {
+      const client = new TetherClient({
+        name: 'test-invalid-url',
         url: 'not-a-valid-url',
       });
       clientsToClose.push(client);
@@ -196,9 +199,9 @@ describe('TetherClient', () => {
 
   describe('Storage & Table Proxying', () => {
     it('should provide typed Table instances', async () => {
-      const client = new TetherClient(
-        `table-test-${Math.random().toString(36).substring(2, 8)}`,
-      );
+      const client = new TetherClient({
+        name: `table-test-${Math.random().toString(36).substring(2, 8)}`,
+      });
       clientsToClose.push(client);
 
       const table = client.table<{ title: string }>('todos');
@@ -210,9 +213,9 @@ describe('TetherClient', () => {
     });
 
     it('should clear all data across tables and metadata on clear()', async () => {
-      const client = new TetherClient(
-        `clear-test-${Math.random().toString(36).substring(2, 8)}`,
-      );
+      const client = new TetherClient({
+        name: `clear-test-${Math.random().toString(36).substring(2, 8)}`,
+      });
       clientsToClose.push(client);
 
       const table = client.table<{ text: string }>('notes');
@@ -226,9 +229,9 @@ describe('TetherClient', () => {
 
   describe('Auth & Sync Event Coordination', () => {
     it('should trigger sync.schedulePush when local mutations occur', async () => {
-      const client = new TetherClient(
-        `sync-push-test-${Math.random().toString(36).substring(2, 8)}`,
-      );
+      const client = new TetherClient({
+        name: `sync-push-test-${Math.random().toString(36).substring(2, 8)}`,
+      });
       clientsToClose.push(client);
 
       // @ts-expect-error - inspecting internal sync
@@ -250,15 +253,13 @@ describe('TetherClient', () => {
         }),
       });
 
-      const client = new TetherClient(
-        `auth-sync-test-${Math.random().toString(36).substring(2, 8)}`,
-        {
-          host: '127.0.0.1',
-          port: 8080,
-          fetch: mockFetch as unknown as typeof fetch,
-          webSocketClass: MockWebSocket as unknown as WebSocketConstructor,
-        },
-      );
+      const client = new TetherClient({
+        name: `auth-sync-test-${Math.random().toString(36).substring(2, 8)}`,
+        host: '127.0.0.1',
+        port: 8080,
+        fetch: mockFetch as unknown as typeof fetch,
+        webSocketClass: MockWebSocket as unknown as WebSocketConstructor,
+      });
       clientsToClose.push(client);
 
       // @ts-expect-error - inspecting internal sync
@@ -285,9 +286,9 @@ describe('TetherClient', () => {
     });
 
     it('should forward sync status change events to onSyncStatusChange', () => {
-      const client = new TetherClient(
-        `sync-status-test-${Math.random().toString(36).substring(2, 8)}`,
-      );
+      const client = new TetherClient({
+        name: `sync-status-test-${Math.random().toString(36).substring(2, 8)}`,
+      });
       clientsToClose.push(client);
 
       const syncStatuses: SyncStatus[] = [];
@@ -305,9 +306,9 @@ describe('TetherClient', () => {
     });
 
     it('should forward sync errors to onError', () => {
-      const client = new TetherClient(
-        `sync-error-test-${Math.random().toString(36).substring(2, 8)}`,
-      );
+      const client = new TetherClient({
+        name: `sync-error-test-${Math.random().toString(36).substring(2, 8)}`,
+      });
       clientsToClose.push(client);
 
       const errors: TetherClientError[] = [];
@@ -324,9 +325,9 @@ describe('TetherClient', () => {
     });
 
     it('should delegate login, register, and logout to Auth', async () => {
-      const client = new TetherClient(
-        `auth-delegate-${Math.random().toString(36).substring(2, 8)}`,
-      );
+      const client = new TetherClient({
+        name: `auth-delegate-${Math.random().toString(36).substring(2, 8)}`,
+      });
       clientsToClose.push(client);
 
       // @ts-expect-error - inspecting internal auth
@@ -354,9 +355,9 @@ describe('TetherClient', () => {
 
   describe('close()', () => {
     it('should tear down sync and close storage connection', async () => {
-      const client = new TetherClient(
-        `close-test-${Math.random().toString(36).substring(2, 8)}`,
-      );
+      const client = new TetherClient({
+        name: `close-test-${Math.random().toString(36).substring(2, 8)}`,
+      });
 
       // @ts-expect-error - inspecting internal sync
       const destroySpy = vi.spyOn(client.sync, 'destroy');
@@ -382,7 +383,7 @@ describe('TetherClient', () => {
       };
 
       try {
-        const client = new TetherClient('browser-loc-test');
+        const client = new TetherClient({ name: 'browser-loc-test' });
         clientsToClose.push(client);
 
         // @ts-expect-error - inspecting internal auth
@@ -394,7 +395,7 @@ describe('TetherClient', () => {
     });
 
     it('should wire sync onTokenRefresh and onAuthError callbacks to auth coordinator', () => {
-      const client = new TetherClient('callbacks-test');
+      const client = new TetherClient({ name: 'callbacks-test' });
       clientsToClose.push(client);
 
       // @ts-expect-error - inspecting internal auth
@@ -412,9 +413,9 @@ describe('TetherClient', () => {
     });
 
     it('should query declarative indexes created on table', async () => {
-      const client = new TetherClient(
-        `client-idx-${Math.random().toString(36).substring(2, 8)}`,
-      );
+      const client = new TetherClient({
+        name: `client-idx-${Math.random().toString(36).substring(2, 8)}`,
+      });
       clientsToClose.push(client);
 
       const users = client.table<{ email: string; name: string }>('users');

@@ -76,10 +76,13 @@ describe('runCli', () => {
 
     // Invalid option format
     testLogger.clear();
-    await runCli(['--port', '8080']);
+    await runCli(['--invalid-flag']);
     expect(testLogger.hasMessage('Command failed:', 'error')).toBe(true);
     expect(
-      testLogger.hasMessage(/Unknown or invalid option: "--port"/, 'error'),
+      testLogger.hasMessage(
+        /Unknown or invalid option: "--invalid-flag"/,
+        'error',
+      ),
     ).toBe(true);
 
     exitSpy.mockRestore();

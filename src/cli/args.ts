@@ -28,19 +28,41 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (arg.startsWith('--port=')) port = Number.parseInt(arg.slice(7), 10);
-    else if (arg === '-p') port = Number.parseInt(args[++i] ?? '', 10);
-    else if (arg.startsWith('--host=')) host = arg.slice(7);
-    else if (arg === '-H') host = args[++i] ?? host;
-    else if (arg === '--memory') backend = BackendType.Memory;
-    else if (arg === '--file' || arg.startsWith('--file=')) {
+    if (arg.startsWith('--port=')) {
+      port = Number.parseInt(arg.slice(7), 10);
+    } else if (arg === '-p' || arg === '--port') {
+      port = Number.parseInt(args[++i] ?? '', 10);
+    } else if (arg.startsWith('--host=')) {
+      host = arg.slice(7);
+    } else if (arg === '-H' || arg === '--host') {
+      host = args[++i] ?? host;
+    } else if (arg.startsWith('--dir=')) {
+      dir = arg.slice(6);
+    } else if (arg === '-d' || arg === '--dir') {
+      dir = args[++i] ?? dir;
+    } else if (arg.startsWith('--backend=')) {
+      backend = parseBackend(arg.slice(10));
+    } else if (arg === '-b' || arg === '--backend') {
+      backend = parseBackend(args[++i] ?? '');
+    } else if (arg === '--memory') {
+      backend = BackendType.Memory;
+    } else if (arg.startsWith('--file=')) {
       backend = BackendType.File;
-      if (arg.startsWith('--file=')) dir = arg.slice(7);
-    } else if (arg === '--sqlite' || arg.startsWith('--sqlite=')) {
+      dir = arg.slice(7);
+    } else if (arg === '--file') {
+      backend = BackendType.File;
+      if (args[i + 1] && !args[i + 1].startsWith('-')) {
+        dir = args[++i];
+      }
+    } else if (arg.startsWith('--sqlite=')) {
       backend = BackendType.Sqlite;
-      if (arg.startsWith('--sqlite=')) dir = arg.slice(9);
+      dir = arg.slice(9);
+    } else if (arg === '--sqlite') {
+      backend = BackendType.Sqlite;
+      if (args[i + 1] && !args[i + 1].startsWith('-')) {
+        dir = args[++i];
+      }
     } else if (
-      arg.startsWith('--app=') ||
       arg.startsWith('--create=') ||
       arg.startsWith('--read=') ||
       arg.startsWith('--update=') ||
@@ -61,12 +83,32 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
     }
   }
 
+  let command = positionalArgs[0] ?? 'serve';
+  if (command === 'table') command = 'tables';
+  else if (command === 'user') command = 'users';
+  else if (command === 'record') command = 'records';
+
+  if (positionalArgs.length > 0) {
+    positionalArgs[0] = command;
+  }
+
   return {
-    command: positionalArgs[0] ?? 'serve',
+    command,
     positionalArgs,
     backend,
     dir,
     host,
     port,
   };
+}
+
+function parseBackend(val: string): BackendType {
+  const normalized = val.toLowerCase();
+  if (normalized === 'memory') return BackendType.Memory;
+  if (normalized === 'file') return BackendType.File;
+  if (normalized === 'sqlite') return BackendType.Sqlite;
+  throw new TetherServerError(
+    TetherServerErrorCode.ConfigurationError,
+    `Invalid backend: "${val}". Expected "sqlite", "file", or "memory"`,
+  );
 }

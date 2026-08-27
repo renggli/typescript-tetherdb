@@ -81,7 +81,8 @@ interface Todo {
 }
 
 // 1. Initialize client with server endpoint
-const client = new TetherClient('todo-app', {
+const client = new TetherClient({
+  name: 'todo-app',
   url: 'http://localhost:8080',
 });
 

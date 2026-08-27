@@ -46,7 +46,8 @@ interface BenchmarkRecord {
 // Database & UI State
 // -----------------------------------------------------------------------------
 
-const db = new TetherClient('playground-example', {
+const db = new TetherClient({
+  name: 'playground-example',
   url: window.location.origin,
 });
 
