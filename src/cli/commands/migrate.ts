@@ -112,16 +112,7 @@ async function migrateSqliteStorage(
     const apps = appsDb
       .prepare('SELECT id, created_at FROM apps')
       .all() as Array<{ id: string; created_at: number }>;
-    const targetApps = appFilter
-      ? apps.filter((a) => a.id === appFilter)
-      : apps;
-
-    if (appFilter && targetApps.length === 0) {
-      throw new TetherServerError(
-        TetherServerErrorCode.NotFound,
-        `Application "${appFilter}" not found in v1 database`,
-      );
-    }
+    const targetApps = filterTargetApps(apps, appFilter);
 
     const stmtInsertTable = tablesDb.prepare(
       'INSERT OR IGNORE INTO tables (name, settings, created_at) VALUES (?, ?, ?)',
@@ -293,14 +284,7 @@ async function migrateFileStorage(
 
   const rawApps = await fs.promises.readFile(appsJsonPath, 'utf-8');
   const apps = JSON.parse(rawApps) as Array<{ id: string; createdAt: number }>;
-  const targetApps = appFilter ? apps.filter((a) => a.id === appFilter) : apps;
-
-  if (appFilter && targetApps.length === 0) {
-    throw new TetherServerError(
-      TetherServerErrorCode.NotFound,
-      `Application "${appFilter}" not found in v1 database`,
-    );
-  }
+  const targetApps = filterTargetApps(apps, appFilter);
 
   const tablesMap = new Map<
     string,
@@ -572,4 +556,20 @@ function backupFile(filePath: string): void {
   } catch {
     // Ignore backup failure
   }
+}
+
+function filterTargetApps<T extends { id: string }>(
+  apps: T[],
+  appFilter?: string,
+): T[] {
+  const targetApps = appFilter ? apps.filter((a) => a.id === appFilter) : apps;
+
+  if (appFilter && targetApps.length === 0) {
+    throw new TetherServerError(
+      TetherServerErrorCode.NotFound,
+      `Application "${appFilter}" not found in v1 database`,
+    );
+  }
+
+  return targetApps;
 }
