@@ -26,6 +26,7 @@ import {
   BaseStorage,
   canRead,
   isPrivateTable,
+  isSnapshotRequired,
   validateBatchChanges,
 } from '../base/index.js';
 import type { MaintenanceResult, StorageOptions } from '../storage.js';
@@ -481,7 +482,7 @@ export class SqliteStorage extends BaseStorage {
     const currentSeq = metaRow?.current_seq ?? 0;
     const minSeq = metaRow?.min_seq ?? 0;
 
-    if ((fromSeq < minSeq && minSeq > 0) || fromSeq > currentSeq) {
+    if (isSnapshotRequired(fromSeq, minSeq, currentSeq)) {
       return { changes: [], currentSeq, requiresSnapshot: true };
     }
 

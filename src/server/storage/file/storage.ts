@@ -26,6 +26,7 @@ import {
   BaseStorage,
   canRead,
   isPrivateTable,
+  isSnapshotRequired,
   validateBatchChanges,
 } from '../base/index.js';
 import type { MaintenanceResult, StorageOptions } from '../storage.js';
@@ -350,7 +351,7 @@ export class FileStorage extends BaseStorage {
       } catch {}
     }
 
-    if ((fromSeq < minSeq && minSeq > 0) || fromSeq > maxCurrentSeq) {
+    if (isSnapshotRequired(fromSeq, minSeq, maxCurrentSeq)) {
       return {
         changes: [],
         currentSeq: maxCurrentSeq,

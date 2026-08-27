@@ -1,6 +1,7 @@
 export {
   BaseStorage,
   buildTableSummaries,
+  isSnapshotRequired,
   validateBatchChanges,
 } from './storage.js';
 export {

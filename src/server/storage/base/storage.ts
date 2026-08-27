@@ -160,3 +160,14 @@ export async function validateBatchChanges(
     }
   }
 }
+
+/**
+ * Determines whether a requested sequence number requires a full snapshot sync.
+ */
+export function isSnapshotRequired(
+  fromSeq: number,
+  minSeq: number,
+  currentSeq: number,
+): boolean {
+  return (fromSeq < minSeq && minSeq > 0) || fromSeq > currentSeq;
+}
