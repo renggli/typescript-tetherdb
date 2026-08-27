@@ -650,4 +650,29 @@ describe('Table', () => {
       unsubscribe();
     });
   });
+
+  describe('live()', () => {
+    it('should stream live snapshots as an async iterable', async () => {
+      const liveTable = storage.table<TestItem>('live_stream_test');
+      await liveTable.put('1', { title: 'First' });
+
+      const iterator = liveTable.live()[Symbol.asyncIterator]();
+
+      // First yield: initial snapshot
+      const first = await iterator.next();
+      expect(first.done).toBe(false);
+      expect(first.value).toEqual([{ title: 'First' }]);
+
+      // Mutate table
+      const nextPromise = iterator.next();
+      await liveTable.put('2', { title: 'Second' });
+
+      const second = await nextPromise;
+      expect(second.done).toBe(false);
+      expect(second.value).toHaveLength(2);
+
+      // Cleanup
+      await iterator.return?.();
+    });
+  });
 });

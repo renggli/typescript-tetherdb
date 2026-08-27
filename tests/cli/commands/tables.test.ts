@@ -101,6 +101,38 @@ describe('handleTablesCommand', () => {
     expect(await storage.getTable('recipes')).toBeUndefined();
   });
 
+  it('should parse all permission and resource limit options', async () => {
+    await handleTablesCommand(target, [
+      'tables',
+      'add',
+      'complex',
+      '--create=authenticated',
+      '--read=public',
+      '--update=owner',
+      '--delete=nobody',
+      '--max-records=5000',
+      '--max-size=1048576',
+      '--max-history=50',
+    ]);
+    expect(testLogger.hasMessage('Created table "complex"')).toBe(true);
+
+    testLogger.clear();
+    await handleTablesCommand(target, ['tables', 'show', 'complex']);
+    expect(testLogger.hasMessage('Max Size:     1048576 bytes')).toBe(true);
+    expect(testLogger.hasMessage('Max History:  50')).toBe(true);
+  });
+
+  it('should throw error for invalid permission options', async () => {
+    await expect(
+      handleTablesCommand(target, [
+        'tables',
+        'add',
+        'invalid_perm',
+        '--read=invalid_value',
+      ]),
+    ).rejects.toThrow(TetherServerError);
+  });
+
   it('should throw error when table name is missing on add, show, update, rm', async () => {
     await expect(
       handleTablesCommand(target, ['tables', 'add']),

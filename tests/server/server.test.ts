@@ -1408,5 +1408,32 @@ describe('TetherServer Standalone Lifecycle & Error Mapping', () => {
 
       await server.close();
     });
+
+    it('should support server.handleRequest alias directly', async () => {
+      const server = new TetherServer();
+      let status = 0;
+      let body = '';
+      const req = {
+        url: '/health',
+        method: 'GET',
+        headers: { host: 'localhost' },
+      } as unknown as http.IncomingMessage;
+      const res = {
+        writeHead(s: number) {
+          status = s;
+          return this;
+        },
+        end(data: string) {
+          body = data;
+        },
+      } as unknown as http.ServerResponse;
+
+      const handled = await server.handleRequest(req, res);
+      expect(handled).toBe(true);
+      expect(status).toBe(200);
+      expect(JSON.parse(body).status).toBe('ok');
+
+      await server.close();
+    });
   });
 });

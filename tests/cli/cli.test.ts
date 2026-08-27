@@ -166,6 +166,26 @@ describe('runCli', () => {
     expect(
       testLogger.hasMessage('Table "non-existent-table" not found', 'error'),
     ).toBe(true);
+    exitSpy.mockRestore();
+  });
+
+  it('should route migrate and stop commands via runCli', async () => {
+    // 1. Migrate database on v2 schema
+    await fs.writeFile(path.join(tmpDir, 'tables.sqlite'), '');
+    testLogger.clear();
+    await runCli(['migrate', `--sqlite=${tmpDir}`]);
+    expect(testLogger.hasMessage('already on the current schema')).toBe(true);
+
+    // 2. Stop command when no server is running
+    const exitSpy = vi
+      .spyOn(process, 'exit')
+      .mockImplementation((() => {}) as unknown as (
+        code?: string | number | null | undefined,
+      ) => never);
+
+    testLogger.clear();
+    await runCli(['stop', `--sqlite=${tmpDir}`]);
+    expect(testLogger.hasMessage('Command failed:', 'error')).toBe(true);
     expect(exitSpy).toHaveBeenCalledWith(1);
 
     exitSpy.mockRestore();

@@ -29,9 +29,11 @@ describe('TetherServerError', () => {
       TetherServerErrorCode.NotFound,
       TetherServerErrorCode.AlreadyExists,
       TetherServerErrorCode.Unauthorized,
+      TetherServerErrorCode.Forbidden,
       TetherServerErrorCode.AuthenticationFailed,
       TetherServerErrorCode.LimitExceeded,
       TetherServerErrorCode.ConfigurationError,
+      TetherServerErrorCode.NotSupported,
       TetherServerErrorCode.InternalError,
     ];
 

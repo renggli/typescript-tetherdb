@@ -366,7 +366,7 @@ describe('Auth', () => {
         fetchFn: mockFetch as unknown as typeof fetch,
       });
 
-      const success = await auth.login({});
+      const success = await auth.login();
       expect(success).toBe(true);
       expect(auth.status).toBe(AuthStatus.SignedIn);
       expect(auth.username).toBe('grace');

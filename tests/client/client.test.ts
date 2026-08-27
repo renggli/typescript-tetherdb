@@ -157,6 +157,19 @@ describe('TetherClient', () => {
       expect(client.sync.url).toBe('ws://127.0.0.1:5000/api/sync');
     });
 
+    it('should parse ws url ending in /sync directly', () => {
+      const client = new TetherClient({
+        name: 'test-ws-sync-url',
+        url: 'ws://127.0.0.1:8080/sync',
+      });
+      clientsToClose.push(client);
+
+      // @ts-expect-error - inspecting internal auth
+      expect(client.auth.baseUrl).toBe('http://127.0.0.1:8080');
+      // @ts-expect-error - inspecting internal sync
+      expect(client.sync.url).toBe('ws://127.0.0.1:8080/sync');
+    });
+
     it('should allow explicit options to override properties extracted from url', () => {
       const client = new TetherClient({
         name: 'test-override-url',
