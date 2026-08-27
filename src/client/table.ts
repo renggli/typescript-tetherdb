@@ -236,8 +236,7 @@ export class Table<T = unknown> {
       savedData.push(entry.data);
     }
 
-    await this.storage.applyLocalChanges(this.tableName, mutations);
-    this.onChange.publish(events);
+    await this.applyAndPublish(mutations, events);
     return savedData;
   }
 
@@ -283,8 +282,7 @@ export class Table<T = unknown> {
     }
 
     if (mutations.length > 0) {
-      await this.storage.applyLocalChanges(this.tableName, mutations);
-      this.onChange.publish(events);
+      await this.applyAndPublish(mutations, events);
     }
 
     return mutations.length;
@@ -391,5 +389,13 @@ export class Table<T = unknown> {
       mutation: { id, op, data, change },
       event: { op, id, data, isRemote: false },
     };
+  }
+
+  private async applyAndPublish(
+    mutations: LocalMutationItem<T>[],
+    events: TableChangeEvent<T>[],
+  ): Promise<void> {
+    await this.storage.applyLocalChanges(this.tableName, mutations);
+    this.onChange.publish(events);
   }
 }
