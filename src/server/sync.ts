@@ -104,10 +104,7 @@ export class Sync {
     let messageQueue: Promise<void> = Promise.resolve();
 
     webSocket.on('message', (data) => {
-      const client = this.webSocketToClient.get(webSocket);
-      const userContext = client
-        ? ` (user: "${client.user?.id ?? 'guest'}", client: "${client.clientId}")`
-        : '';
+      const userContext = this.getClientContext(webSocket);
 
       messageQueue = messageQueue
         .then(async () => {
@@ -137,10 +134,7 @@ export class Sync {
     });
 
     webSocket.on('error', (err) => {
-      const client = this.webSocketToClient.get(webSocket);
-      const userContext = client
-        ? ` (user: "${client.user?.id ?? 'guest'}", client: "${client.clientId}")`
-        : '';
+      const userContext = this.getClientContext(webSocket);
       this.logger?.error(
         `[TetherServer.Sync] WebSocket connection error${userContext}:`,
         err,
@@ -195,12 +189,7 @@ export class Sync {
     msg: AuthClientMessage,
   ): Promise<void> {
     const ip = this.webSocketToIp.get(webSocket) ?? '127.0.0.1';
-
-    const authTimer = this.pendingAuthTimers.get(webSocket);
-    if (authTimer) {
-      clearTimeout(authTimer);
-      this.pendingAuthTimers.delete(webSocket);
-    }
+    this.clearPendingAuthTimer(webSocket);
 
     if (msg.protocolVersion !== PROTOCOL_VERSION) {
       this.rateLimiter?.recordFailure(ip);
@@ -340,12 +329,23 @@ export class Sync {
 
   // -- Private Helpers ------------------------------------------------------
 
-  private cleanupConnection(webSocket: WebSocket): void {
+  private clearPendingAuthTimer(webSocket: WebSocket): void {
     const authTimer = this.pendingAuthTimers.get(webSocket);
     if (authTimer) {
       clearTimeout(authTimer);
       this.pendingAuthTimers.delete(webSocket);
     }
+  }
+
+  private getClientContext(webSocket: WebSocket): string {
+    const client = this.webSocketToClient.get(webSocket);
+    return client
+      ? ` (user: "${client.user?.id ?? 'guest'}", client: "${client.clientId}")`
+      : '';
+  }
+
+  private cleanupConnection(webSocket: WebSocket): void {
+    this.clearPendingAuthTimer(webSocket);
     this.webSocketToIp.delete(webSocket);
 
     const client = this.webSocketToClient.get(webSocket);
@@ -361,6 +361,19 @@ export class Sync {
     }
   }
 
+  private async sendSyncSnapshot(
+    client: ActiveClient,
+    currentSeq: number,
+    tableFilters?: string[],
+  ): Promise<void> {
+    const snapshot = await this.buildSnapshot(client.user, tableFilters);
+    this.send(client.webSocket, {
+      type: ServerMessageType.SyncSnapshot,
+      seq: currentSeq,
+      snapshot,
+    });
+  }
+
   private async performSync(
     client: ActiveClient,
     lastSyncSeq?: number,
@@ -369,13 +382,8 @@ export class Sync {
     const seq = lastSyncSeq ?? 0;
 
     if (seq === 0) {
-      const snapshot = await this.buildSnapshot(client.user, tableFilters);
       const currentSeq = await this.storage.getCurrentSeq(client.user);
-      this.send(client.webSocket, {
-        type: ServerMessageType.SyncSnapshot,
-        seq: currentSeq,
-        snapshot,
-      });
+      await this.sendSyncSnapshot(client, currentSeq, tableFilters);
       return;
     }
 
@@ -383,12 +391,7 @@ export class Sync {
       await this.storage.getChangesSince(client.user, seq, tableFilters);
 
     if (requiresSnapshot) {
-      const snapshot = await this.buildSnapshot(client.user, tableFilters);
-      this.send(client.webSocket, {
-        type: ServerMessageType.SyncSnapshot,
-        seq: currentSeq,
-        snapshot,
-      });
+      await this.sendSyncSnapshot(client, currentSeq, tableFilters);
       return;
     }
 
