@@ -10,6 +10,7 @@ import {
 import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
 import type { TableStorage } from '../table.js';
 import type { UserStorage } from '../user.js';
+import type { BaseStorage } from './storage.js';
 
 /** Default table permission policy if not specified. */
 export const DEFAULT_TABLE_PERMISSIONS: Required<TablePermissions> = {
@@ -22,14 +23,19 @@ export const DEFAULT_TABLE_PERMISSIONS: Required<TablePermissions> = {
 /**
  * Common abstract base class for TableStorage implementations.
  */
-export abstract class TableBaseStorage implements TableStorage {
+export abstract class TableBaseStorage<
+  TStorage extends BaseStorage = BaseStorage,
+> implements TableStorage
+{
   readonly name: string;
+  protected readonly storage: TStorage;
   settings: TableSettings = {
     permissions: { ...DEFAULT_TABLE_PERMISSIONS },
   };
 
-  constructor(name: string, settings: TableSettings = {}) {
+  constructor(name: string, storage: TStorage, settings: TableSettings = {}) {
     this.name = name;
+    this.storage = storage;
     this.mergeSettings(settings);
   }
 
@@ -47,12 +53,20 @@ export abstract class TableBaseStorage implements TableStorage {
 
   abstract getAllRecords(user?: UserStorage): Promise<SnapshotRecord[]>;
 
-  abstract applyChanges(
+  async applyChanges(
     user: UserStorage | undefined,
     changes: ChangeRecord[],
-  ): Promise<{ applied: ChangeRecord[]; newSeq: number }>;
+  ): Promise<{ applied: ChangeRecord[]; newSeq: number }> {
+    const targeted = changes.map((c) => ({
+      ...c,
+      table: this.name,
+    }));
+    return this.storage.applyChanges(user, targeted);
+  }
 
-  abstract delete(): Promise<boolean>;
+  async delete(): Promise<boolean> {
+    return this.storage.deleteTable(this.name);
+  }
 
   private mergeSettings(settings: Partial<TableSettings>): TableSettings {
     this.settings = {

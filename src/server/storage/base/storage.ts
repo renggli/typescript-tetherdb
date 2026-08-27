@@ -47,6 +47,7 @@ export abstract class BaseStorage implements Storage {
   ): Promise<TableStorage>;
   abstract getTable(name: string): Promise<TableStorage | undefined>;
   abstract getTables(): Promise<TableStorage[]>;
+  abstract deleteTable(name: string): boolean | Promise<boolean>;
 
   abstract createUser(username: string, password: string): Promise<UserStorage>;
   abstract getUser(id: string): Promise<UserStorage | undefined>;
@@ -54,6 +55,7 @@ export abstract class BaseStorage implements Storage {
     username: string,
   ): Promise<UserStorage | undefined>;
   abstract getUsers(): Promise<UserStorage[]>;
+  abstract deleteUser(id: string): boolean | Promise<boolean>;
 
   abstract applyChanges(
     user: UserStorage | undefined,

@@ -1,5 +1,4 @@
 import type {
-  ChangeRecord,
   SnapshotRecord,
   StoredRecord,
   TableSettings,
@@ -17,16 +16,13 @@ import type { FileStorage } from './storage.js';
 /**
  * Filesystem-backed implementation of `TableStorage`.
  */
-export class TableFileStorage extends TableBaseStorage {
-  private storage: FileStorage;
-
+export class TableFileStorage extends TableBaseStorage<FileStorage> {
   constructor(
     name: string,
     storage: FileStorage,
     settings: TableSettings = {},
   ) {
-    super(name, settings);
-    this.storage = storage;
+    super(name, storage, settings);
   }
 
   override async updateSettings(
@@ -75,20 +71,5 @@ export class TableFileStorage extends TableBaseStorage {
 
     const map = await this.storage.readTableRecords(effectiveUserId, this.name);
     return filterActiveRecords(this.name, map.values());
-  }
-
-  async applyChanges(
-    user: UserStorage | undefined,
-    changes: ChangeRecord[],
-  ): Promise<{ applied: ChangeRecord[]; newSeq: number }> {
-    const targeted = changes.map((c) => ({
-      ...c,
-      table: this.name,
-    }));
-    return this.storage.applyChanges(user, targeted);
-  }
-
-  async delete(): Promise<boolean> {
-    return this.storage.deleteTable(this.name);
   }
 }

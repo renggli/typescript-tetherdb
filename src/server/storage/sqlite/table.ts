@@ -1,5 +1,4 @@
 import type {
-  ChangeRecord,
   SnapshotRecord,
   StoredRecord,
   TableSettings,
@@ -22,16 +21,13 @@ interface RawRecordRow {
 /**
  * SQLite-backed implementation of `TableStorage`.
  */
-export class TableSqliteStorage extends TableBaseStorage {
-  private storage: SqliteStorage;
-
+export class TableSqliteStorage extends TableBaseStorage<SqliteStorage> {
   constructor(
     name: string,
     storage: SqliteStorage,
     settings: TableSettings = {},
   ) {
-    super(name, settings);
-    this.storage = storage;
+    super(name, storage, settings);
   }
 
   override async updateSettings(
@@ -40,10 +36,6 @@ export class TableSqliteStorage extends TableBaseStorage {
     const updated = await super.updateSettings(settings);
     this.storage.updateTableSettingsInDb(this.name, updated);
     return updated;
-  }
-
-  async delete(): Promise<boolean> {
-    return this.storage.deleteTable(this.name);
   }
 
   private parseData(raw: string | null): unknown {
@@ -114,16 +106,5 @@ export class TableSqliteStorage extends TableBaseStorage {
       clientId: row.client_id ?? '',
       data: this.parseData(row.data),
     }));
-  }
-
-  async applyChanges(
-    user: UserStorage | undefined,
-    changes: ChangeRecord[],
-  ): Promise<{ applied: ChangeRecord[]; newSeq: number }> {
-    const targeted = changes.map((c) => ({
-      ...c,
-      table: this.name,
-    }));
-    return this.storage.applyChanges(user, targeted);
   }
 }
