@@ -614,24 +614,7 @@ export class SqliteStorage extends BaseStorage {
   getUsersDb(): UsersDbHandle {
     if (this.usersHandle) return this.usersHandle;
 
-    const require = createRequire(import.meta.url);
-    const { DatabaseSync } = require('node:sqlite') as {
-      DatabaseSync: new (path: string) => DatabaseSync;
-    };
-
-    const dbPath = this.inMemory
-      ? ':memory:'
-      : path.join(this.baseDir, 'users.sqlite');
-
-    const db = new DatabaseSync(dbPath);
-
-    db.exec('PRAGMA busy_timeout = 5000;');
-    db.exec('PRAGMA foreign_keys = ON;');
-    if (!this.inMemory) {
-      db.exec('PRAGMA journal_mode = WAL;');
-      db.exec('PRAGMA synchronous = NORMAL;');
-    }
-
+    const db = createDatabase(this.baseDir, 'users.sqlite', this.inMemory);
     initUsersSchema(db);
 
     this.usersHandle = {
@@ -660,24 +643,7 @@ export class SqliteStorage extends BaseStorage {
   getTablesDb(): TablesDbHandle {
     if (this.tablesHandle) return this.tablesHandle;
 
-    const require = createRequire(import.meta.url);
-    const { DatabaseSync } = require('node:sqlite') as {
-      DatabaseSync: new (path: string) => DatabaseSync;
-    };
-
-    const dbPath = this.inMemory
-      ? ':memory:'
-      : path.join(this.baseDir, 'tables.sqlite');
-
-    const db = new DatabaseSync(dbPath);
-
-    db.exec('PRAGMA busy_timeout = 5000;');
-    db.exec('PRAGMA foreign_keys = ON;');
-    if (!this.inMemory) {
-      db.exec('PRAGMA journal_mode = WAL;');
-      db.exec('PRAGMA synchronous = NORMAL;');
-    }
-
+    const db = createDatabase(this.baseDir, 'tables.sqlite', this.inMemory);
     initTablesSchema(db);
 
     this.tablesHandle = {
@@ -862,4 +828,27 @@ function initTablesSchema(db: DatabaseSync): void {
       min_seq INTEGER NOT NULL
     );
   `);
+}
+
+function createDatabase(
+  baseDir: string,
+  filename: string,
+  inMemory: boolean,
+): DatabaseSync {
+  const require = createRequire(import.meta.url);
+  const { DatabaseSync } = require('node:sqlite') as {
+    DatabaseSync: new (path: string) => DatabaseSync;
+  };
+
+  const dbPath = inMemory ? ':memory:' : path.join(baseDir, filename);
+  const db = new DatabaseSync(dbPath);
+
+  db.exec('PRAGMA busy_timeout = 5000;');
+  db.exec('PRAGMA foreign_keys = ON;');
+  if (!inMemory) {
+    db.exec('PRAGMA journal_mode = WAL;');
+    db.exec('PRAGMA synchronous = NORMAL;');
+  }
+
+  return db;
 }
