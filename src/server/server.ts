@@ -321,7 +321,7 @@ export class TetherServer {
   }
 
   /**
-   * Attaches WebSocket synchronization handling to an existing HTTP server.
+   * Attaches WebSocket synchronization handling and lockfile management to an existing HTTP server.
    *
    * @param server - The HTTP server instance to attach to.
    */
@@ -355,6 +355,41 @@ export class TetherServer {
         });
       }
     });
+
+    const setupLock = () => {
+      const addr =
+        typeof server.address === 'function' ? server.address() : null;
+      const port = typeof addr === 'object' && addr ? addr.port : 8080;
+      const host =
+        typeof addr === 'object' && addr && 'address' in addr
+          ? (addr.address as string)
+          : '127.0.0.1';
+      this.acquireLockIfPersistent(port, host);
+    };
+
+    if (server.listening) {
+      setupLock();
+    } else if (typeof server.once === 'function') {
+      server.once('listening', setupLock);
+    } else if (typeof server.on === 'function') {
+      server.on('listening', setupLock);
+    }
+
+    if (typeof server.once === 'function') {
+      server.once('close', () => {
+        if (this.lockHandle) {
+          this.lockHandle.release();
+          this.lockHandle = null;
+        }
+      });
+    } else if (typeof server.on === 'function') {
+      server.on('close', () => {
+        if (this.lockHandle) {
+          this.lockHandle.release();
+          this.lockHandle = null;
+        }
+      });
+    }
   }
 
   /**
@@ -365,22 +400,7 @@ export class TetherServer {
    * @returns The active Node.js HTTP server instance.
    */
   async listen(port = 8080, host = '0.0.0.0'): Promise<http.Server> {
-    const storageBaseDir = (
-      this.storage as { baseDir?: string; inMemory?: boolean }
-    ).baseDir;
-    const isMemory =
-      (this.storage as { inMemory?: boolean }).inMemory ??
-      this.storage instanceof MemoryStorage;
-
-    if (storageBaseDir && !isMemory) {
-      const status = await this.storage.getStatus();
-      this.lockHandle = acquireServerLock(storageBaseDir, {
-        port,
-        host,
-        backend: status.backend,
-        adminSecret: this.adminSecret,
-      });
-    }
+    this.acquireLockIfPersistent(port, host);
 
     return new Promise<http.Server>((resolve, reject) => {
       this._httpServer = http.createServer(async (req, res) => {
@@ -395,18 +415,8 @@ export class TetherServer {
           const addr = this._httpServer.address();
           const actualPort =
             typeof addr === 'object' && addr ? addr.port : port;
-          if (
-            this.lockHandle &&
-            storageBaseDir &&
-            this.lockHandle.info.port !== actualPort
-          ) {
-            this.lockHandle.release();
-            this.lockHandle = acquireServerLock(storageBaseDir, {
-              port: actualPort,
-              host,
-              backend: this.lockHandle.info.backend,
-              adminSecret: this.adminSecret,
-            });
+          if (actualPort !== port) {
+            this.acquireLockIfPersistent(actualPort, host);
           }
           resolve(this._httpServer);
         }
@@ -1107,6 +1117,35 @@ export class TetherServer {
       }
     }
     return req.socket.remoteAddress ?? '127.0.0.1';
+  }
+
+  private acquireLockIfPersistent(port: number, host: string): void {
+    const storageBaseDir = (
+      this.storage as { baseDir?: string; inMemory?: boolean }
+    ).baseDir;
+    const isMemory =
+      (this.storage as { inMemory?: boolean }).inMemory ??
+      this.storage instanceof MemoryStorage;
+
+    if (storageBaseDir && !isMemory) {
+      if (
+        this.lockHandle &&
+        this.lockHandle.info.port === port &&
+        this.lockHandle.info.host === host
+      ) {
+        return;
+      }
+      if (this.lockHandle) {
+        this.lockHandle.release();
+        this.lockHandle = null;
+      }
+      this.lockHandle = acquireServerLock(storageBaseDir, {
+        port,
+        host,
+        backend: this.storage.backend,
+        adminSecret: this.adminSecret,
+      });
+    }
   }
 }
 

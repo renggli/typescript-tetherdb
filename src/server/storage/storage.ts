@@ -1,4 +1,8 @@
-import type { ChangeRecord, TableSettings } from '../../shared/types.js';
+import type {
+  BackendType,
+  ChangeRecord,
+  TableSettings,
+} from '../../shared/types.js';
 import type { TableStorage } from './table.js';
 import type { UserStorage } from './user.js';
 
@@ -23,7 +27,7 @@ export interface StorageOptions {
  */
 export interface StorageStatus {
   /** Storage persistence type ('sqlite', 'file', or 'memory'). */
-  backend: string;
+  backend: BackendType;
   /** Storage base directory if disk-backed. */
   baseDir?: string;
   /** Number of registered user accounts. */
@@ -44,8 +48,8 @@ export interface StorageStatus {
 export interface MaintenanceResult {
   /** Maintenance action performed ('checkpoint', 'vacuum', 'prune'). */
   action: 'checkpoint' | 'vacuum' | 'prune';
-  /** Target backend name. */
-  backend: string;
+  /** Target backend engine. */
+  backend: BackendType;
   /** Optional target table name. */
   tableName?: string;
   /** Number of entries or database files affected, if applicable. */
@@ -58,6 +62,8 @@ export interface MaintenanceResult {
  * Top-level storage coordinator managing tables and user accounts.
  */
 export interface Storage {
+  /** Backend persistence engine type. */
+  readonly backend: BackendType;
   /** Storage configuration options and resource limits. */
   readonly options?: StorageOptions;
 

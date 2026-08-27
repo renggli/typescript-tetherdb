@@ -4,15 +4,28 @@
  * @module tetherdb/server
  */
 export {
+  BackendType,
   Permission,
   PROTOCOL_VERSION,
   type TablePermissions,
   type TableSettings,
 } from '../shared/types.js';
 export {
+  AdminClient,
+  type AdminTarget,
+  LocalAdminTarget,
+  type ResolvedAdminContext,
+} from './admin.js';
+export {
   TetherServerError,
   TetherServerErrorCode,
 } from './errors.js';
+export {
+  acquireServerLock,
+  readServerLock,
+  type ServerLockHandle,
+  type ServerLockInfo,
+} from './lock.js';
 export {
   type CorsOptions,
   type RateLimitOptions,
@@ -27,12 +40,14 @@ export {
   BaseStorage,
   FileStorage,
   type FileStorageOptions,
+  type MaintenanceResult,
   MemoryStorage,
   type MemoryStorageOptions,
   SqliteStorage,
   type SqliteStorageOptions,
   type Storage,
   type StorageOptions,
+  type StorageStatus,
   TableBaseStorage,
   type TableStorage,
   UserBaseStorage,

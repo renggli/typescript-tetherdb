@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
 import { shouldOverwrite } from '../../../shared/clock.js';
 import {
+  BackendType,
   type ChangeRecord,
   OperationType,
   type StoredRecord,
@@ -82,7 +83,7 @@ export interface SqliteStorageOptions extends StorageOptions {
  * SQLite-backed implementation of `Storage`.
  */
 export class SqliteStorage extends BaseStorage {
-  readonly backend = 'sqlite';
+  readonly backend = BackendType.Sqlite;
   readonly baseDir: string;
   readonly inMemory: boolean;
   readonly secret: string;
@@ -560,7 +561,7 @@ export class SqliteStorage extends BaseStorage {
 
     return {
       action: 'checkpoint',
-      backend: 'sqlite',
+      backend: BackendType.Sqlite,
       affectedCount: 2,
       message: 'Checkpoint completed successfully across databases',
     };
@@ -572,7 +573,7 @@ export class SqliteStorage extends BaseStorage {
 
     return {
       action: 'vacuum',
-      backend: 'sqlite',
+      backend: BackendType.Sqlite,
       affectedCount: 2,
       message: 'Vacuum completed successfully across databases',
     };
@@ -602,7 +603,7 @@ export class SqliteStorage extends BaseStorage {
 
     return {
       action: 'prune',
-      backend: 'sqlite',
+      backend: BackendType.Sqlite,
       tableName,
       affectedCount: totalPruned,
       message: `Prune completed successfully. Removed ${totalPruned} changelog record(s)`,

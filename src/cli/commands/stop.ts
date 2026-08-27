@@ -1,9 +1,9 @@
 import {
+  AdminClient,
   TetherServerError,
   TetherServerErrorCode,
 } from '../../server/index.js';
 import { readServerLock } from '../../server/lock.js';
-import { AdminClient } from '../admin-client.js';
 
 /**
  * Handles the 'stop' command to gracefully shut down a running TetherDB server.

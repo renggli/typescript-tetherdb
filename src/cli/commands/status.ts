@@ -1,35 +1,27 @@
-import type { Storage } from '../../server/index.js';
-import { readServerLock } from '../../server/lock.js';
-import { AdminClient } from '../admin-client.js';
+import type {
+  AdminTarget,
+  ServerLockInfo,
+  StorageStatus,
+} from '../../server/index.js';
 
 /**
  * Handles the 'status' command to display storage backend statistics.
  *
- * @param storage - Instantiated Storage engine (used if offline).
- * @param positionalArgs - Positional CLI arguments.
- * @param dir - Data directory.
+ * @param target - Active administration target.
+ * @param _positionalArgs - Positional CLI arguments.
+ * @param lock - Server lock info if connected to a running server.
  */
 export async function handleStatusCommand(
-  storage: Storage,
-  _positionalArgs: string[],
-  dir = '.data',
-): Promise<void> {
-  const lock = readServerLock(dir);
-  if (lock?.adminSecret) {
-    const admin = new AdminClient(lock.port, lock.host, lock.adminSecret);
-    const status = await admin.getStatus();
-    printStatus(status, lock);
-    return;
-  }
-
-  const status = await storage.getStatus();
+  target: AdminTarget,
+  _positionalArgs: string[] = [],
+  lock: ServerLockInfo | null = null,
+): Promise<StorageStatus> {
+  const status = await target.getStatus();
   printStatus(status, lock);
+  return status;
 }
 
-function printStatus(
-  status: import('../../server/storage/storage.js').StorageStatus,
-  lock: import('../../server/lock.js').ServerLockInfo | null,
-): void {
+function printStatus(status: StorageStatus, lock: ServerLockInfo | null): void {
   console.log('TetherDB Storage Status:');
   console.log(`  Backend:     ${status.backend}`);
   if (status.baseDir) {

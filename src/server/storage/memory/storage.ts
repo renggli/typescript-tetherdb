@@ -1,6 +1,7 @@
 import * as crypto from 'node:crypto';
 import { shouldOverwrite } from '../../../shared/clock.js';
 import {
+  BackendType,
   type ChangeRecord,
   OperationType,
   type StoredRecord,
@@ -44,7 +45,7 @@ export interface MemoryStorageOptions extends StorageOptions {}
  * In-memory implementation of `Storage`.
  */
 export class MemoryStorage extends BaseStorage {
-  readonly backend = 'memory';
+  readonly backend = BackendType.Memory;
   readonly secret: string;
   override readonly options: MemoryStorageOptions;
   private globalSeq = 0;
@@ -379,7 +380,7 @@ export class MemoryStorage extends BaseStorage {
 
     return {
       action: 'prune',
-      backend: 'memory',
+      backend: BackendType.Memory,
       tableName,
       affectedCount: totalPruned,
       message: `Prune completed successfully. Removed ${totalPruned} changelog record(s)`,

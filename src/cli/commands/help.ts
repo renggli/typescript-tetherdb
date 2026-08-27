@@ -16,6 +16,7 @@ Commands:
   maintenance checkpoint [table]               Truncate WAL files for SQLite databases
   maintenance vacuum                           Reclaim disk space and defragment database files
   maintenance prune [table] [keepCount]        Prune changelogs older than retention threshold
+  migrate [--app=<appId>]                      Migrate offline database from v1 (multi-app) to v2 format
   tables [list]                                List all tables
   tables add <table_name> [options]            Create a table (--mode=..., --max-records=...)
   tables show <table_name>                     Show table details and settings

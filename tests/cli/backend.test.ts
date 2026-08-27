@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { type BackendType, createBackend } from '../../src/cli/backend.js';
+import { BackendType, createBackend } from '../../src/cli/backend.js';
 import {
   FileStorage,
   MemoryStorage,
@@ -34,22 +34,22 @@ describe('createBackend', () => {
     const storage = createBackend();
     expect(storage).toBeInstanceOf(MemoryStorage);
 
-    const explicitMem = createBackend('memory');
+    const explicitMem = createBackend(BackendType.Memory);
     expect(explicitMem).toBeInstanceOf(MemoryStorage);
   });
 
   it('should create matching SQLite storage with resolved baseDir', () => {
-    const storage = createBackend('sqlite', tmpDir);
+    const storage = createBackend(BackendType.Sqlite, tmpDir);
     expect(storage).toBeInstanceOf(SqliteStorage);
   });
 
   it('should create matching file storage with resolved baseDir', () => {
-    const storage = createBackend('file', tmpDir);
+    const storage = createBackend(BackendType.File, tmpDir);
     expect(storage).toBeInstanceOf(FileStorage);
   });
 
   it('should pass custom options through createBackend', () => {
-    const storage = createBackend('memory', '.data', {
+    const storage = createBackend(BackendType.Memory, '.data', {
       maxRecords: 500,
     });
     expect(storage).toBeInstanceOf(MemoryStorage);

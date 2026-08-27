@@ -50,10 +50,8 @@ enum AuthMode {
   Register = 'register',
 }
 
-// Database & UI State — initialize with unified backend URL
-const db = new TetherClient('todo-example', {
-  url: window.location.origin,
-});
+// Database & Table State — zero-config defaults to current origin
+const db = new TetherClient('todo-example');
 const todosTable: Table<TodoItem> = db.table<TodoItem>('todos');
 const statusIndex: Index<TodoItem, TodoStatus> =
   todosTable.index<TodoStatus>('status');

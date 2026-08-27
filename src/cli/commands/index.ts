@@ -1,5 +1,9 @@
 export { printHelp } from './help.js';
 export { handleMaintenanceCommand } from './maintenance.js';
+export {
+  handleMigrateCommand,
+  type MigrationResult,
+} from './migrate.js';
 export { handleRecordsCommand } from './records.js';
 export { handleServeCommand } from './serve.js';
 export { handleStatusCommand } from './status.js';

@@ -145,4 +145,50 @@ describe('tetherPlugin (Vite Dev Server Integration)', () => {
       await (plugin.closeBundle as () => Promise<void> | void)();
     }
   });
+
+  it('should acquire server.lock with persistent storage and release on shutdown', async () => {
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const fs = await import('node:fs/promises');
+    const { SqliteStorage } = await import('../../src/server/index.js');
+    const { readServerLock } = await import('../../src/server/lock.js');
+
+    const tmpDir = path.join(
+      os.tmpdir(),
+      `tetherdb-vite-lock-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    );
+    await fs.mkdir(tmpDir, { recursive: true });
+
+    try {
+      const storage = new SqliteStorage({ baseDir: tmpDir });
+      vite = await createViteServer({
+        server: {
+          host: '127.0.0.1',
+          port: 0,
+        },
+        plugins: [
+          tetherPlugin({
+            storage,
+            tables: ['todos'],
+          }),
+        ],
+      });
+
+      await vite.listen();
+
+      const lock = readServerLock(tmpDir);
+      expect(lock).not.toBeNull();
+      expect(lock?.pid).toBe(process.pid);
+      expect(lock?.backend).toBe('sqlite');
+      expect(lock?.adminSecret).toBeDefined();
+
+      await vite.close();
+      vite = null;
+
+      const lockAfterClose = readServerLock(tmpDir);
+      expect(lockAfterClose).toBeNull();
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    }
+  });
 });

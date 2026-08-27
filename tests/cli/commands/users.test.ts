@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createBackend } from '../../../src/cli/backend.js';
 import { handleUsersCommand } from '../../../src/cli/commands/users.js';
 import {
+  LocalAdminTarget,
   type Storage,
   TetherServerError,
   TetherServerErrorCode,
@@ -14,6 +15,7 @@ import { testLogger } from '../../logger.js';
 describe('handleUsersCommand', () => {
   let tmpDir: string;
   let storage: Storage;
+  let target: LocalAdminTarget;
 
   beforeEach(async () => {
     tmpDir = path.join(
@@ -22,6 +24,7 @@ describe('handleUsersCommand', () => {
     );
     await fs.mkdir(tmpDir, { recursive: true });
     storage = createBackend('sqlite', tmpDir);
+    target = new LocalAdminTarget(storage);
   });
 
   afterEach(async () => {
@@ -35,7 +38,7 @@ describe('handleUsersCommand', () => {
 
   it('should list registered users (empty and populated)', async () => {
     // Empty list
-    await handleUsersCommand(storage, ['users', 'list']);
+    await handleUsersCommand(target, ['users', 'list']);
     expect(testLogger.hasMessage('No registered users found.')).toBe(true);
 
     // Add a user directly
@@ -43,13 +46,13 @@ describe('handleUsersCommand', () => {
 
     // List users
     testLogger.clear();
-    await handleUsersCommand(storage, ['users', 'list']);
+    await handleUsersCommand(target, ['users', 'list']);
     expect(testLogger.hasMessage('Registered users (1):')).toBe(true);
     expect(testLogger.hasMessage(`[${user.id}] alice`)).toBe(true);
   });
 
   it('should add a new user account', async () => {
-    await handleUsersCommand(storage, ['users', 'add', 'bobby', 'password123']);
+    await handleUsersCommand(target, ['users', 'add', 'bobby', 'password123']);
     expect(testLogger.hasMessage('Created user: [')).toBe(true);
     expect(testLogger.hasMessage('bobby')).toBe(true);
 
@@ -61,38 +64,38 @@ describe('handleUsersCommand', () => {
     const user = await storage.createUser('charlie', 'password123');
 
     // Delete existing user
-    await handleUsersCommand(storage, ['users', 'rm', user.id]);
+    await handleUsersCommand(target, ['users', 'rm', user.id]);
     expect(testLogger.hasMessage(`Deleted user: ${user.id}`)).toBe(true);
     expect(await storage.getUser(user.id)).toBeUndefined();
 
     // Delete non-existent user
-    testLogger.clear();
-    await handleUsersCommand(storage, ['users', 'rm', 'nonexistent_id']);
-    expect(testLogger.hasMessage('User not found: nonexistent_id')).toBe(true);
+    await expect(
+      handleUsersCommand(target, ['users', 'rm', 'nonexistent_id']),
+    ).rejects.toThrow(TetherServerError);
   });
 
   it('should throw error for missing arguments or invalid action', async () => {
     // Missing username on add
-    await expect(handleUsersCommand(storage, ['users', 'add'])).rejects.toThrow(
+    await expect(handleUsersCommand(target, ['users', 'add'])).rejects.toThrow(
       TetherServerError,
     );
 
     // Missing password on add
     await expect(
-      handleUsersCommand(storage, ['users', 'add', 'dave']),
+      handleUsersCommand(target, ['users', 'add', 'dave']),
     ).rejects.toThrow(TetherServerError);
 
     // Missing user ID on rm
-    await expect(handleUsersCommand(storage, ['users', 'rm'])).rejects.toThrow(
+    await expect(handleUsersCommand(target, ['users', 'rm'])).rejects.toThrow(
       TetherServerError,
     );
 
     // Unknown action
     await expect(
-      handleUsersCommand(storage, ['users', 'invalid_action']),
+      handleUsersCommand(target, ['users', 'invalid_action']),
     ).rejects.toThrow(TetherServerError);
     try {
-      await handleUsersCommand(storage, ['users', 'invalid_action']);
+      await handleUsersCommand(target, ['users', 'invalid_action']);
     } catch (err) {
       expect((err as TetherServerError).code).toBe(
         TetherServerErrorCode.ConfigurationError,

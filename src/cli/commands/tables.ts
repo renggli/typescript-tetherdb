@@ -1,38 +1,25 @@
 import {
-  type Storage,
+  type AdminTarget,
   TetherServerError,
   TetherServerErrorCode,
 } from '../../server/index.js';
-import { readServerLock } from '../../server/lock.js';
 import { Permission, type TableSettings } from '../../shared/types.js';
-import { AdminClient } from '../admin-client.js';
 
 /**
  * Handles the 'tables' command family (list, add, show, update, rm).
  *
- * @param storage - Instantiated Storage engine (used if offline).
+ * @param target - Active administration target.
  * @param args - Positional arguments: `[command, action, tableName, ...options]`.
- * @param dir - Data directory.
  */
 export async function handleTablesCommand(
-  storage: Storage,
+  target: AdminTarget,
   args: string[],
-  dir = '.data',
 ): Promise<void> {
   const action = args[1] ?? 'list';
-  const lock = readServerLock(dir);
-  const admin = lock?.adminSecret
-    ? new AdminClient(lock.port, lock.host, lock.adminSecret)
-    : null;
 
   if (action === 'list') {
-    if (admin) {
-      const tables = await admin.getTables();
-      printTables(tables);
-    } else {
-      const tables = await storage.getTables();
-      printTables(tables.map((t) => ({ name: t.name, settings: t.settings })));
-    }
+    const tables = await target.getTables();
+    printTables(tables);
     return;
   }
 
@@ -45,14 +32,8 @@ export async function handleTablesCommand(
       );
     }
     const settings = parseTableOptions(args.slice(3));
-
-    if (admin) {
-      await admin.createTable(tableName, settings);
-      console.log(`Created table "${tableName}"`);
-    } else {
-      await storage.createTable(tableName, settings);
-      console.log(`Created table "${tableName}"`);
-    }
+    await target.createTable(tableName, settings);
+    console.log(`Created table "${tableName}"`);
     return;
   }
 
@@ -64,20 +45,14 @@ export async function handleTablesCommand(
         'Missing table name',
       );
     }
-
-    if (admin) {
-      const table = await admin.getTable(tableName);
-      printTableDetails(table);
-    } else {
-      const table = await storage.getTable(tableName);
-      if (!table) {
-        throw new TetherServerError(
-          TetherServerErrorCode.NotFound,
-          `Table "${tableName}" not found`,
-        );
-      }
-      printTableDetails({ name: table.name, settings: table.settings });
+    const table = await target.getTable(tableName);
+    if (!table) {
+      throw new TetherServerError(
+        TetherServerErrorCode.NotFound,
+        `Table "${tableName}" not found`,
+      );
     }
+    printTableDetails(table);
     return;
   }
 
@@ -90,21 +65,8 @@ export async function handleTablesCommand(
       );
     }
     const settings = parseTableOptions(args.slice(3));
-
-    if (admin) {
-      const res = await admin.updateTable(tableName, settings);
-      console.log(`Updated table "${tableName}":`, res.settings);
-    } else {
-      const table = await storage.getTable(tableName);
-      if (!table) {
-        throw new TetherServerError(
-          TetherServerErrorCode.NotFound,
-          `Table "${tableName}" not found`,
-        );
-      }
-      const updated = await table.updateSettings(settings);
-      console.log(`Updated table "${tableName}":`, updated);
-    }
+    const res = await target.updateTable(tableName, settings);
+    console.log(`Updated table "${tableName}":`, res.settings);
     return;
   }
 
@@ -116,19 +78,8 @@ export async function handleTablesCommand(
         'Missing table name',
       );
     }
-
-    if (admin) {
-      await admin.deleteTable(tableName);
-      console.log(`Deleted table "${tableName}"`);
-    } else {
-      const table = await storage.getTable(tableName);
-      if (!table) {
-        console.log(`Table "${tableName}" not found`);
-      } else {
-        await table.delete();
-        console.log(`Deleted table "${tableName}"`);
-      }
-    }
+    await target.deleteTable(tableName);
+    console.log(`Deleted table "${tableName}"`);
     return;
   }
 

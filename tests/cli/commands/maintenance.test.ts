@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createBackend } from '../../../src/cli/backend.js';
 import { handleMaintenanceCommand } from '../../../src/cli/commands/maintenance.js';
 import {
+  LocalAdminTarget,
   type Storage,
   TetherServerError,
   TetherServerErrorCode,
@@ -15,6 +16,8 @@ describe('handleMaintenanceCommand', () => {
   let tmpDir: string;
   let sqliteStorage: Storage;
   let memoryStorage: Storage;
+  let sqliteTarget: LocalAdminTarget;
+  let memoryTarget: LocalAdminTarget;
 
   beforeEach(async () => {
     tmpDir = path.join(
@@ -24,6 +27,8 @@ describe('handleMaintenanceCommand', () => {
     await fs.mkdir(tmpDir, { recursive: true });
     sqliteStorage = createBackend('sqlite', tmpDir);
     memoryStorage = createBackend('memory');
+    sqliteTarget = new LocalAdminTarget(sqliteStorage);
+    memoryTarget = new LocalAdminTarget(memoryStorage);
   });
 
   afterEach(async () => {
@@ -37,20 +42,17 @@ describe('handleMaintenanceCommand', () => {
   });
 
   it('should run checkpoint and vacuum on sqlite storage', async () => {
-    await handleMaintenanceCommand(sqliteStorage, [
-      'maintenance',
-      'checkpoint',
-    ]);
+    await handleMaintenanceCommand(sqliteTarget, ['maintenance', 'checkpoint']);
     expect(testLogger.hasMessage('Checkpoint completed successfully')).toBe(
       true,
     );
 
-    await handleMaintenanceCommand(sqliteStorage, ['maintenance', 'vacuum']);
+    await handleMaintenanceCommand(sqliteTarget, ['maintenance', 'vacuum']);
     expect(testLogger.hasMessage('Vacuum completed successfully')).toBe(true);
   });
 
   it('should run prune on sqlite and memory storage', async () => {
-    await handleMaintenanceCommand(sqliteStorage, [
+    await handleMaintenanceCommand(sqliteTarget, [
       'maintenance',
       'prune',
       undefined as unknown as string,
@@ -58,34 +60,31 @@ describe('handleMaintenanceCommand', () => {
     ]);
     expect(testLogger.hasMessage('Prune completed successfully')).toBe(true);
 
-    await handleMaintenanceCommand(memoryStorage, ['maintenance', 'prune']);
+    await handleMaintenanceCommand(memoryTarget, ['maintenance', 'prune']);
     expect(testLogger.hasMessage('Prune completed successfully')).toBe(true);
   });
 
   it('should throw NotSupported for checkpoint and vacuum on memory storage', async () => {
     await expect(
-      handleMaintenanceCommand(memoryStorage, ['maintenance', 'checkpoint']),
+      handleMaintenanceCommand(memoryTarget, ['maintenance', 'checkpoint']),
     ).rejects.toThrow(/not supported/i);
 
     await expect(
-      handleMaintenanceCommand(memoryStorage, ['maintenance', 'vacuum']),
+      handleMaintenanceCommand(memoryTarget, ['maintenance', 'vacuum']),
     ).rejects.toThrow(/not supported/i);
   });
 
   it('should validate missing action and unknown action errors', async () => {
     await expect(
-      handleMaintenanceCommand(sqliteStorage, ['maintenance']),
+      handleMaintenanceCommand(sqliteTarget, ['maintenance']),
     ).rejects.toThrow(TetherServerError);
 
     await expect(
-      handleMaintenanceCommand(sqliteStorage, [
-        'maintenance',
-        'invalid-action',
-      ]),
+      handleMaintenanceCommand(sqliteTarget, ['maintenance', 'invalid-action']),
     ).rejects.toThrow(TetherServerError);
 
     try {
-      await handleMaintenanceCommand(sqliteStorage, [
+      await handleMaintenanceCommand(sqliteTarget, [
         'maintenance',
         'invalid-action',
       ]);
@@ -98,7 +97,7 @@ describe('handleMaintenanceCommand', () => {
 
   it('should support optional table parameter for checkpoint and prune', async () => {
     await sqliteStorage.createTable('tasks');
-    await handleMaintenanceCommand(sqliteStorage, [
+    await handleMaintenanceCommand(sqliteTarget, [
       'maintenance',
       'checkpoint',
       'tasks',
@@ -107,7 +106,7 @@ describe('handleMaintenanceCommand', () => {
       true,
     );
 
-    await handleMaintenanceCommand(sqliteStorage, [
+    await handleMaintenanceCommand(sqliteTarget, [
       'maintenance',
       'prune',
       'tasks',

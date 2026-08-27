@@ -1,4 +1,8 @@
-import type { ChangeRecord, TableSettings } from '../../../shared/types.js';
+import type {
+  BackendType,
+  ChangeRecord,
+  TableSettings,
+} from '../../../shared/types.js';
 import { verifySessionToken } from '../../crypto.js';
 import type {
   MaintenanceResult,
@@ -19,8 +23,8 @@ export abstract class BaseStorage implements Storage {
     this.options = options;
   }
 
-  /** Backend persistence type name ('file', 'memory', 'sqlite'). */
-  abstract readonly backend: string;
+  /** Backend persistence type ('file', 'memory', 'sqlite'). */
+  abstract readonly backend: BackendType;
 
   /** Secret key used for signing session tokens. */
   abstract readonly secret: string;

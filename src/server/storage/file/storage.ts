@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { shouldOverwrite } from '../../../shared/clock.js';
 import {
+  BackendType,
   type ChangeRecord,
   OperationType,
   type StoredRecord,
@@ -56,7 +57,7 @@ export interface FileStorageOptions extends StorageOptions {
  * Filesystem-backed implementation of `Storage`.
  */
 export class FileStorage extends BaseStorage {
-  readonly backend = 'file';
+  readonly backend = BackendType.File;
   readonly baseDir: string;
   readonly secret: string;
   override readonly options: FileStorageOptions;
@@ -491,7 +492,7 @@ export class FileStorage extends BaseStorage {
 
     return {
       action: 'prune',
-      backend: 'file',
+      backend: BackendType.File,
       tableName,
       affectedCount: totalPruned,
       message: `Prune completed successfully. Removed ${totalPruned} changelog record(s)`,

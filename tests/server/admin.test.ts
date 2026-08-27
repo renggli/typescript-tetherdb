@@ -1,0 +1,161 @@
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  AdminClient,
+  LocalAdminTarget,
+  SqliteStorage,
+  TetherServer,
+} from '../../src/server/index.js';
+
+describe('AdminTarget (LocalAdminTarget & AdminClient)', () => {
+  let tmpDir: string;
+  let storage: SqliteStorage;
+  let server: TetherServer | null = null;
+  let localTarget: LocalAdminTarget;
+  let remoteTarget: AdminClient | null = null;
+
+  beforeEach(async () => {
+    tmpDir = path.join(
+      os.tmpdir(),
+      `tetherdb-admin-test-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    );
+    await fs.mkdir(tmpDir, { recursive: true });
+    storage = new SqliteStorage({ baseDir: tmpDir });
+    localTarget = new LocalAdminTarget(storage);
+  });
+
+  afterEach(async () => {
+    if (server) {
+      await server.close();
+      server = null;
+    }
+    await storage.close();
+    try {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    } catch {
+      // Ignore
+    }
+  });
+
+  it('should perform full administrative CRUD and maintenance via LocalAdminTarget', async () => {
+    // 1. Table CRUD
+    await localTarget.createTable('tasks', { maxRecords: 100 });
+    const tables = await localTarget.getTables();
+    expect(tables.map((t) => t.name)).toContain('tasks');
+
+    const table = await localTarget.getTable('tasks');
+    expect(table?.settings?.maxRecords).toBe(100);
+
+    const updated = await localTarget.updateTable('tasks', { maxRecords: 200 });
+    expect(updated.settings?.maxRecords).toBe(200);
+
+    // 2. User CRUD
+    const user = await localTarget.createUser('alice', 'password123');
+    expect(user.username).toBe('alice');
+    const users = await localTarget.getUsers();
+    expect(users.map((u) => u.username)).toContain('alice');
+
+    // 3. Record CRUD
+    await localTarget.putRecord(
+      'tasks',
+      'rec-1',
+      { title: 'First Task' },
+      user.id,
+    );
+    const records = await localTarget.getRecords('tasks', user.id);
+    expect(records).toHaveLength(1);
+    expect(records[0].id).toBe('rec-1');
+    expect(records[0].data).toEqual({ title: 'First Task' });
+
+    await localTarget.deleteRecord('tasks', 'rec-1', user.id);
+    const recordsAfterDelete = await localTarget.getRecords('tasks', user.id);
+    expect(recordsAfterDelete).toHaveLength(0);
+
+    // 4. Maintenance & Status
+    const status = await localTarget.getStatus();
+    expect(status.tablesCount).toBe(1);
+    expect(status.usersCount).toBe(1);
+
+    const checkpointRes = await localTarget.checkpoint();
+    expect(checkpointRes.action).toBe('checkpoint');
+
+    const vacuumRes = await localTarget.vacuum();
+    expect(vacuumRes.action).toBe('vacuum');
+
+    const pruneRes = await localTarget.prune(10);
+    expect(pruneRes.action).toBe('prune');
+
+    // Cleanup
+    await localTarget.deleteUser(user.id);
+    await localTarget.deleteTable('tasks');
+    expect(await localTarget.getTable('tasks')).toBeUndefined();
+  });
+
+  it('should perform full administrative CRUD and maintenance via AdminClient against a running server', async () => {
+    server = new TetherServer({ storage });
+    const httpServer = await server.listen(0, '127.0.0.1');
+    const addr = httpServer.address();
+    const port = typeof addr === 'object' && addr ? addr.port : 8080;
+
+    remoteTarget = new AdminClient(port, '127.0.0.1', server.adminSecret);
+
+    // 1. Table CRUD
+    await remoteTarget.createTable('remotetasks', { maxRecords: 50 });
+    const tables = await remoteTarget.getTables();
+    expect(tables.map((t) => t.name)).toContain('remotetasks');
+
+    const table = await remoteTarget.getTable('remotetasks');
+    expect(table?.settings?.maxRecords).toBe(50);
+
+    const updated = await remoteTarget.updateTable('remotetasks', {
+      maxRecords: 150,
+    });
+    expect(updated.settings?.maxRecords).toBe(150);
+
+    // 2. User CRUD
+    const user = await remoteTarget.createUser('bobby', 'secretpass');
+    expect(user.username).toBe('bobby');
+    const users = await remoteTarget.getUsers();
+    expect(users.map((u) => u.username)).toContain('bobby');
+
+    // 3. Record CRUD
+    await remoteTarget.putRecord(
+      'remotetasks',
+      'rec-remote',
+      { title: 'Remote Task' },
+      user.id,
+    );
+    const records = await remoteTarget.getRecords('remotetasks', user.id);
+    expect(records).toHaveLength(1);
+    expect(records[0].id).toBe('rec-remote');
+    expect(records[0].data).toEqual({ title: 'Remote Task' });
+
+    await remoteTarget.deleteRecord('remotetasks', 'rec-remote', user.id);
+    const recordsAfterDelete = await remoteTarget.getRecords(
+      'remotetasks',
+      user.id,
+    );
+    expect(recordsAfterDelete).toHaveLength(0);
+
+    // 4. Maintenance & Status
+    const status = await remoteTarget.getStatus();
+    expect(status.tablesCount).toBe(1);
+    expect(status.usersCount).toBe(1);
+
+    const checkpointRes = await remoteTarget.checkpoint();
+    expect(checkpointRes.action).toBe('checkpoint');
+
+    const vacuumRes = await remoteTarget.vacuum();
+    expect(vacuumRes.action).toBe('vacuum');
+
+    const pruneRes = await remoteTarget.prune(10);
+    expect(pruneRes.action).toBe('prune');
+
+    // Cleanup
+    await remoteTarget.deleteUser(user.id);
+    await remoteTarget.deleteTable('remotetasks');
+    expect(await remoteTarget.getTable('remotetasks')).toBeUndefined();
+  });
+});

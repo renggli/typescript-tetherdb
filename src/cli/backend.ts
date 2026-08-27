@@ -8,11 +8,9 @@ import {
   TetherServerError,
   TetherServerErrorCode,
 } from '../server/index.js';
+import { BackendType } from '../shared/types.js';
 
-/**
- * Backend persistence type for TetherDB server.
- */
-export type BackendType = 'memory' | 'file' | 'sqlite';
+export { BackendType };
 
 /**
  * Instantiates the matching Storage implementation for a given backend type and directory.
@@ -23,17 +21,17 @@ export type BackendType = 'memory' | 'file' | 'sqlite';
  * @returns Instantiated `Storage` engine.
  */
 export function createBackend(
-  backend: BackendType = 'memory',
+  backend: BackendType = BackendType.Memory,
   baseDir = '.data',
   options?: StorageOptions,
 ): Storage {
   const resolvedDir = path.resolve(baseDir);
   switch (backend) {
-    case 'memory':
+    case BackendType.Memory:
       return new MemoryStorage(options);
-    case 'sqlite':
+    case BackendType.Sqlite:
       return new SqliteStorage({ baseDir: resolvedDir, ...options });
-    case 'file':
+    case BackendType.File:
       return new FileStorage({ baseDir: resolvedDir, ...options });
     default:
       throw new TetherServerError(

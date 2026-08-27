@@ -1,29 +1,21 @@
 import {
-  type Storage,
+  type AdminTarget,
   TetherServerError,
   TetherServerErrorCode,
 } from '../../server/index.js';
-import { readServerLock } from '../../server/lock.js';
-import { AdminClient } from '../admin-client.js';
 
 /**
  * Handles the 'maintenance' command to execute maintenance routines.
  *
- * @param storage - Instantiated Storage engine (used if offline).
+ * @param target - Active administration target.
  * @param positionalArgs - Positional CLI arguments (e.g. ['maintenance', 'checkpoint', 'my-table']).
- * @param dir - Data directory.
  */
 export async function handleMaintenanceCommand(
-  storage: Storage,
+  target: AdminTarget,
   positionalArgs: string[],
-  dir = '.data',
 ): Promise<void> {
   const action = positionalArgs[1];
   const targetTable = positionalArgs[2];
-  const lock = readServerLock(dir);
-  const admin = lock?.adminSecret
-    ? new AdminClient(lock.port, lock.host, lock.adminSecret)
-    : null;
 
   if (!action) {
     throw new TetherServerError(
@@ -34,17 +26,13 @@ export async function handleMaintenanceCommand(
 
   switch (action) {
     case 'checkpoint': {
-      const result = admin
-        ? await admin.runMaintenance('checkpoint', undefined, targetTable)
-        : await storage.checkpoint(targetTable);
+      const result = await target.checkpoint(targetTable);
       console.log(result.message);
       break;
     }
 
     case 'vacuum': {
-      const result = admin
-        ? await admin.runMaintenance('vacuum')
-        : await storage.vacuum();
+      const result = await target.vacuum();
       console.log(result.message);
       break;
     }
@@ -52,9 +40,7 @@ export async function handleMaintenanceCommand(
     case 'prune': {
       const keepStr = positionalArgs[3];
       const keepCount = keepStr ? Number.parseInt(keepStr, 10) : undefined;
-      const result = admin
-        ? await admin.runMaintenance('prune', keepCount, targetTable)
-        : await storage.prune(keepCount, targetTable);
+      const result = await target.prune(keepCount, targetTable);
       console.log(result.message);
       break;
     }

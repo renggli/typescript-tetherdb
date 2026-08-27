@@ -4,7 +4,7 @@ import {
   type Storage,
   startServer,
 } from '../../server/index.js';
-import type { BackendType } from '../backend.js';
+import { BackendType } from '../../shared/types.js';
 
 /**
  * Handles the 'serve' command to launch the HTTP and WebSocket synchronization server.
@@ -26,7 +26,7 @@ export async function handleServeCommand(
   const running = await startServer({ port, host, storage });
   const hostLabel = running.host === '0.0.0.0' ? 'localhost' : running.host;
   const storageInfo =
-    backend === 'memory'
+    backend === BackendType.Memory
       ? 'in-memory (ephemeral)'
       : `${backend} (${path.resolve(dir)})`;
 

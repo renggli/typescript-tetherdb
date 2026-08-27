@@ -4,12 +4,13 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createBackend } from '../../../src/cli/backend.js';
 import { handleStatusCommand } from '../../../src/cli/commands/status.js';
-import type { Storage } from '../../../src/server/index.js';
+import { LocalAdminTarget, type Storage } from '../../../src/server/index.js';
 import { testLogger } from '../../logger.js';
 
 describe('handleStatusCommand', () => {
   let tmpDir: string;
   let storage: Storage;
+  let target: LocalAdminTarget;
 
   beforeEach(async () => {
     tmpDir = path.join(
@@ -18,6 +19,7 @@ describe('handleStatusCommand', () => {
     );
     await fs.mkdir(tmpDir, { recursive: true });
     storage = createBackend('sqlite', tmpDir);
+    target = new LocalAdminTarget(storage);
   });
 
   afterEach(async () => {
@@ -30,7 +32,7 @@ describe('handleStatusCommand', () => {
   });
 
   it('should display status for empty database', async () => {
-    await handleStatusCommand(storage, ['status'], tmpDir);
+    await handleStatusCommand(target, ['status']);
 
     expect(testLogger.hasMessage('TetherDB Storage Status:')).toBe(true);
     expect(testLogger.hasMessage('Backend:     sqlite')).toBe(true);
@@ -43,7 +45,7 @@ describe('handleStatusCommand', () => {
     await storage.createTable('tasks');
     await storage.createTable('settings');
 
-    await handleStatusCommand(storage, ['status'], tmpDir);
+    await handleStatusCommand(target, ['status']);
 
     expect(testLogger.hasMessage('TetherDB Storage Status:')).toBe(true);
     expect(testLogger.hasMessage('Server:      Stopped')).toBe(true);
@@ -53,20 +55,19 @@ describe('handleStatusCommand', () => {
   });
 
   it('should display running server details when lock is present', async () => {
-    const lockFile = path.join(tmpDir, 'server.lock');
-    await fs.writeFile(
-      lockFile,
-      JSON.stringify({
-        pid: process.pid,
-        port: 8080,
-        host: '0.0.0.0',
-        backend: 'sqlite',
-        startedAt: Date.now(),
-      }),
-      { mode: 0o600 },
-    );
+    const lock = {
+      pid: process.pid,
+      port: 8080,
+      host: '0.0.0.0',
+      backend: 'sqlite' as const,
+      startedAt: Date.now(),
+    };
 
-    await handleStatusCommand(storage, ['status'], tmpDir);
+    await handleStatusCommand(
+      target,
+      ['status'],
+      lock as unknown as import('../../../src/server/lock.js').ServerLockInfo,
+    );
 
     expect(testLogger.hasMessage(/Server:\s+Running \(PID:/)).toBe(true);
   });

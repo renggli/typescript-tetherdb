@@ -33,11 +33,14 @@ describe('runCli', () => {
   });
 
   it('should run serve command and handle SIGINT shutdown signal', async () => {
-    const exitSpy = vi
-      .spyOn(process, 'exit')
-      .mockImplementation((() => {}) as unknown as (
-        code?: string | number | null | undefined,
-      ) => never);
+    let resolveShutdown: () => void;
+    const shutdownPromise = new Promise<void>((r) => {
+      resolveShutdown = r;
+    });
+
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
+      resolveShutdown();
+    }) as unknown as (code?: string | number | null | undefined) => never);
 
     await runCli([
       'serve',
@@ -48,7 +51,7 @@ describe('runCli', () => {
 
     // Emit shutdown signal
     process.emit('SIGINT');
-    await new Promise((r) => setTimeout(r, 50));
+    await shutdownPromise;
 
     expect(testLogger.hasMessage('Stopping TetherDB server...')).toBe(true);
     expect(exitSpy).toHaveBeenCalledWith(0);

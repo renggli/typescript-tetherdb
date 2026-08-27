@@ -1,15 +1,13 @@
 #!/usr/bin/env node
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
-  type Storage,
-  TetherServerError,
-  TetherServerErrorCode,
-} from '../server/index.js';
+import { TetherServerError, TetherServerErrorCode } from '../server/index.js';
+import { type ResolvedAdminContext, resolveAdminTarget } from './admin.js';
 import { parseCliArgs } from './args.js';
 import { createBackend } from './backend.js';
 import {
   handleMaintenanceCommand,
+  handleMigrateCommand,
   handleRecordsCommand,
   handleServeCommand,
   handleStatusCommand,
@@ -31,32 +29,44 @@ export async function runCli(
     printHelp();
     return;
   }
-  let storage: Storage | undefined;
+  let adminContext: ResolvedAdminContext | undefined;
   try {
     const { command, positionalArgs, port, host, backend, dir } =
       parseCliArgs(args);
-    storage = createBackend(backend, dir);
+    if (command === 'migrate') {
+      await handleMigrateCommand(positionalArgs, backend, dir);
+      return;
+    }
+    if (command === 'stop') {
+      await handleStopCommand(dir);
+      return;
+    }
+    if (command === 'serve') {
+      const storage = createBackend(backend, dir);
+      await handleServeCommand(storage, backend, dir, port, host);
+      return;
+    }
+
+    adminContext = await resolveAdminTarget(dir, backend);
     switch (command) {
-      case 'serve':
-        await handleServeCommand(storage, backend, dir, port, host);
-        break;
       case 'status':
-        await handleStatusCommand(storage, positionalArgs, dir);
-        break;
-      case 'stop':
-        await handleStopCommand(dir);
+        await handleStatusCommand(
+          adminContext.target,
+          positionalArgs,
+          adminContext.lock,
+        );
         break;
       case 'maintenance':
-        await handleMaintenanceCommand(storage, positionalArgs, dir);
+        await handleMaintenanceCommand(adminContext.target, positionalArgs);
         break;
       case 'tables':
-        await handleTablesCommand(storage, positionalArgs, dir);
+        await handleTablesCommand(adminContext.target, positionalArgs);
         break;
       case 'records':
-        await handleRecordsCommand(storage, positionalArgs, dir);
+        await handleRecordsCommand(adminContext.target, positionalArgs);
         break;
       case 'users':
-        await handleUsersCommand(storage, positionalArgs, dir);
+        await handleUsersCommand(adminContext.target, positionalArgs);
         break;
       default:
         throw new TetherServerError(
@@ -64,10 +74,10 @@ export async function runCli(
           `Unknown command: "${command}"`,
         );
     }
-    await storage.close?.();
+    await adminContext.close();
   } catch (err) {
-    console.error('Command failed:', (err as Error).message);
-    await storage?.close?.();
+    console.error(`Command failed: ${(err as Error).message}`);
+    await adminContext?.close();
     process.exit(1);
   }
 }
