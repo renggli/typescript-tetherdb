@@ -410,17 +410,7 @@ export class LocalAdminTarget implements AdminTarget {
     data: unknown,
     userId?: string,
   ): Promise<void> {
-    const user = userId ? await this.storage.getUser(userId) : undefined;
-    await this.storage.applyChanges(user, [
-      {
-        table: tableName,
-        id,
-        op: OperationType.Put,
-        data,
-        timestamp: Date.now(),
-        clientId: 'admin-cli',
-      },
-    ]);
+    await this.applyAdminChange(tableName, id, OperationType.Put, data, userId);
   }
 
   async deleteRecord(
@@ -428,16 +418,13 @@ export class LocalAdminTarget implements AdminTarget {
     id: string,
     userId?: string,
   ): Promise<void> {
-    const user = userId ? await this.storage.getUser(userId) : undefined;
-    await this.storage.applyChanges(user, [
-      {
-        table: tableName,
-        id,
-        op: OperationType.Delete,
-        timestamp: Date.now(),
-        clientId: 'admin-cli',
-      },
-    ]);
+    await this.applyAdminChange(
+      tableName,
+      id,
+      OperationType.Delete,
+      undefined,
+      userId,
+    );
   }
 
   async checkpoint(tableName?: string): Promise<MaintenanceResult> {
@@ -457,5 +444,27 @@ export class LocalAdminTarget implements AdminTarget {
 
   async close(): Promise<void> {
     await this.storage.close?.();
+  }
+
+  // -- Private Helpers ------------------------------------------------------
+
+  private async applyAdminChange(
+    table: string,
+    id: string,
+    op: OperationType,
+    data?: unknown,
+    userId?: string,
+  ): Promise<void> {
+    const user = userId ? await this.storage.getUser(userId) : undefined;
+    await this.storage.applyChanges(user, [
+      {
+        table,
+        id,
+        op,
+        data,
+        timestamp: Date.now(),
+        clientId: 'admin-cli',
+      },
+    ]);
   }
 }
