@@ -10,12 +10,10 @@ import {
 import { hashPassword } from '../../crypto.js';
 import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
 import {
-  calculateByteSize,
   normalizeUsername,
   validatePassword,
   validateRecordId,
   validateTableName,
-  validateTimestamp,
   validateUserId,
   validateUsername,
 } from '../../validate.js';
@@ -25,6 +23,7 @@ import {
   BaseStorage,
   canRead,
   isPrivateTable,
+  validateBatchChanges,
 } from '../base/index.js';
 import type { MaintenanceResult, StorageOptions } from '../storage.js';
 import type { TableStorage } from '../table.js';
@@ -151,29 +150,7 @@ export class MemoryStorage extends BaseStorage {
     const defaultMaxHistory = this.options.maxHistoryEntries ?? 1000;
 
     // Phase 1: Pre-validate all changes in the batch
-    for (const change of changes) {
-      const tableName = validateTableName(change.table);
-      validateRecordId(change.id);
-      validateTimestamp(change.timestamp);
-
-      const table = this.tables.get(tableName);
-      if (!table) {
-        throw new TetherServerError(
-          TetherServerErrorCode.NotFound,
-          `Table "${tableName}" not found`,
-        );
-      }
-
-      const maxRecordSize =
-        table.settings.maxRecordSizeBytes ?? defaultMaxRecordSize;
-      const payloadBytes = calculateByteSize(change.data);
-      if (payloadBytes > maxRecordSize) {
-        throw new TetherServerError(
-          TetherServerErrorCode.LimitExceeded,
-          'Record payload exceeds maximum allowed size',
-        );
-      }
-    }
+    await validateBatchChanges(this, changes, defaultMaxRecordSize);
 
     // Phase 2: Stage mutations
     const stagedUserTables = new Map<string, Map<string, StoredRecord>>();

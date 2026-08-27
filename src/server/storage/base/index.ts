@@ -1,6 +1,7 @@
 export {
   BaseStorage,
   buildTableSummaries,
+  validateBatchChanges,
 } from './storage.js';
 export {
   applyChangeToRecord,

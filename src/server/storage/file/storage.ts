@@ -13,13 +13,10 @@ import { getOrCreateKeyfileSecret, hashPassword } from '../../crypto.js';
 import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
 import { readServerLock } from '../../lock.js';
 import {
-  calculateByteSize,
   getUserBucket,
   normalizeUsername,
   validatePassword,
-  validateRecordId,
   validateTableName,
-  validateTimestamp,
   validateUserId,
   validateUsername,
 } from '../../validate.js';
@@ -29,6 +26,7 @@ import {
   BaseStorage,
   canRead,
   isPrivateTable,
+  validateBatchChanges,
 } from '../base/index.js';
 import type { MaintenanceResult, StorageOptions } from '../storage.js';
 import type { TableStorage } from '../table.js';
@@ -178,29 +176,7 @@ export class FileStorage extends BaseStorage {
     const defaultMaxHistory = this.options.maxHistoryEntries ?? 1000;
 
     // Phase 1: Pre-validate
-    for (const change of changes) {
-      const tableName = validateTableName(change.table);
-      validateRecordId(change.id);
-      validateTimestamp(change.timestamp);
-
-      const table = await this.getTable(tableName);
-      if (!table) {
-        throw new TetherServerError(
-          TetherServerErrorCode.NotFound,
-          `Table "${tableName}" not found`,
-        );
-      }
-
-      const maxRecordSize =
-        table.settings.maxRecordSizeBytes ?? defaultMaxRecordSize;
-      const payloadBytes = calculateByteSize(change.data);
-      if (payloadBytes > maxRecordSize) {
-        throw new TetherServerError(
-          TetherServerErrorCode.LimitExceeded,
-          'Record payload exceeds maximum allowed size',
-        );
-      }
-    }
+    await validateBatchChanges(this, changes, defaultMaxRecordSize);
 
     // Phase 2: Lock and apply changes
     return this.withLock('__apply_changes__', async () => {

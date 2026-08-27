@@ -4,6 +4,13 @@ import type {
   TableSettings,
 } from '../../../shared/types.js';
 import { verifySessionToken } from '../../crypto.js';
+import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
+import {
+  calculateByteSize,
+  validateRecordId,
+  validateTableName,
+  validateTimestamp,
+} from '../../validate.js';
 import type {
   MaintenanceResult,
   Storage,
@@ -117,4 +124,37 @@ export async function buildTableSummaries(
     });
   }
   return summaries;
+}
+
+/**
+ * Validates a batch of change records before applying them to storage.
+ */
+export async function validateBatchChanges(
+  storage: Storage,
+  changes: ChangeRecord[],
+  defaultMaxRecordSize = 512 * 1024,
+): Promise<void> {
+  for (const change of changes) {
+    const tableName = validateTableName(change.table);
+    validateRecordId(change.id);
+    validateTimestamp(change.timestamp);
+
+    const table = await storage.getTable(tableName);
+    if (!table) {
+      throw new TetherServerError(
+        TetherServerErrorCode.NotFound,
+        `Table "${tableName}" not found`,
+      );
+    }
+
+    const maxRecordSize =
+      table.settings.maxRecordSizeBytes ?? defaultMaxRecordSize;
+    const payloadBytes = calculateByteSize(change.data);
+    if (payloadBytes > maxRecordSize) {
+      throw new TetherServerError(
+        TetherServerErrorCode.LimitExceeded,
+        'Record payload exceeds maximum allowed size',
+      );
+    }
+  }
 }
