@@ -1,30 +1,41 @@
 import * as crypto from 'node:crypto';
+import { shouldOverwrite } from '../../../shared/clock.js';
+import {
+  type ChangeRecord,
+  OperationType,
+  type StoredRecord,
+  type TableSettings,
+} from '../../../shared/types.js';
 import { hashPassword } from '../../crypto.js';
 import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
 import {
+  calculateByteSize,
   normalizeUsername,
-  validateAppId,
   validatePassword,
+  validateRecordId,
+  validateTableName,
+  validateTimestamp,
   validateUserId,
   validateUsername,
 } from '../../validate.js';
-import type { AppStorage } from '../app.js';
-import { BaseStorage, filterTargetApps } from '../base/index.js';
+import {
+  applyChangeToRecord,
+  assertCanMutate,
+  BaseStorage,
+  canRead,
+  isPrivateTable,
+} from '../base/index.js';
 import type { MaintenanceResult, StorageOptions } from '../storage.js';
+import type { TableStorage } from '../table.js';
 import type { UserStorage } from '../user.js';
-import { AppMemoryStorage } from './app.js';
+import { TableMemoryStorage } from './table.js';
 import { type MemoryUserData, UserMemoryStorage } from './user.js';
 
-export interface UserState {
+export interface StatePartition {
   currentSeq: number;
   minSeq: number;
-  tables: Map<
-    string,
-    Map<string, import('../../../shared/types.js').StoredRecord>
-  >;
-  changelog: Array<
-    import('../../../shared/types.js').ChangeRecord & { seq: number }
-  >;
+  tables: Map<string, Map<string, StoredRecord>>;
+  changelog: Array<ChangeRecord & { seq: number }>;
 }
 
 export interface MemoryStorageOptions extends StorageOptions {}
@@ -34,12 +45,19 @@ export interface MemoryStorageOptions extends StorageOptions {}
  */
 export class MemoryStorage extends BaseStorage {
   readonly backend = 'memory';
-  private apps: Map<string, AppMemoryStorage> = new Map();
-  private userStates: Map<string, UserState> = new Map(); // key = `${appId}:${userId}`
-  private users: Map<string, MemoryUserData> = new Map(); // key = userId
-  private usersByUsername: Map<string, string> = new Map(); // username -> userId
   readonly secret: string;
-  readonly options: MemoryStorageOptions;
+  override readonly options: MemoryStorageOptions;
+  private globalSeq = 0;
+  private tables: Map<string, TableMemoryStorage> = new Map();
+  private users: Map<string, MemoryUserData> = new Map();
+  private usersByUsername: Map<string, string> = new Map();
+  private userStates: Map<string, StatePartition> = new Map();
+  private sharedState: StatePartition = {
+    currentSeq: 0,
+    minSeq: 0,
+    tables: new Map(),
+    changelog: [],
+  };
 
   constructor(options: MemoryStorageOptions = {}) {
     super(options);
@@ -47,73 +65,29 @@ export class MemoryStorage extends BaseStorage {
     this.secret = options.secret ?? crypto.randomBytes(32).toString('hex');
   }
 
-  getUserState(userId: string, appId: string): UserState {
-    const safeAppId = validateAppId(appId);
-    const safeUserId = validateUserId(userId);
-    const key = `${safeAppId}:${safeUserId}`;
-    let state = this.userStates.get(key);
-    if (!state) {
-      state = {
-        currentSeq: 0,
-        minSeq: 0,
-        tables: new Map(),
-        changelog: [],
-      };
-      this.userStates.set(key, state);
-    }
-    return state;
-  }
-
-  deleteUserState(userId: string): boolean {
-    const safeUserId = validateUserId(userId);
-    let deleted = false;
-    for (const key of Array.from(this.userStates.keys())) {
-      if (key.endsWith(`:${safeUserId}`)) {
-        this.userStates.delete(key);
-        deleted = true;
-      }
-    }
-    return deleted;
-  }
-
-  deleteAppUserStates(appId: string): void {
-    const safeAppId = validateAppId(appId);
-    for (const key of Array.from(this.userStates.keys())) {
-      if (key.startsWith(`${safeAppId}:`)) {
-        this.userStates.delete(key);
-      }
-    }
-  }
-
-  deleteTableInUserStates(appId: string, tableName: string): void {
-    const safeAppId = validateAppId(appId);
-    for (const [key, state] of this.userStates.entries()) {
-      if (key.startsWith(`${safeAppId}:`)) {
-        state.tables.delete(tableName);
-      }
-    }
-  }
-
-  async createApp(id: string): Promise<AppStorage> {
-    const safeId = validateAppId(id);
-    if (this.apps.has(safeId)) {
+  async createTable(
+    name: string,
+    settings: TableSettings = {},
+  ): Promise<TableStorage> {
+    const safeName = validateTableName(name);
+    if (this.tables.has(safeName)) {
       throw new TetherServerError(
         TetherServerErrorCode.AlreadyExists,
-        'Application already exists',
+        'Table already exists',
       );
     }
-    const app = new AppMemoryStorage(safeId, this);
-    this.apps.set(safeId, app);
-    return app;
+    const table = new TableMemoryStorage(safeName, this, settings);
+    this.tables.set(safeName, table);
+    return table;
   }
 
-  async getApp(id: string): Promise<AppStorage | undefined> {
-    const safeId = validateAppId(id);
-    return this.apps.get(safeId);
+  async getTable(name: string): Promise<TableStorage | undefined> {
+    const safeName = validateTableName(name);
+    return this.tables.get(safeName);
   }
 
-  async getApps(): Promise<AppStorage[]> {
-    return Array.from(this.apps.values());
+  async getTables(): Promise<TableStorage[]> {
+    return Array.from(this.tables.values());
   }
 
   async createUser(username: string, password: string): Promise<UserStorage> {
@@ -138,10 +112,6 @@ export class MemoryStorage extends BaseStorage {
     this.users.set(userId, userData);
     this.usersByUsername.set(safeUsername, userId);
     return new UserMemoryStorage(userData, this);
-  }
-
-  getUserData(userId: string): MemoryUserData | undefined {
-    return this.users.get(userId);
   }
 
   async getUser(id: string): Promise<UserStorage | undefined> {
@@ -171,9 +141,308 @@ export class MemoryStorage extends BaseStorage {
     );
   }
 
+  async applyChanges(
+    user: UserStorage | undefined,
+    changes: ChangeRecord[],
+  ): Promise<{ applied: ChangeRecord[]; newSeq: number }> {
+    const defaultMaxRecords = this.options.maxRecords ?? 10_000;
+    const defaultMaxRecordSize = this.options.maxRecordSizeBytes ?? 512 * 1024;
+    const defaultMaxHistory = this.options.maxHistoryEntries ?? 1000;
+
+    // Phase 1: Pre-validate all changes in the batch
+    for (const change of changes) {
+      const tableName = validateTableName(change.table);
+      validateRecordId(change.id);
+      validateTimestamp(change.timestamp);
+
+      const table = this.tables.get(tableName);
+      if (!table) {
+        throw new TetherServerError(
+          TetherServerErrorCode.NotFound,
+          `Table "${tableName}" not found`,
+        );
+      }
+
+      const maxRecordSize =
+        table.settings.maxRecordSizeBytes ?? defaultMaxRecordSize;
+      const payloadBytes = calculateByteSize(change.data);
+      if (payloadBytes > maxRecordSize) {
+        throw new TetherServerError(
+          TetherServerErrorCode.LimitExceeded,
+          'Record payload exceeds maximum allowed size',
+        );
+      }
+    }
+
+    // Phase 2: Stage mutations
+    const stagedUserTables = new Map<string, Map<string, StoredRecord>>();
+    const stagedSharedTables = new Map<string, Map<string, StoredRecord>>();
+    const stagedApplied: (ChangeRecord & { seq: number })[] = [];
+
+    const userState = user ? this.getUserState(user.id) : null;
+
+    for (const change of changes) {
+      const tableName = validateTableName(change.table);
+      const recordId = validateRecordId(change.id);
+      const table = this.tables.get(tableName);
+      if (!table) continue;
+      const isPrivate = isPrivateTable(table);
+
+      const maxRecords = table.settings.maxRecords ?? defaultMaxRecords;
+      let targetMap: Map<string, StoredRecord>;
+
+      if (isPrivate) {
+        if (!userState) {
+          throw new TetherServerError(
+            TetherServerErrorCode.Forbidden,
+            `Authentication required for private table "${tableName}"`,
+          );
+        }
+        let stagedMap = stagedUserTables.get(tableName);
+        if (!stagedMap) {
+          const existingMap = userState.tables.get(tableName);
+          stagedMap = new Map(existingMap);
+          stagedUserTables.set(tableName, stagedMap);
+        }
+        targetMap = stagedMap;
+      } else {
+        let stagedMap = stagedSharedTables.get(tableName);
+        if (!stagedMap) {
+          const existingMap = this.sharedState.tables.get(tableName);
+          stagedMap = new Map(existingMap);
+          stagedSharedTables.set(tableName, stagedMap);
+        }
+        targetMap = stagedMap;
+      }
+
+      const existing = targetMap.get(recordId);
+      assertCanMutate(table, user, change, existing);
+
+      if (
+        change.op === OperationType.Put &&
+        (!existing || existing.deleted) &&
+        targetMap.size >= maxRecords
+      ) {
+        throw new TetherServerError(
+          TetherServerErrorCode.LimitExceeded,
+          `Table record limit reached (${maxRecords} records)`,
+        );
+      }
+
+      const shouldApply = !existing || shouldOverwrite(change, existing);
+
+      if (shouldApply) {
+        this.globalSeq++;
+        const assignedSeq = this.globalSeq;
+
+        const { updatedRecord, appliedChange } = applyChangeToRecord(
+          change,
+          existing,
+          assignedSeq,
+          user,
+        );
+
+        targetMap.set(recordId, updatedRecord);
+        stagedApplied.push(appliedChange);
+      }
+    }
+
+    // Phase 3: Commit staged modifications
+    if (userState) {
+      for (const [tableName, stagedMap] of stagedUserTables.entries()) {
+        userState.tables.set(tableName, stagedMap);
+      }
+      userState.currentSeq = this.globalSeq;
+      if (userState.minSeq === 0 && this.globalSeq > 0) userState.minSeq = 1;
+    }
+
+    for (const [tableName, stagedMap] of stagedSharedTables.entries()) {
+      this.sharedState.tables.set(tableName, stagedMap);
+    }
+    this.sharedState.currentSeq = this.globalSeq;
+    if (this.sharedState.minSeq === 0 && this.globalSeq > 0) {
+      this.sharedState.minSeq = 1;
+    }
+
+    for (const applied of stagedApplied) {
+      const table = this.tables.get(applied.table);
+      if (!table) continue;
+      const isPrivate = isPrivateTable(table);
+      if (isPrivate && userState) {
+        userState.changelog.push(applied);
+      } else {
+        this.sharedState.changelog.push(applied);
+      }
+    }
+
+    // Phase 4: Automatic compaction with hysteresis buffer (+50)
+    if (userState && userState.changelog.length > defaultMaxHistory + 50) {
+      const pruneCount = userState.changelog.length - defaultMaxHistory;
+      userState.changelog.splice(0, pruneCount);
+      if (userState.changelog.length > 0) {
+        userState.minSeq = userState.changelog[0].seq;
+      }
+    }
+    if (this.sharedState.changelog.length > defaultMaxHistory + 50) {
+      const pruneCount = this.sharedState.changelog.length - defaultMaxHistory;
+      this.sharedState.changelog.splice(0, pruneCount);
+      if (this.sharedState.changelog.length > 0) {
+        this.sharedState.minSeq = this.sharedState.changelog[0].seq;
+      }
+    }
+
+    return { applied: stagedApplied, newSeq: this.globalSeq };
+  }
+
+  async getChangesSince(
+    user: UserStorage | undefined,
+    fromSeq: number,
+    tableFilters?: string[],
+  ): Promise<{
+    changes: ChangeRecord[];
+    currentSeq: number;
+    requiresSnapshot?: boolean;
+  }> {
+    const currentSeq = this.globalSeq;
+    const userState = user ? this.getUserState(user.id) : null;
+    const userMinSeq = userState?.minSeq ?? 0;
+    const sharedMinSeq = this.sharedState.minSeq;
+
+    const minSeq = Math.max(userMinSeq, sharedMinSeq);
+    if ((fromSeq < minSeq && minSeq > 0) || fromSeq > currentSeq) {
+      return { changes: [], currentSeq, requiresSnapshot: true };
+    }
+
+    const allChanges: (ChangeRecord & { seq: number })[] = [];
+    if (userState) {
+      allChanges.push(...userState.changelog.filter((c) => c.seq > fromSeq));
+    }
+    allChanges.push(
+      ...this.sharedState.changelog.filter((c) => c.seq > fromSeq),
+    );
+
+    allChanges.sort((a, b) => a.seq - b.seq);
+
+    const filtered = allChanges.filter((c) => {
+      const table = this.tables.get(c.table);
+      if (!table || !canRead(table, user)) return false;
+      if (tableFilters && !tableFilters.includes(c.table)) return false;
+      return true;
+    });
+
+    return { changes: filtered, currentSeq, requiresSnapshot: false };
+  }
+
+  async getCurrentSeq(_user?: UserStorage): Promise<number> {
+    return this.globalSeq;
+  }
+
+  async checkpoint(_tableName?: string): Promise<MaintenanceResult> {
+    throw new TetherServerError(
+      TetherServerErrorCode.NotSupported,
+      'Checkpoint operation is not supported by memory storage',
+    );
+  }
+
+  async vacuum(): Promise<MaintenanceResult> {
+    throw new TetherServerError(
+      TetherServerErrorCode.NotSupported,
+      'Vacuum operation is not supported by memory storage',
+    );
+  }
+
+  async prune(
+    keepCount?: number,
+    tableName?: string,
+  ): Promise<MaintenanceResult> {
+    const keep = keepCount ?? this.options.maxHistoryEntries ?? 1000;
+    let totalPruned = 0;
+
+    for (const state of this.userStates.values()) {
+      if (state.changelog.length > keep) {
+        const pruneCount = state.changelog.length - keep;
+        state.changelog.splice(0, pruneCount);
+        if (state.changelog.length > 0) {
+          state.minSeq = state.changelog[0].seq;
+        }
+        totalPruned += pruneCount;
+      }
+    }
+    if (this.sharedState.changelog.length > keep) {
+      const pruneCount = this.sharedState.changelog.length - keep;
+      this.sharedState.changelog.splice(0, pruneCount);
+      if (this.sharedState.changelog.length > 0) {
+        this.sharedState.minSeq = this.sharedState.changelog[0].seq;
+      }
+      totalPruned += pruneCount;
+    }
+
+    return {
+      action: 'prune',
+      backend: 'memory',
+      tableName,
+      affectedCount: totalPruned,
+      message: `Prune completed successfully. Removed ${totalPruned} changelog record(s)`,
+    };
+  }
+
+  async close(): Promise<void> {
+    this.tables.clear();
+    this.userStates.clear();
+    this.sharedState.tables.clear();
+    this.sharedState.changelog.length = 0;
+    this.users.clear();
+    this.usersByUsername.clear();
+  }
+
+  getUserState(userId: string): StatePartition {
+    const safeUserId = validateUserId(userId);
+    let state = this.userStates.get(safeUserId);
+    if (!state) {
+      state = {
+        currentSeq: 0,
+        minSeq: 0,
+        tables: new Map(),
+        changelog: [],
+      };
+      this.userStates.set(safeUserId, state);
+    }
+    return state;
+  }
+
+  getTableRecordsMap(
+    tableName: string,
+    userId?: string,
+  ): Map<string, StoredRecord> | undefined {
+    const table = this.tables.get(tableName);
+    if (!table) return undefined;
+    const isPrivate = isPrivateTable(table);
+
+    if (isPrivate) {
+      if (!userId) return undefined;
+      const userState = this.getUserState(userId);
+      return userState.tables.get(tableName);
+    }
+    return this.sharedState.tables.get(tableName);
+  }
+
+  getUserData(userId: string): MemoryUserData | undefined {
+    return this.users.get(userId);
+  }
+
+  deleteTable(name: string): boolean {
+    const safeName = validateTableName(name);
+    const deleted = this.tables.delete(safeName);
+    for (const state of this.userStates.values()) {
+      state.tables.delete(safeName);
+    }
+    this.sharedState.tables.delete(safeName);
+    return deleted;
+  }
+
   deleteUser(id: string): boolean {
     const safeUserId = validateUserId(id);
-    this.deleteUserState(safeUserId);
+    this.userStates.delete(safeUserId);
     const data = this.users.get(safeUserId);
     if (data) {
       this.usersByUsername.delete(data.username);
@@ -181,62 +450,5 @@ export class MemoryStorage extends BaseStorage {
       return true;
     }
     return false;
-  }
-
-  deleteApp(id: string): boolean {
-    const safeId = validateAppId(id);
-    this.deleteAppUserStates(safeId);
-    return this.apps.delete(safeId);
-  }
-
-  async checkpoint(appId?: string): Promise<MaintenanceResult> {
-    throw new TetherServerError(
-      TetherServerErrorCode.NotSupported,
-      `Checkpoint operation is not supported by memory storage${appId ? ` (app: ${appId})` : ''}`,
-    );
-  }
-
-  async vacuum(appId?: string): Promise<MaintenanceResult> {
-    throw new TetherServerError(
-      TetherServerErrorCode.NotSupported,
-      `Vacuum operation is not supported by memory storage${appId ? ` (app: ${appId})` : ''}`,
-    );
-  }
-
-  async prune(appId?: string, keepCount?: number): Promise<MaintenanceResult> {
-    const keep = keepCount ?? this.options.maxChangelogEntries ?? 1000;
-    const allApps = await this.getApps();
-    const targetApps = filterTargetApps(allApps, appId);
-
-    let totalPruned = 0;
-    for (const app of targetApps) {
-      for (const [key, state] of this.userStates.entries()) {
-        if (key.startsWith(`${app.id}:`)) {
-          if (state.changelog.length > keep) {
-            const pruneCount = state.changelog.length - keep;
-            state.changelog.splice(0, pruneCount);
-            if (state.changelog.length > 0) {
-              state.minSeq = state.changelog[0].seq;
-            }
-            totalPruned += pruneCount;
-          }
-        }
-      }
-    }
-
-    return {
-      action: 'prune',
-      backend: 'memory',
-      appId,
-      affectedCount: totalPruned,
-      message: `Prune completed successfully. Removed ${totalPruned} changelog record(s)`,
-    };
-  }
-
-  async close(): Promise<void> {
-    this.apps.clear();
-    this.userStates.clear();
-    this.users.clear();
-    this.usersByUsername.clear();
   }
 }

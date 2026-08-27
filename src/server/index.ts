@@ -3,7 +3,12 @@
  *
  * @module tetherdb/server
  */
-export { PROTOCOL_VERSION } from '../shared/types.js';
+export {
+  Permission,
+  PROTOCOL_VERSION,
+  type TablePermissions,
+  type TableSettings,
+} from '../shared/types.js';
 export {
   TetherServerError,
   TetherServerErrorCode,
@@ -19,8 +24,6 @@ export {
   type TetherServerOptions,
 } from './server.js';
 export {
-  AppBaseStorage,
-  type AppStorage,
   BaseStorage,
   FileStorage,
   type FileStorageOptions,

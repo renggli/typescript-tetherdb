@@ -1,19 +1,46 @@
+import * as crypto from 'node:crypto';
 import * as http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { normalizeBasePath } from '../shared/path.js';
+import {
+  type ChangeRecord,
+  OperationType,
+  type TableSettings,
+} from '../shared/types.js';
 import { verifyDummyPasswordHash } from './crypto.js';
 import { TetherServerError, TetherServerErrorCode } from './errors.js';
 import { acquireServerLock, type ServerLockHandle } from './lock.js';
 import { RateLimiter } from './rate-limiter.js';
-import type { Storage, UserStorage } from './storage/index.js';
+import type {
+  MaintenanceResult,
+  Storage,
+  TableStorage,
+  UserStorage,
+} from './storage/index.js';
 import { MemoryStorage } from './storage/memory/index.js';
 import { Sync } from './sync.js';
-import { normalizePassword, normalizeUsername } from './validate.js';
+import {
+  normalizePassword,
+  normalizeUsername,
+  validateTableName,
+} from './validate.js';
 
 /**
  * Rate limiting and resource control options for authentication endpoints and sync streams.
  */
 export interface RateLimitOptions {
+  /** Sliding window duration in milliseconds (defaults to 60,000ms / 1 minute). */
+  windowMs?: number;
+  /** Maximum duration in milliseconds to wait for authentication before terminating socket (defaults to 10,000ms). */
+  authTimeoutMs?: number;
+  /** Maximum concurrent active WebSocket connections allowed per user channel (defaults to 20). */
+  maxConcurrentConnectionsPerUser?: number;
+  /** Consecutive failed attempts before progressive backoff begins (defaults to 5). */
+  maxFailures?: number;
+  /** Initial backoff duration in milliseconds (defaults to 1,000ms). */
+  initialBackoffMs?: number;
+  /** Maximum backoff duration in milliseconds (defaults to 900,000ms / 15 minutes). */
+  maxBackoffMs?: number;
   /** Maximum login attempts per IP within the time window (defaults to 100). */
   ipLoginMaxRequests?: number;
   /** Maximum login attempts per target username within the time window (defaults to 20). */
@@ -22,18 +49,6 @@ export interface RateLimitOptions {
   ipRegisterMaxRequests?: number;
   /** Maximum WebSocket connection handshakes per IP within the time window (defaults to 100). */
   ipSyncMaxRequests?: number;
-  /** Maximum concurrent active WebSocket connections allowed per user channel (defaults to 20). */
-  maxConcurrentConnectionsPerUser?: number;
-  /** Maximum duration in milliseconds to wait for authentication before terminating socket (defaults to 10,000ms). */
-  authTimeoutMs?: number;
-  /** Sliding window duration in milliseconds (defaults to 60,000ms / 1 minute). */
-  windowMs?: number;
-  /** Consecutive failed attempts before progressive backoff begins (defaults to 5). */
-  maxFailures?: number;
-  /** Initial backoff duration in milliseconds (defaults to 1,000ms). */
-  initialBackoffMs?: number;
-  /** Maximum backoff duration in milliseconds (defaults to 900,000ms / 15 minutes). */
-  maxBackoffMs?: number;
 }
 
 /**
@@ -90,30 +105,32 @@ export interface TetherServerOptions {
   cors?: boolean | CorsOptions;
   /** Optional custom logger instance, or `false` to silence internal server logs (defaults to `console`). */
   logger?: TetherLogger | false;
+  /** Optional secret token required for accessing local admin endpoints. */
+  adminSecret?: string;
 }
 
 /**
  * Options for starting the standard server launcher.
  */
 export interface StartServerOptions extends TetherServerOptions {
-  /** Port number to bind (defaults to 8080 or PORT environment variable). */
-  port?: number;
   /** Host interface to bind (defaults to '0.0.0.0'). */
   host?: string;
+  /** Port number to bind (defaults to 8080 or PORT environment variable). */
+  port?: number;
 }
 
 /**
  * Result returned when launching a server using `startServer()`.
  */
 export interface RunningServer {
+  /** Bound host address. */
+  host: string;
+  /** Bound port number. */
+  port: number;
   /** The TetherServer instance. */
   server: TetherServer;
   /** The running Node.js HTTP server instance. */
   httpServer: http.Server;
-  /** Bound port number. */
-  port: number;
-  /** Bound host address. */
-  host: string;
   /** Closes both HTTP and WebSocket server cleanly. */
   close(): Promise<void>;
 }
@@ -149,11 +166,11 @@ export async function startServer(
 }
 
 /**
- * Unified HTTP and WebSocket server handling authentication endpoints (`/auth/register`, `/auth/login`)
- * and real-time streaming connections (`/sync`).
+ * Unified HTTP and WebSocket server handling authentication endpoints (`/auth/register`, `/auth/login`),
+ * real-time streaming connections (`/sync`), and administration routes (`/admin/*`).
  */
 export class TetherServer {
-  /** Underlying storage engine for users, apps, and tables. */
+  /** Underlying storage engine for users and tables. */
   readonly storage: Storage;
   /** Real-time synchronization connection and broadcast coordinator. */
   readonly sync: Sync;
@@ -171,6 +188,7 @@ export class TetherServer {
   private _httpServer: http.Server | null = null;
   private _webSocketServer: WebSocketServer | null = null;
   private lockHandle: ServerLockHandle | null = null;
+  private adminSecret: string;
 
   /**
    * Initializes a new TetherServer instance.
@@ -183,6 +201,8 @@ export class TetherServer {
     this.webSocketPath = options.webSocketPath ?? `${this.basePath}/sync`;
     this.allowRegistration = options.allowRegistration ?? true;
     this.trustProxy = options.trustProxy ?? false;
+    this.adminSecret =
+      options.adminSecret ?? crypto.randomBytes(32).toString('hex');
     this.corsConfig =
       options.cors === false
         ? null
@@ -262,23 +282,25 @@ export class TetherServer {
   }
 
   /**
-   * Declares an application and its tables.
-   * Registers the application and any declared tables if not already present.
+   * Declares a table with optional settings.
+   * Creates the table if not already present or updates its settings.
    *
-   * @param appId - Application identifier.
-   * @param tables - Array of table names.
+   * @param name - Name of the table.
+   * @param settings - Optional table settings.
+   * @returns TableStorage handle for the declared table.
    */
-  async declareApp(appId: string, tables: string[] = []): Promise<void> {
-    let app = await this.storage.getApp(appId);
-    if (!app) {
-      app = await this.storage.createApp(appId);
+  async declareTable(
+    name: string,
+    settings?: TableSettings,
+  ): Promise<TableStorage> {
+    const safeName = validateTableName(name);
+    let table = await this.storage.getTable(safeName);
+    if (!table) {
+      table = await this.storage.createTable(safeName, settings);
+    } else if (settings) {
+      await table.updateSettings(settings);
     }
-    for (const table of tables) {
-      const existing = await app.getTable(table);
-      if (!existing) {
-        await app.createTable(table);
-      }
-    }
+    return table;
   }
 
   /**
@@ -356,6 +378,7 @@ export class TetherServer {
         port,
         host,
         backend: status.backend,
+        adminSecret: this.adminSecret,
       });
     }
 
@@ -382,6 +405,7 @@ export class TetherServer {
               port: actualPort,
               host,
               backend: this.lockHandle.info.backend,
+              adminSecret: this.adminSecret,
             });
           }
           resolve(this._httpServer);
@@ -457,7 +481,7 @@ export class TetherServer {
   }
 
   /**
-   * Handles incoming HTTP requests for authentication and discovery endpoints.
+   * Handles incoming HTTP requests for authentication, discovery, and administration endpoints.
    *
    * @param req - Incoming HTTP request.
    * @param res - Server HTTP response.
@@ -508,6 +532,11 @@ export class TetherServer {
         return true;
       }
 
+      // Handle /admin/* routes
+      if (url.pathname.startsWith(`${this.basePath}/admin`)) {
+        return await this.handleAdminRequest(req, res, url);
+      }
+
       return false;
     } catch (err) {
       const status = getHttpStatusForError(err);
@@ -522,15 +551,282 @@ export class TetherServer {
     }
   }
 
+  // -- Private Admin API Handlers -------------------------------------------
+
+  private assertAdminAuth(req: http.IncomingMessage): void {
+    const authHeader = req.headers.authorization ?? '';
+    const xAdmin = req.headers['x-admin-secret'];
+    const token = authHeader.startsWith('Bearer ')
+      ? authHeader.slice(7).trim()
+      : typeof xAdmin === 'string'
+        ? xAdmin.trim()
+        : '';
+
+    if (token !== this.adminSecret) {
+      throw new TetherServerError(
+        TetherServerErrorCode.Unauthorized,
+        'Invalid or missing admin authorization token',
+      );
+    }
+  }
+
+  private async handleAdminRequest(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL,
+  ): Promise<boolean> {
+    this.assertAdminAuth(req);
+    const method = req.method?.toUpperCase();
+    const adminPath = url.pathname.slice(`${this.basePath}/admin`.length);
+
+    if (method === 'GET' && adminPath === '/status') {
+      const status = await this.storage.getStatus();
+      this.sendJson(res, 200, status, req);
+      return true;
+    }
+
+    if (method === 'POST' && adminPath === '/maintenance') {
+      const body = (await this.readJsonBody(req)) as {
+        action: 'checkpoint' | 'vacuum' | 'prune';
+        keepCount?: number;
+        tableName?: string;
+      };
+      let result: MaintenanceResult;
+      if (body.action === 'checkpoint') {
+        result = await this.storage.checkpoint(body.tableName);
+      } else if (body.action === 'vacuum') {
+        result = await this.storage.vacuum();
+      } else if (body.action === 'prune') {
+        result = await this.storage.prune(body.keepCount, body.tableName);
+      } else {
+        throw new TetherServerError(
+          TetherServerErrorCode.InvalidInput,
+          `Invalid maintenance action "${body.action}"`,
+        );
+      }
+      this.sendJson(res, 200, result, req);
+      return true;
+    }
+
+    if (method === 'POST' && adminPath === '/stop') {
+      this.sendJson(res, 200, { message: 'Server stopping' }, req);
+      setImmediate(() => {
+        this.close().catch(() => {});
+      });
+      return true;
+    }
+
+    // /admin/tables
+    if (method === 'GET' && adminPath === '/tables') {
+      const tables = await this.storage.getTables();
+      const list = tables.map((t) => ({
+        name: t.name,
+        settings: t.settings,
+      }));
+      this.sendJson(res, 200, list, req);
+      return true;
+    }
+
+    if (method === 'POST' && adminPath === '/tables') {
+      const body = (await this.readJsonBody(req)) as {
+        name: string;
+        settings?: TableSettings;
+      };
+      if (!body.name) {
+        throw new TetherServerError(
+          TetherServerErrorCode.InvalidInput,
+          'Table name is required',
+        );
+      }
+      const table = await this.storage.createTable(body.name, body.settings);
+      this.sendJson(
+        res,
+        201,
+        { name: table.name, settings: table.settings },
+        req,
+      );
+      return true;
+    }
+
+    if (adminPath.startsWith('/tables/')) {
+      const tableName = decodeURIComponent(adminPath.slice('/tables/'.length));
+      if (method === 'GET') {
+        const table = await this.storage.getTable(tableName);
+        if (!table) {
+          throw new TetherServerError(
+            TetherServerErrorCode.NotFound,
+            `Table "${tableName}" not found`,
+          );
+        }
+        this.sendJson(
+          res,
+          200,
+          { name: table.name, settings: table.settings },
+          req,
+        );
+        return true;
+      }
+      if (method === 'PATCH') {
+        const body = (await this.readJsonBody(req)) as {
+          settings: Partial<TableSettings>;
+        };
+        const table = await this.storage.getTable(tableName);
+        if (!table) {
+          throw new TetherServerError(
+            TetherServerErrorCode.NotFound,
+            `Table "${tableName}" not found`,
+          );
+        }
+        const updated = await table.updateSettings(body.settings ?? {});
+        this.sendJson(res, 200, { name: table.name, settings: updated }, req);
+        return true;
+      }
+      if (method === 'DELETE') {
+        const table = await this.storage.getTable(tableName);
+        if (!table) {
+          throw new TetherServerError(
+            TetherServerErrorCode.NotFound,
+            `Table "${tableName}" not found`,
+          );
+        }
+        await table.delete();
+        this.sendJson(res, 200, { deleted: true }, req);
+        return true;
+      }
+    }
+
+    // /admin/users
+    if (method === 'GET' && adminPath === '/users') {
+      const users = await this.storage.getUsers();
+      const list = users.map((u) => ({
+        id: u.id,
+        username: u.username,
+        createdAt: u.createdAt,
+      }));
+      this.sendJson(res, 200, list, req);
+      return true;
+    }
+
+    if (method === 'POST' && adminPath === '/users') {
+      const body = (await this.readJsonBody(req)) as {
+        username?: string;
+        password?: string;
+      };
+      if (!body.username || !body.password) {
+        throw new TetherServerError(
+          TetherServerErrorCode.InvalidInput,
+          'Username and password are required',
+        );
+      }
+      const user = await this.storage.createUser(body.username, body.password);
+      this.sendJson(
+        res,
+        201,
+        { id: user.id, username: user.username, createdAt: user.createdAt },
+        req,
+      );
+      return true;
+    }
+
+    if (adminPath.startsWith('/users/')) {
+      const userId = decodeURIComponent(adminPath.slice('/users/'.length));
+      if (method === 'DELETE') {
+        const user = await this.storage.getUser(userId);
+        if (!user) {
+          throw new TetherServerError(
+            TetherServerErrorCode.NotFound,
+            `User "${userId}" not found`,
+          );
+        }
+        await user.delete();
+        this.sendJson(res, 200, { deleted: true }, req);
+        return true;
+      }
+    }
+
+    // /admin/records
+    if (adminPath === '/records') {
+      if (method === 'GET') {
+        const tableName = url.searchParams.get('table');
+        const userParam =
+          url.searchParams.get('user') ?? url.searchParams.get('userId');
+        if (!tableName) {
+          throw new TetherServerError(
+            TetherServerErrorCode.InvalidInput,
+            'Query parameter "table" is required',
+          );
+        }
+        const table = await this.storage.getTable(tableName);
+        if (!table) {
+          throw new TetherServerError(
+            TetherServerErrorCode.NotFound,
+            `Table "${tableName}" not found`,
+          );
+        }
+        const user = userParam
+          ? ((await this.storage.getUser(userParam)) ??
+            (await this.storage.getUserByUsername(userParam)))
+          : undefined;
+        const records = await table.getAllRecords(user);
+        this.sendJson(res, 200, records, req);
+        return true;
+      }
+
+      if (method === 'POST') {
+        const body = (await this.readJsonBody(req)) as {
+          userId?: string;
+          changes?: ChangeRecord[];
+          table?: string;
+          id?: string;
+          data?: unknown;
+          op?: OperationType;
+        };
+        const user = body.userId
+          ? ((await this.storage.getUser(body.userId)) ??
+            (await this.storage.getUserByUsername(body.userId)))
+          : undefined;
+
+        let changes = body.changes;
+        if (!changes && body.table && body.id) {
+          changes = [
+            {
+              table: body.table,
+              id: body.id,
+              op: body.op ?? OperationType.Put,
+              data: body.data,
+              timestamp: Date.now(),
+              clientId: 'admin_cli',
+            },
+          ];
+        }
+        if (!changes) {
+          throw new TetherServerError(
+            TetherServerErrorCode.InvalidInput,
+            'Either "changes" array or "table" and "id" must be provided',
+          );
+        }
+        const result = await this.storage.applyChanges(user, changes);
+        this.sendJson(res, 200, result, req);
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   // -- Private Helpers ------------------------------------------------------
 
   private getCorsHeaders(req?: http.IncomingMessage): Record<string, string> {
     if (!this.corsConfig) return {};
 
     const headers: Record<string, string> = {
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': (
-        this.corsConfig.allowedHeaders ?? ['Content-Type', 'Authorization']
+        this.corsConfig.allowedHeaders ?? [
+          'Content-Type',
+          'Authorization',
+          'X-Admin-Secret',
+        ]
       ).join(', '),
     };
 
@@ -649,7 +945,7 @@ export class TetherServer {
     res: http.ServerResponse,
   ): Promise<void> {
     try {
-      await this.storage.getApps();
+      await this.storage.getTables();
       this.sendJson(res, 200, { status: 'ready' }, req);
     } catch (err) {
       const message =
@@ -663,14 +959,14 @@ export class TetherServer {
     req: http.IncomingMessage,
     res: http.ServerResponse,
   ): Promise<void> {
-    const apps = await this.storage.getApps();
+    const tables = await this.storage.getTables();
     this.sendJson(
       res,
       200,
       {
         uptime: process.uptime(),
         connectedClients: this.sync.connectedClientsCount,
-        appsCount: apps.length,
+        tablesCount: tables.length,
         memoryUsage: process.memoryUsage(),
       },
       req,
@@ -825,6 +1121,8 @@ function getHttpStatusForError(err: unknown): number {
       case TetherServerErrorCode.Unauthorized:
       case TetherServerErrorCode.AuthenticationFailed:
         return 401;
+      case TetherServerErrorCode.Forbidden:
+        return 403;
       case TetherServerErrorCode.NotFound:
         return 404;
       case TetherServerErrorCode.AlreadyExists:

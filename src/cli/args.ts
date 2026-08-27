@@ -7,10 +7,10 @@ import type { BackendType } from './backend.js';
 export interface ParsedCliArgs {
   command: string;
   positionalArgs: string[];
-  port: number;
-  host: string;
   backend: BackendType;
   dir: string;
+  host: string;
+  port: number;
 }
 
 /**
@@ -39,6 +39,17 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
     } else if (arg === '--sqlite' || arg.startsWith('--sqlite=')) {
       backend = 'sqlite';
       if (arg.startsWith('--sqlite=')) dir = arg.slice(9);
+    } else if (
+      arg.startsWith('--create=') ||
+      arg.startsWith('--read=') ||
+      arg.startsWith('--update=') ||
+      arg.startsWith('--delete=') ||
+      arg.startsWith('--max-records=') ||
+      arg.startsWith('--max-size=') ||
+      arg.startsWith('--max-history=') ||
+      arg.startsWith('--user=')
+    ) {
+      positionalArgs.push(arg);
     } else if (arg.startsWith('-')) {
       throw new TetherServerError(
         TetherServerErrorCode.ConfigurationError,
@@ -52,9 +63,9 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
   return {
     command: positionalArgs[0] ?? 'serve',
     positionalArgs,
-    port,
-    host,
     backend,
     dir,
+    host,
+    port,
   };
 }

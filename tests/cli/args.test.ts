@@ -23,10 +23,10 @@ describe('parseCliArgs', () => {
     expect(result).toEqual({
       command: 'serve',
       positionalArgs: [],
-      port: 8080,
-      host: '0.0.0.0',
       backend: 'memory',
       dir: '.data',
+      host: '0.0.0.0',
+      port: 8080,
     });
   });
 
@@ -76,9 +76,9 @@ describe('parseCliArgs', () => {
   });
 
   it('should extract positional arguments and subcommands', () => {
-    const result = parseCliArgs(['apps', 'add', 'my-app', '--sqlite=.data']);
-    expect(result.command).toBe('apps');
-    expect(result.positionalArgs).toEqual(['apps', 'add', 'my-app']);
+    const result = parseCliArgs(['tables', 'add', 'recipes', '--sqlite=.data']);
+    expect(result.command).toBe('tables');
+    expect(result.positionalArgs).toEqual(['tables', 'add', 'recipes']);
     expect(result.backend).toBe('sqlite');
   });
 

@@ -33,149 +33,101 @@ describe('handleTablesCommand', () => {
     }
   });
 
-  it('should list tables for an application (empty and populated)', async () => {
-    await storage.createApp('rezeptario');
-
+  it('should list tables (empty and populated)', async () => {
     // List empty
-    await handleTablesCommand(storage, ['tables', 'list', 'rezeptario']);
-    expect(
-      testLogger.hasMessage('No tables found for application "rezeptario".'),
-    ).toBe(true);
+    await handleTablesCommand(storage, ['tables', 'list'], tmpDir);
+    expect(testLogger.hasMessage('No tables found.')).toBe(true);
 
-    // List with direct app name shorthand: tables <appid>
-    testLogger.clear();
-    await handleTablesCommand(storage, ['tables', 'rezeptario']);
-    expect(
-      testLogger.hasMessage('No tables found for application "rezeptario".'),
-    ).toBe(true);
-
-    // Add tables via API
-    const app = await storage.getApp('rezeptario');
-    await app?.createTable('recipes');
-    await app?.createTable('ingredients');
+    // Create tables
+    await storage.createTable('recipes');
+    await storage.createTable('ingredients');
 
     // List again
     testLogger.clear();
-    await handleTablesCommand(storage, ['tables', 'list', 'rezeptario']);
-    expect(
-      testLogger.hasMessage('Tables for application "rezeptario" (2):'),
-    ).toBe(true);
+    await handleTablesCommand(storage, ['tables', 'list'], tmpDir);
+    expect(testLogger.hasMessage('Tables (2):')).toBe(true);
     expect(testLogger.hasMessage('• recipes')).toBe(true);
     expect(testLogger.hasMessage('• ingredients')).toBe(true);
   });
 
-  it('should add multiple tables to an application', async () => {
-    await storage.createApp('rezeptario');
+  it('should add tables with custom settings', async () => {
+    await handleTablesCommand(
+      storage,
+      ['tables', 'add', 'recipes', '--read=everybody', '--max-records=500'],
+      tmpDir,
+    );
+    expect(testLogger.hasMessage('Created table "recipes"')).toBe(true);
 
-    await handleTablesCommand(storage, [
-      'tables',
-      'add',
-      'rezeptario',
-      'recipes',
-      'ingredients',
-    ]);
-    expect(
-      testLogger.hasMessage(
-        'Added table "recipes" to application "rezeptario"',
-      ),
-    ).toBe(true);
-    expect(
-      testLogger.hasMessage(
-        'Added table "ingredients" to application "rezeptario"',
-      ),
-    ).toBe(true);
-
-    // Add existing table (idempotency check)
-    await handleTablesCommand(storage, [
-      'tables',
-      'add',
-      'rezeptario',
-      'recipes',
-    ]);
-    expect(
-      testLogger.hasMessage(
-        'Table "recipes" already exists in application "rezeptario"',
-      ),
-    ).toBe(true);
+    const table = await storage.getTable('recipes');
+    expect(table).toBeDefined();
+    expect(table?.settings.permissions?.read).toBe('everybody');
+    expect(table?.settings.maxRecords).toBe(500);
   });
 
-  it('should remove tables from an application', async () => {
-    const app = await storage.createApp('rezeptario');
-    await app.createTable('recipes');
+  it('should show table details', async () => {
+    await storage.createTable('recipes', { maxRecords: 1000 });
+
+    await handleTablesCommand(storage, ['tables', 'show', 'recipes'], tmpDir);
+    expect(testLogger.hasMessage('Table "recipes":')).toBe(true);
+    expect(testLogger.hasMessage('Max Records:  1000')).toBe(true);
+  });
+
+  it('should update table settings', async () => {
+    await storage.createTable('recipes', { maxRecords: 100 });
+
+    await handleTablesCommand(
+      storage,
+      ['tables', 'update', 'recipes', '--max-records=2000'],
+      tmpDir,
+    );
+    expect(testLogger.hasMessage('Updated table "recipes":')).toBe(true);
+
+    const table = await storage.getTable('recipes');
+    expect(table?.settings.maxRecords).toBe(2000);
+  });
+
+  it('should remove tables', async () => {
+    await storage.createTable('recipes');
 
     // Remove existing table
-    await handleTablesCommand(storage, [
-      'tables',
-      'rm',
-      'rezeptario',
-      'recipes',
-    ]);
-    expect(
-      testLogger.hasMessage(
-        'Removed table "recipes" from application "rezeptario"',
-      ),
-    ).toBe(true);
+    await handleTablesCommand(storage, ['tables', 'rm', 'recipes'], tmpDir);
+    expect(testLogger.hasMessage('Deleted table "recipes"')).toBe(true);
+    expect(await storage.getTable('recipes')).toBeUndefined();
 
     // Remove non-existent table
-    await handleTablesCommand(storage, [
-      'tables',
-      'rm',
-      'rezeptario',
-      'nonexistent',
-    ]);
-    expect(
-      testLogger.hasMessage(
-        'Table "nonexistent" not found in application "rezeptario"',
-      ),
-    ).toBe(true);
+    testLogger.clear();
+    await handleTablesCommand(storage, ['tables', 'rm', 'nonexistent'], tmpDir);
+    expect(testLogger.hasMessage('Table "nonexistent" not found')).toBe(true);
   });
 
-  it('should throw error when application does not exist', async () => {
+  it('should throw error when table name is missing on add, show, update, rm', async () => {
     await expect(
-      handleTablesCommand(storage, ['tables', 'list', 'nonexistent']),
+      handleTablesCommand(storage, ['tables', 'add'], tmpDir),
     ).rejects.toThrow(TetherServerError);
 
     await expect(
-      handleTablesCommand(storage, ['tables', 'add', 'nonexistent', 'table1']),
+      handleTablesCommand(storage, ['tables', 'show'], tmpDir),
     ).rejects.toThrow(TetherServerError);
 
+    await expect(
+      handleTablesCommand(storage, ['tables', 'update'], tmpDir),
+    ).rejects.toThrow(TetherServerError);
+
+    await expect(
+      handleTablesCommand(storage, ['tables', 'rm'], tmpDir),
+    ).rejects.toThrow(TetherServerError);
+
+    // Unknown action
+    await expect(
+      handleTablesCommand(storage, ['tables', 'invalid_action'], tmpDir),
+    ).rejects.toThrow(TetherServerError);
     try {
-      await handleTablesCommand(storage, [
-        'tables',
-        'add',
-        'nonexistent',
-        'table1',
-      ]);
-    } catch (err) {
-      expect((err as TetherServerError).code).toBe(
-        TetherServerErrorCode.NotFound,
-      );
-    }
-  });
-
-  it('should throw error when appId or table name are missing', async () => {
-    // Missing appId on list
-    await expect(
-      handleTablesCommand(storage, ['tables', 'list']),
-    ).rejects.toThrow(TetherServerError);
-
-    // Missing appId on add
-    await expect(
-      handleTablesCommand(storage, ['tables', 'add']),
-    ).rejects.toThrow(TetherServerError);
-
-    // Missing table name on add
-    await expect(
-      handleTablesCommand(storage, ['tables', 'add', 'app1']),
-    ).rejects.toThrow(TetherServerError);
-
-    try {
-      await handleTablesCommand(storage, ['tables', 'add', 'app1']);
+      await handleTablesCommand(storage, ['tables', 'invalid_action'], tmpDir);
     } catch (err) {
       expect((err as TetherServerError).code).toBe(
         TetherServerErrorCode.ConfigurationError,
       );
-      expect((err as Error).message).toBe('Missing table name');
+      expect((err as Error).message).toContain('Unknown tables action');
     }
   });
 });

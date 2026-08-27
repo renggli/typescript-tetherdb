@@ -13,10 +13,10 @@ import type { LocalMutationItem, Storage } from './storage.js';
  * @typeParam T - Data payload type.
  */
 export interface TableChangeEvent<T = unknown> {
-  /** The mutation operation type. */
-  op: OperationType;
   /** The affected record identifier. */
   id: string;
+  /** The mutation operation type. */
+  op: OperationType;
   /** The new record data (defined on 'put' operations). */
   data?: T;
   /** `true` if the change originated from remote synchronization; `false` if triggered locally. */
@@ -323,6 +323,38 @@ export class Table<T = unknown> {
       isActive = false;
       unsubscribe();
     };
+  }
+
+  /**
+   * Returns an AsyncIterable stream yielding the initial snapshot and re-yielding whenever
+   * records in this table change.
+   *
+   * @param ids - Optional list of record identifiers to watch.
+   * @returns AsyncIterable yielding arrays of records.
+   */
+  async *live(ids?: string[]): AsyncIterable<T[]> {
+    let notifyResolver: (() => void) | null = null;
+    let isClosed = false;
+
+    const unsubscribe = this.onChange.register(() => {
+      if (notifyResolver) {
+        const resolve = notifyResolver;
+        notifyResolver = null;
+        resolve();
+      }
+    });
+
+    try {
+      while (!isClosed) {
+        yield await this.getAll(ids);
+        await new Promise<void>((resolve) => {
+          notifyResolver = resolve;
+        });
+      }
+    } finally {
+      isClosed = true;
+      unsubscribe();
+    }
   }
 
   /**

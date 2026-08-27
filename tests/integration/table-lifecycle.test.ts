@@ -39,7 +39,7 @@ describe.each(storageDescriptors)(
       });
       serverPort = runningServer.port;
 
-      await runningServer.server.declareApp('lifecycle-app', ['todos']);
+      await runningServer.server.declareTable('todos');
       await runningServer.server.declareUser('alice', 'password123');
       await runningServer.server.declareUser('bobby', 'password123');
     });
@@ -60,7 +60,6 @@ describe.each(storageDescriptors)(
         {
           host: '127.0.0.1',
           port: serverPort,
-          appId: 'lifecycle-app',
           webSocketClass: WebSocket,
           reconnectIntervalMs: 200,
         },
@@ -70,9 +69,6 @@ describe.each(storageDescriptors)(
     }
 
     it('should support dynamic table creation, syncing, and recreation across multiple clients', async () => {
-      const app = await serverStorage.getApp('lifecycle-app');
-      expect(app).toBeDefined();
-
       // Setup two concurrent clients
       const client1 = createClient('c1');
       const client2 = createClient('c2');
@@ -97,7 +93,7 @@ describe.each(storageDescriptors)(
       expect(await todos2.getAll()).toHaveLength(2);
 
       // Server dynamically adds a new table "notes"
-      const notesTable = await app?.createTable('notes');
+      const notesTable = await serverStorage.createTable('notes');
       expect(notesTable).toBeDefined();
 
       const notes1 = client1.table<NoteItem>('notes');
@@ -115,12 +111,12 @@ describe.each(storageDescriptors)(
       );
 
       // Server deletes the "notes" table
-      const deleted = await app?.deleteTable('notes');
+      const deleted = await notesTable.delete();
       expect(deleted).toBe(true);
-      expect(await app?.getTable('notes')).toBeUndefined();
+      expect(await serverStorage.getTable('notes')).toBeUndefined();
 
       // Server recreates table "notes" - should start clean on server
-      const recreatedNotes = await app?.createTable('notes');
+      const recreatedNotes = await serverStorage.createTable('notes');
       expect(recreatedNotes).toBeDefined();
       const userAlice = await serverStorage.getUserByUsername('alice');
       expect(userAlice).toBeDefined();
@@ -142,8 +138,7 @@ describe.each(storageDescriptors)(
 
       // Wait for server to receive the pushed items
       const userBobby = await serverStorage.getUserByUsername('bobby');
-      const app = await serverStorage.getApp('lifecycle-app');
-      const todosTable = await app?.getTable('todos');
+      const todosTable = await serverStorage.getTable('todos');
       await waitForCondition(async () => {
         if (!userBobby || !todosTable) return false;
         const recs = await todosTable.getAllRecords(userBobby);

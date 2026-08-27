@@ -66,17 +66,6 @@ export function validateUserId(userId: string): string {
 }
 
 /**
- * Validates an application namespace identifier.
- *
- * @param appId - The application ID to validate.
- * @returns The validated application ID.
- * @throws TetherServerError if the application ID is invalid.
- */
-export function validateAppId(appId: string): string {
-  return validateFilesystemSafe(appId, 'application ID');
-}
-
-/**
  * Validates a table name ensuring it is safe for filesystem use.
  *
  * @param tableName - The table name to validate.
@@ -123,12 +112,6 @@ export function normalizeUsername(username: string): string {
  * @throws TetherServerError if the username is invalid or out of length bounds.
  */
 export function validateUsername(username: string): string {
-  if (typeof username !== 'string') {
-    throw new TetherServerError(
-      TetherServerErrorCode.InvalidInput,
-      `Username must be between ${MIN_USERNAME_LENGTH} and ${MAX_USERNAME_LENGTH} characters`,
-    );
-  }
   const normalized = normalizeUsername(username);
   if (
     normalized.length < MIN_USERNAME_LENGTH ||
@@ -160,12 +143,6 @@ export function normalizePassword(password: string): string {
  * @throws TetherServerError if the password is not a string, is empty, or exceeds length bounds.
  */
 export function validatePassword(password: string): string {
-  if (typeof password !== 'string') {
-    throw new TetherServerError(
-      TetherServerErrorCode.InvalidInput,
-      'Password must be a valid non-empty string',
-    );
-  }
   const normalized = normalizePassword(password);
   if (
     normalized.length < MIN_PASSWORD_LENGTH ||

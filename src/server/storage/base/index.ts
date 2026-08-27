@@ -1,13 +1,17 @@
-export { AppBaseStorage, applyChangeToRecord } from './app.js';
 export {
   BaseStorage,
-  buildAppSummaries,
-  filterTargetApps,
+  buildTableSummaries,
 } from './storage.js';
 export {
+  applyChangeToRecord,
+  assertCanMutate,
+  canRead,
+  canReadRecord,
+  DEFAULT_TABLE_PERMISSIONS,
   filterActiveRecords,
+  isPermissionAllowed,
+  isPrivateTable,
   TableBaseStorage,
-  targetChangesForTable,
 } from './table.js';
 export {
   hashUserPassword,

@@ -82,9 +82,9 @@ export interface AuthResult {
  * Internal persisted session representation in IndexedDB metadata.
  */
 export interface StoredAuthSession {
-  token: string;
   userId: string;
   username: string;
+  token: string;
 }
 
 /**
@@ -348,8 +348,8 @@ export class Auth {
   private async applyDataMode(dataMode: DataMode): Promise<void> {
     if (dataMode === DataMode.Clear || dataMode === DataMode.Remote) {
       await this.storage.clearTables(true);
-      await this.storage.setMeta('lastSyncSeq', 0);
     }
+    await this.storage.setMeta('lastSyncSeq', 0);
   }
 
   private async updateStoredAuth(

@@ -29,14 +29,12 @@ describe.each(storageDescriptors)(
         storage: storageContext.storage,
       });
 
-      await server.declareApp('stress-app', [
-        'records',
-        'logs',
-        'metrics',
-        'items',
-        'shared_kv',
-        'stream',
-      ]);
+      await server.declareTable('records');
+      await server.declareTable('logs');
+      await server.declareTable('metrics');
+      await server.declareTable('items');
+      await server.declareTable('shared_kv');
+      await server.declareTable('stream');
 
       const httpServer = await server.listen(0, '127.0.0.1');
       const addr = httpServer.address();
@@ -62,7 +60,6 @@ describe.each(storageDescriptors)(
       const client = new TetherClient(
         `${name}-${Math.random().toString(36).substring(2, 8)}`,
         {
-          appId: 'stress-app',
           host: '127.0.0.1',
           port,
           webSocketClass: WebSocket,
@@ -113,8 +110,7 @@ describe.each(storageDescriptors)(
       expect(user).toBeDefined();
       if (!user) return;
 
-      const stressApp = await server.storage.getApp('stress-app');
-      const serverTable = await stressApp?.getTable('records');
+      const serverTable = await server.storage.getTable('records');
 
       await waitForCondition(async () => {
         const serverRecords = (await serverTable?.getAllRecords(user)) ?? [];
@@ -188,7 +184,6 @@ describe.each(storageDescriptors)(
     it('should accumulate offline mutations (>1000 items) and sync on reconnection', async () => {
       const dbName = `offline-stresser-${Math.random().toString(36).substring(2, 8)}`;
       const offlineClient = new TetherClient(dbName, {
-        appId: 'stress-app',
         host: '127.0.0.1',
         port,
         webSocketClass: WebSocket,
@@ -242,13 +237,18 @@ describe.each(storageDescriptors)(
         dataMode: DataMode.Local,
       });
 
+      // Wait for offline client outbox to completely drain across chunks
+      await waitForCondition(async () => {
+        const pending = await clientStorage.getPendingOutbox();
+        return pending.length === 0;
+      }, 20000);
+
       // Wait for server to receive all mutations through multiple outbox chunks
       const user = await server.storage.getUserByUsername('stressuser');
       expect(user).toBeDefined();
       if (!user) return;
 
-      const stressApp = await server.storage.getApp('stress-app');
-      const serverTable = await stressApp?.getTable('records');
+      const serverTable = await server.storage.getTable('records');
 
       await waitForCondition(async () => {
         const serverRecords = (await serverTable?.getAllRecords(user)) ?? [];
@@ -445,10 +445,9 @@ describe.each(storageDescriptors)(
       expect(user).toBeDefined();
       if (!user) return;
 
-      const stressApp = await server.storage.getApp('stress-app');
-      const serverLogs = await stressApp?.getTable('logs');
-      const serverMetrics = await stressApp?.getTable('metrics');
-      const serverItems = await stressApp?.getTable('items');
+      const serverLogs = await server.storage.getTable('logs');
+      const serverMetrics = await server.storage.getTable('metrics');
+      const serverItems = await server.storage.getTable('items');
 
       await waitForCondition(async () => {
         const l = (await serverLogs?.getAllRecords(user)) ?? [];
@@ -509,8 +508,7 @@ describe.each(storageDescriptors)(
       expect(user).toBeDefined();
       if (!user) return;
 
-      const stressApp = await server.storage.getApp('stress-app');
-      const serverStream = await stressApp?.getTable('stream');
+      const serverStream = await server.storage.getTable('stream');
 
       await waitForCondition(async () => {
         const serverRecords = (await serverStream?.getAllRecords(user)) ?? [];
@@ -584,8 +582,7 @@ describe.each(storageDescriptors)(
       }
 
       // 4. Verify Server-Side Sync Convergence for All Concurrent Users
-      const stressApp = await server.storage.getApp('stress-app');
-      const serverTable = await stressApp?.getTable('records');
+      const serverTable = await server.storage.getTable('records');
 
       await waitForCondition(async () => {
         for (const cred of userCredentials) {

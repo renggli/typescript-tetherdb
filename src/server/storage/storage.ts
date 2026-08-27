@@ -1,20 +1,21 @@
-import type { AppStorage } from './app.js';
+import type { ChangeRecord, TableSettings } from '../../shared/types.js';
+import type { TableStorage } from './table.js';
 import type { UserStorage } from './user.js';
 
 /**
  * Configuration options and resource limits for storage engines.
  */
 export interface StorageOptions {
-  /** Maximum number of active records allowed per table (default: 10,000). */
-  maxRecordsPerTable?: number;
-  /** Maximum allowed payload size in bytes for an individual record (default: 512 KB). */
-  maxRecordSizeBytes?: number;
-  /** Maximum allowed size in bytes for a single change batch payload (default: 5 MB). */
-  maxBatchSizeBytes?: number;
-  /** Maximum number of changelog entries retained per user before compaction (default: 1,000). */
-  maxChangelogEntries?: number;
   /** Secret key used for signing session tokens. */
   secret?: string;
+  /** Maximum number of active records allowed per table partition. */
+  maxRecords?: number;
+  /** Maximum allowed payload size in bytes for an individual record. */
+  maxRecordSizeBytes?: number;
+  /** Maximum allowed size in bytes for a single change batch payload. */
+  maxBatchSizeBytes?: number;
+  /** Maximum number of history entries retained per partition before compaction. */
+  maxHistoryEntries?: number;
 }
 
 /**
@@ -27,12 +28,13 @@ export interface StorageStatus {
   baseDir?: string;
   /** Number of registered user accounts. */
   usersCount: number;
-  /** Number of registered applications. */
-  appsCount: number;
-  /** Detailed statistics per application if queried or available. */
-  apps?: Array<{
-    id: string;
-    tables: string[];
+  /** Number of registered tables. */
+  tablesCount: number;
+  /** Detailed statistics per table if queried or available. */
+  tables?: Array<{
+    name: string;
+    read: string;
+    recordsCount: number;
   }>;
 }
 
@@ -44,8 +46,8 @@ export interface MaintenanceResult {
   action: 'checkpoint' | 'vacuum' | 'prune';
   /** Target backend name. */
   backend: string;
-  /** Optional target application ID. */
-  appId?: string;
+  /** Optional target table name. */
+  tableName?: string;
   /** Number of entries or database files affected, if applicable. */
   affectedCount?: number;
   /** Human-readable status message. */
@@ -53,36 +55,37 @@ export interface MaintenanceResult {
 }
 
 /**
- * Top-level storage coordinator managing application namespaces and user accounts.
+ * Top-level storage coordinator managing tables and user accounts.
  */
 export interface Storage {
   /** Storage configuration options and resource limits. */
   readonly options?: StorageOptions;
 
   /**
-   * Creates/registers a new application namespace.
-   * Throws an error if an application with the specified ID already exists.
+   * Creates/registers a new table.
+   * Throws an error if a table with the specified name already exists.
    *
-   * @param id - Unique application identifier.
-   * @returns Created AppStorage handle.
-   * @throws Error if the application already exists.
+   * @param name - Name of the table.
+   * @param settings - Optional table settings, limits, and access policies.
+   * @returns Created TableStorage handle.
+   * @throws Error if the table already exists.
    */
-  createApp(id: string): Promise<AppStorage>;
+  createTable(name: string, settings?: TableSettings): Promise<TableStorage>;
 
   /**
-   * Retrieves an application handle if it exists.
+   * Retrieves a table handle if it exists.
    *
-   * @param id - Unique application identifier.
-   * @returns AppStorage handle or `undefined` if not found.
+   * @param name - Name of the table.
+   * @returns TableStorage handle or `undefined`.
    */
-  getApp(id: string): Promise<AppStorage | undefined>;
+  getTable(name: string): Promise<TableStorage | undefined>;
 
   /**
-   * Lists all registered application handles.
+   * Lists all registered table handles.
    *
-   * @returns Array of AppStorage handles.
+   * @returns Array of TableStorage handles.
    */
-  getApps(): Promise<AppStorage[]>;
+  getTables(): Promise<TableStorage[]>;
 
   /**
    * Creates a new user account with credentials.
@@ -127,39 +130,75 @@ export interface Storage {
   getUsers(): Promise<UserStorage[]>;
 
   /**
+   * Applies an array of mutation change operations across tables for a user or shared context.
+   *
+   * @param user - Target user handle (if authenticated).
+   * @param changes - Array of change records.
+   * @returns Applied changes and new sequence number.
+   */
+  applyChanges(
+    user: UserStorage | undefined,
+    changes: ChangeRecord[],
+  ): Promise<{ applied: ChangeRecord[]; newSeq: number }>;
+
+  /**
+   * Retrieves change operations since a given sequence number.
+   *
+   * @param user - Target user handle (if authenticated).
+   * @param fromSeq - Starting sequence number (exclusive).
+   * @param tableFilters - Optional array of table names to filter.
+   * @returns Changes, current sequence, and snapshot requirement flag.
+   */
+  getChangesSince(
+    user: UserStorage | undefined,
+    fromSeq: number,
+    tableFilters?: string[],
+  ): Promise<{
+    changes: ChangeRecord[];
+    currentSeq: number;
+    requiresSnapshot?: boolean;
+  }>;
+
+  /**
+   * Returns the current global sequence number for a user or shared database.
+   *
+   * @param user - Optional target user handle.
+   * @returns Current integer sequence number.
+   */
+  getCurrentSeq(user?: UserStorage): Promise<number>;
+
+  /**
    * Retrieves summary operational status of the storage backend.
    *
-   * @param appId - Optional application identifier filter.
    * @returns StorageStatus object.
    */
-  getStatus(appId?: string): Promise<StorageStatus>;
+  getStatus(): Promise<StorageStatus>;
 
   /**
    * Performs a WAL checkpoint on SQLite databases to truncate WAL files.
    *
-   * @param appId - Optional target application identifier.
+   * @param tableName - Optional target table name.
    * @returns MaintenanceResult describing checkpoint outcome.
    * @throws TetherServerError if checkpoint is not supported by this backend.
    */
-  checkpoint(appId?: string): Promise<MaintenanceResult>;
+  checkpoint(tableName?: string): Promise<MaintenanceResult>;
 
   /**
    * Performs database vacuuming to reclaim disk space and defragment storage.
    *
-   * @param appId - Optional target application identifier.
    * @returns MaintenanceResult describing vacuum outcome.
    * @throws TetherServerError if vacuum is not supported by this backend.
    */
-  vacuum(appId?: string): Promise<MaintenanceResult>;
+  vacuum(): Promise<MaintenanceResult>;
 
   /**
    * Prunes changelog history entries older than the retention threshold.
    *
-   * @param appId - Optional target application identifier.
    * @param keepCount - Optional maximum entries to retain per table/user (defaults to configured limit).
+   * @param tableName - Optional target table name.
    * @returns MaintenanceResult describing prune outcome.
    */
-  prune(appId?: string, keepCount?: number): Promise<MaintenanceResult>;
+  prune(keepCount?: number, tableName?: string): Promise<MaintenanceResult>;
 
   /**
    * Optional cleanup callback invoked when shutting down the storage engine.

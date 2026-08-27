@@ -19,6 +19,7 @@ export default defineConfig({
       exclude: [
         'src/**/index.ts',
         'src/shared/types.ts',
+        'src/shared/types/**',
         'src/server/storage/app.ts',
         'src/server/storage/storage.ts',
         'src/server/storage/table.ts',

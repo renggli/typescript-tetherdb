@@ -24,13 +24,10 @@ export abstract class UserBaseStorage implements UserStorage {
   /** Retrieves the secret key used for signing session tokens. */
   protected abstract getSecret(): string;
 
-  /** Verifies if the plaintext password matches. */
   abstract verifyPassword(password: string): Promise<boolean>;
 
-  /** Updates user credentials with a new password. */
   abstract changePassword(newPassword: string): Promise<void>;
 
-  /** Deletes the user account and associated data. */
   abstract delete(): Promise<boolean>;
 
   /** Creates a signed session token for this user. */

@@ -11,6 +11,14 @@ This document outlines the core architecture, developer rules, TypeScript conven
 ## 🚨 Developer Rules & Quality Checks
 
 - **Structure & Documentation**: Public APIs, exported types, classes, and functions must be placed at the top of the file and thoroughly documented with JSDoc comments. Methods should be concise, focused, and readable. Avoid unnecessary abbreviations in identifiers.
+- **Logical Declaration & Member Ordering**: Order fields, methods, classes, and interfaces meaningfully across all files:
+  - **Types & Interfaces**: Place base types and models first, followed by configuration options, and then result/status types. Order fields logically: identifiers/discriminators → payloads → sequence/timestamps → ownership → configuration/limits.
+  - **Classes**: Order members from top to bottom:
+    1. Public `readonly` properties and configuration options.
+    2. Private state fields (maps, database handles, mutexes/locks).
+    3. `constructor`.
+    4. Public methods grouped by lifecycle and domain (e.g., Table CRUD → User CRUD → Sync/Mutations → Maintenance & Cleanup).
+    5. Private helper methods and internal utilities at the very bottom.
 - **Minimal Public API Surface**: Only export or make public APIs, types, classes, methods, and properties that are absolutely necessary for consumers. Keep internal implementations, helper utilities, state fields, rate limiters, crypto primitives, lock handlers, and command dispatchers strictly private to their classes and internal modules. Never export internal constants, helpers, or properties just for unit tests.
 - **Private Helpers at the Bottom**: Place private helper methods and internal utility functions at the bottom of classes and files so that the public API and core lifecycle methods appear clearly at the top.
 - **No `any` Types**: Never use the `any` type. Leverage strict types, `unknown`, explicit generics (`<T = unknown>`), type narrowing, or specific interfaces/unions instead.

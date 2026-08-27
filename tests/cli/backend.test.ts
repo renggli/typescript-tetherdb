@@ -50,7 +50,7 @@ describe('createBackend', () => {
 
   it('should pass custom options through createBackend', () => {
     const storage = createBackend('memory', '.data', {
-      maxRecordsPerTable: 500,
+      maxRecords: 500,
     });
     expect(storage).toBeInstanceOf(MemoryStorage);
   });

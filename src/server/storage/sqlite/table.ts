@@ -1,8 +1,13 @@
-import type { SnapshotRecord, StoredRecord } from '../../../shared/types.js';
+import type {
+  ChangeRecord,
+  SnapshotRecord,
+  StoredRecord,
+  TableSettings,
+} from '../../../shared/types.js';
 import { validateRecordId, validateUserId } from '../../validate.js';
-import { TableBaseStorage } from '../base/table.js';
+import { canRead, isPrivateTable, TableBaseStorage } from '../base/index.js';
 import type { UserStorage } from '../user.js';
-import type { AppSqliteStorage } from './app.js';
+import type { SqliteStorage } from './storage.js';
 
 interface RawRecordRow {
   table_name: string;
@@ -18,11 +23,29 @@ interface RawRecordRow {
  * SQLite-backed implementation of `TableStorage`.
  */
 export class TableSqliteStorage extends TableBaseStorage {
-  declare readonly app: AppSqliteStorage;
+  private storage: SqliteStorage;
+
+  constructor(
+    name: string,
+    storage: SqliteStorage,
+    settings: TableSettings = {},
+  ) {
+    super(name, settings);
+    this.storage = storage;
+  }
+
+  override async updateSettings(
+    settings: Partial<TableSettings>,
+  ): Promise<TableSettings> {
+    const updated = await super.updateSettings(settings);
+    this.storage.updateTableSettingsInDb(this.name, updated);
+    return updated;
+  }
 
   async delete(): Promise<boolean> {
-    return this.app.deleteTable(this.name);
+    return this.storage.deleteTable(this.name);
   }
+
   private parseData(raw: string | null): unknown {
     if (raw === null || raw === undefined) return null;
     try {
@@ -32,17 +55,32 @@ export class TableSqliteStorage extends TableBaseStorage {
     }
   }
 
+  private resolveEffectiveUserId(user?: UserStorage): string | undefined {
+    const isPrivate = isPrivateTable(this);
+    if (isPrivate) {
+      return user ? validateUserId(user.id) : undefined;
+    }
+    return '__shared__';
+  }
+
   async getRecord(
-    user: UserStorage,
+    user: UserStorage | undefined,
     id: string,
   ): Promise<StoredRecord | undefined> {
-    const safeUserId = validateUserId(user.id);
-    const safeId = validateRecordId(id);
-    const handle = this.app.getUserDb(safeUserId);
+    if (!canRead(this, user)) {
+      return undefined;
+    }
+    const effectiveUserId = this.resolveEffectiveUserId(user);
+    if (!effectiveUserId) return undefined;
 
-    const row = handle.stmtGetRecord.get(this.name, safeId) as
-      | RawRecordRow
-      | undefined;
+    const safeId = validateRecordId(id);
+    const dbHandle = this.storage.getTablesDb();
+
+    const row = dbHandle.stmtGetRecord.get(
+      this.name,
+      effectiveUserId,
+      safeId,
+    ) as RawRecordRow | undefined;
     if (!row) return undefined;
 
     return {
@@ -55,11 +93,17 @@ export class TableSqliteStorage extends TableBaseStorage {
     };
   }
 
-  async getAllRecords(user: UserStorage): Promise<SnapshotRecord[]> {
-    const safeUserId = validateUserId(user.id);
-    const handle = this.app.getUserDb(safeUserId);
-    const rows = handle.stmtGetSnapshotByTable.all(
+  async getAllRecords(user?: UserStorage): Promise<SnapshotRecord[]> {
+    if (!canRead(this, user)) {
+      return [];
+    }
+    const effectiveUserId = this.resolveEffectiveUserId(user);
+    if (!effectiveUserId) return [];
+
+    const dbHandle = this.storage.getTablesDb();
+    const rows = dbHandle.stmtGetSnapshotByTable.all(
       this.name,
+      effectiveUserId,
     ) as unknown as RawRecordRow[];
 
     return rows.map((row) => ({
@@ -70,5 +114,16 @@ export class TableSqliteStorage extends TableBaseStorage {
       clientId: row.client_id ?? '',
       data: this.parseData(row.data),
     }));
+  }
+
+  async applyChanges(
+    user: UserStorage | undefined,
+    changes: ChangeRecord[],
+  ): Promise<{ applied: ChangeRecord[]; newSeq: number }> {
+    const targeted = changes.map((c) => ({
+      ...c,
+      table: this.name,
+    }));
+    return this.storage.applyChanges(user, targeted);
   }
 }

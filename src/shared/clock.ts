@@ -1,4 +1,4 @@
-import type { ChangeRecord, StoredRecord } from './types.js';
+import type { ChangeRecord, StoredRecord } from './types/record.js';
 
 /**
  * Determines whether an incoming mutation should overwrite an existing stored record

@@ -30,28 +30,26 @@ describe('handleStatusCommand', () => {
   });
 
   it('should display status for empty database', async () => {
-    await handleStatusCommand(storage, ['status']);
+    await handleStatusCommand(storage, ['status'], tmpDir);
 
     expect(testLogger.hasMessage('TetherDB Storage Status:')).toBe(true);
     expect(testLogger.hasMessage('Backend:     sqlite')).toBe(true);
     expect(testLogger.hasMessage('Server:      Stopped')).toBe(true);
     expect(testLogger.hasMessage('Users:       0')).toBe(true);
-    expect(testLogger.hasMessage('Total Apps:  0')).toBe(true);
+    expect(testLogger.hasMessage('Tables:      0')).toBe(true);
   });
 
-  it('should display status for specific app with tables', async () => {
-    const app = await storage.createApp('demo-app');
-    await app.createTable('tasks');
-    await app.createTable('settings');
+  it('should display status with tables', async () => {
+    await storage.createTable('tasks');
+    await storage.createTable('settings');
 
-    await handleStatusCommand(storage, ['status', 'demo-app']);
+    await handleStatusCommand(storage, ['status'], tmpDir);
 
     expect(testLogger.hasMessage('TetherDB Storage Status:')).toBe(true);
     expect(testLogger.hasMessage('Server:      Stopped')).toBe(true);
-    expect(testLogger.hasMessage('- App: demo-app')).toBe(true);
-    expect(
-      testLogger.hasMessage(/Tables \(2\): (settings, tasks|tasks, settings)/),
-    ).toBe(true);
+    expect(testLogger.hasMessage('Tables:      2')).toBe(true);
+    expect(testLogger.hasMessage('• tasks')).toBe(true);
+    expect(testLogger.hasMessage('• settings')).toBe(true);
   });
 
   it('should display running server details when lock is present', async () => {
@@ -68,23 +66,8 @@ describe('handleStatusCommand', () => {
       { mode: 0o600 },
     );
 
-    await handleStatusCommand(storage, ['status']);
+    await handleStatusCommand(storage, ['status'], tmpDir);
 
     expect(testLogger.hasMessage(/Server:\s+Running \(PID:/)).toBe(true);
-  });
-
-  it('should display (none) when application has no tables and throw when app is not found', async () => {
-    await storage.createApp('empty-app');
-
-    await handleStatusCommand(storage, ['status', 'empty-app']);
-
-    expect(testLogger.hasMessage('TetherDB Storage Status:')).toBe(true);
-    expect(testLogger.hasMessage('- App: empty-app')).toBe(true);
-    expect(testLogger.hasMessage('Tables (0): (none)')).toBe(true);
-
-    testLogger.clear();
-    await expect(
-      handleStatusCommand(storage, ['status', 'non-existent-app']),
-    ).rejects.toThrow('Application "non-existent-app" not found');
   });
 });

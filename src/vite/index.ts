@@ -7,15 +7,16 @@
 import type { Plugin, PreviewServer, ViteDevServer } from 'vite';
 import { TetherServer, type TetherServerOptions } from '../server/server.js';
 import { MemoryStorage } from '../server/storage/memory/index.js';
+import type { TableSettings } from '../shared/types.js';
 
 /**
- * Application and table declaration for automatic provisioning on startup.
+ * Table declaration for automatic provisioning on startup.
  */
-export interface TetherPluginAppDeclaration {
-  /** Unique application identifier. */
-  appId: string;
-  /** Array of table names to declare within the application. */
-  tables?: string[];
+export interface TetherPluginTableDeclaration {
+  /** Table name. */
+  name: string;
+  /** Optional table settings and permissions. */
+  settings?: TableSettings;
 }
 
 /**
@@ -32,8 +33,8 @@ export interface TetherPluginUserDeclaration {
  * Options for configuring the TetherDB Vite plugin.
  */
 export interface TetherPluginOptions extends TetherServerOptions {
-  /** Applications and tables to automatically declare on server startup. */
-  apps?: TetherPluginAppDeclaration[];
+  /** Tables to automatically declare on server startup. */
+  tables?: Array<string | TetherPluginTableDeclaration>;
   /** Default user accounts to automatically declare or update on server startup. */
   users?: TetherPluginUserDeclaration[];
 }
@@ -42,7 +43,7 @@ export interface TetherPluginOptions extends TetherServerOptions {
  * Creates a Vite plugin that runs an embedded TetherDB synchronization and REST
  * authentication backend directly within the Vite dev and preview servers.
  *
- * @param options - Configuration options for storage, endpoints, apps, and users.
+ * @param options - Configuration options for storage, endpoints, tables, and users.
  * @returns Vite plugin object.
  */
 export function tetherPlugin(options: TetherPluginOptions = {}): Plugin {
@@ -57,9 +58,13 @@ export function tetherPlugin(options: TetherPluginOptions = {}): Plugin {
       ...options,
     });
 
-    if (options.apps) {
-      for (const app of options.apps) {
-        await tetherServer.declareApp(app.appId, app.tables ?? []);
+    if (options.tables) {
+      for (const table of options.tables) {
+        if (typeof table === 'string') {
+          await tetherServer.declareTable(table);
+        } else {
+          await tetherServer.declareTable(table.name, table.settings);
+        }
       }
     }
 

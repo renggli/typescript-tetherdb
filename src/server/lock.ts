@@ -1,3 +1,4 @@
+import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { TetherServerError, TetherServerErrorCode } from './errors.js';
@@ -8,14 +9,16 @@ import { TetherServerError, TetherServerErrorCode } from './errors.js';
 export interface ServerLockInfo {
   /** Process identifier running the server. */
   pid: number;
-  /** Port number the server is bound to. */
-  port: number;
   /** Host interface the server is bound to. */
   host: string;
+  /** Port number the server is bound to. */
+  port: number;
   /** Storage backend type ('sqlite', 'file', or 'memory'). */
   backend: string;
   /** Epoch timestamp when the server acquired the lock. */
   startedAt: number;
+  /** Ephemeral secret used by the CLI to authenticate against local admin API. */
+  adminSecret?: string;
 }
 
 /**
@@ -74,13 +77,13 @@ export function readServerLock(baseDir: string): ServerLockInfo | null {
  * from running against the same data storage.
  *
  * @param baseDir - Directory path where the lockfile will be maintained.
- * @param details - Port, host, and backend details to write to the lockfile.
+ * @param details - Port, host, backend, and optional adminSecret to write to the lockfile.
  * @returns ServerLockHandle representing the active lock.
  * @throws TetherServerError if another active server already holds the lock.
  */
 export function acquireServerLock(
   baseDir: string,
-  details: { port: number; host: string; backend: string },
+  details: Omit<ServerLockInfo, 'pid' | 'startedAt'>,
 ): ServerLockHandle {
   fs.mkdirSync(baseDir, { recursive: true });
   const lockPath = path.join(baseDir, 'server.lock');
@@ -102,12 +105,16 @@ export function acquireServerLock(
     }
   }
 
+  const adminSecret =
+    details.adminSecret ?? crypto.randomBytes(32).toString('hex');
+
   const info: ServerLockInfo = {
     pid: process.pid,
     port: details.port,
     host: details.host,
     backend: details.backend,
     startedAt: Date.now(),
+    adminSecret,
   };
 
   fs.writeFileSync(lockPath, JSON.stringify(info, null, 2), {

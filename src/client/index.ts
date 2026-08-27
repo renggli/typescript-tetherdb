@@ -4,7 +4,13 @@
  * @module tetherdb/client
  */
 
-export { OperationType, PROTOCOL_VERSION } from '../shared/types.js';
+export {
+  OperationType,
+  Permission,
+  PROTOCOL_VERSION,
+  type TablePermissions,
+  type TableSettings,
+} from '../shared/types.js';
 export {
   AuthStatus,
   DataMode,
@@ -28,6 +34,8 @@ export {
   IndexRange,
 } from './indexed.js';
 export {
+  type SyncMetadata,
+  type SyncOptions,
   SyncStatus,
   type WebSocketConstructor,
 } from './sync.js';

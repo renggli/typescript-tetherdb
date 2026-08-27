@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TetherDB — Client API Playground & Stress Tester</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main class="app-container">
+    <!-- Header -->
+    <header>
+      <div class="header-top">
+        <div class="brand">
+          <div class="brand-icon">⚡</div>
+          <div>
+            <h1>TetherDB Explorer</h1>
+            <p class="subtitle">Interactive Client API Playground & Stress Test Suite</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <button type="button" id="toggleSyncBtn" class="btn btn-secondary btn-sm">Disconnect</button>
+          <button type="button" id="userBadgeBtn" class="user-badge" title="Click to switch account">
+            <span>👤</span>
+            <span id="currentUsername">Offline Guest</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="status-bar">
+        <div id="statusPill" class="status-pill status-disconnected">
+          <span class="status-dot"></span>
+          <span id="statusText">Offline (Local Only)</span>
+        </div>
+        <div class="header-stats">
+          <span>Active Table: <strong id="activeTableLabel">items</strong></span>
+        </div>
+      </div>
+
+      <!-- Prominent Error / Alert Banner -->
+      <div id="errorBanner" class="alert-banner" style="display: none;">
+        <span class="alert-icon">⚠️</span>
+        <span id="errorMessage" class="alert-text">An error occurred</span>
+        <button type="button" id="closeErrorBtn" class="alert-close">✕</button>
+      </div>
+
+      <!-- Navigation Tabs -->
+      <nav class="nav-tabs">
+        <button type="button" class="tab-btn active" data-tab="playground">API Playground</button>
+        <button type="button" class="tab-btn" data-tab="stress">Stress & Benchmarks</button>
+      </nav>
+    </header>
+
+    <!-- Tab 1: API Playground -->
+    <section id="playgroundTab" class="tab-content active">
+      <div class="grid-2">
+        <!-- Controls Column -->
+        <div class="col">
+          <!-- Table Selection & CRUD -->
+          <div class="card">
+            <div class="card-header">
+              <h2>📁 Table & Record Operations</h2>
+              <button type="button" id="fillSampleBtn" class="btn-link">Fill Sample Data</button>
+            </div>
+            <div class="card-body">
+              <div class="form-group">
+                <label for="tableSelect">Target Table</label>
+                <select id="tableSelect">
+                  <option value="items">items</option>
+                  <option value="notes">notes</option>
+                  <option value="todos">todos</option>
+                  <option value="benchmarks">benchmarks</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="recordId">Record ID</label>
+                <input type="text" id="recordId" placeholder="e.g. item_1 (leave blank to auto-generate)">
+              </div>
+
+              <div class="form-group">
+                <label for="recordData">JSON Payload</label>
+                <textarea id="recordData" rows="3" placeholder='{"title": "Sample Item", "score": 42, "category": "books"}'></textarea>
+              </div>
+
+              <div class="btn-group">
+                <button type="button" id="putRecordBtn" class="btn btn-primary">Put Record</button>
+                <button type="button" id="getRecordBtn" class="btn btn-secondary">Get Record</button>
+                <button type="button" id="deleteRecordBtn" class="btn btn-danger">Delete</button>
+              </div>
+
+              <hr class="divider">
+
+              <div class="btn-group">
+                <button type="button" id="getAllRecordsBtn" class="btn btn-secondary">Get All Records</button>
+                <button type="button" id="countRecordsBtn" class="btn btn-secondary">Count Records</button>
+                <button type="button" id="clearTableBtn" class="btn btn-danger-outline">Clear Table</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Index Operations -->
+          <div class="card">
+            <div class="card-header">
+              <h2>🔍 Table Indexes & Queries</h2>
+            </div>
+            <div class="card-body">
+              <div class="form-group">
+                <label for="indexKeyPath">Field to Index</label>
+                <div class="input-with-btn">
+                  <input type="text" id="indexKeyPath" placeholder="e.g. category, score, or title">
+                  <button type="button" id="registerIndexBtn" class="btn btn-secondary">Create Index</button>
+                </div>
+              </div>
+
+              <div class="checkbox-row">
+                <label class="checkbox-label">
+                  <input type="checkbox" id="indexUnique"> Unique
+                </label>
+                <label class="checkbox-label">
+                  <input type="checkbox" id="indexMultiEntry"> Multi-Entry (for Array fields)
+                </label>
+              </div>
+
+              <hr class="divider">
+
+              <div class="form-row">
+                <div class="form-group flex-1">
+                  <label for="queryIndexSelect">Select Index</label>
+                  <select id="queryIndexSelect">
+                    <option value="">-- No indexes declared yet --</option>
+                  </select>
+                </div>
+                <div class="form-group flex-1">
+                  <label for="queryRangeType">Query Filter</label>
+                  <select id="queryRangeType">
+                    <option value="all">All (No filter)</option>
+                    <option value="exact">Exact Value</option>
+                    <option value="startsWith">Starts With (Prefix)</option>
+                    <option value="greaterThan">Greater Than</option>
+                    <option value="lessThan">Less Than</option>
+                    <option value="between">Between Range</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-row" id="queryValueRow">
+                <div class="form-group flex-1">
+                  <label for="queryValue1">Search Value / Lower Bound</label>
+                  <input type="text" id="queryValue1" placeholder="e.g. books or 10">
+                </div>
+                <div class="form-group flex-1" id="queryValue2Group" style="display: none;">
+                  <label for="queryValue2">Upper Bound</label>
+                  <input type="text" id="queryValue2" placeholder="e.g. 50">
+                </div>
+              </div>
+
+              <div class="btn-group">
+                <button type="button" id="queryIndexGetAllBtn" class="btn btn-primary">Query Index</button>
+                <button type="button" id="queryIndexCountBtn" class="btn btn-secondary">Count Index</button>
+                <button type="button" id="queryIndexKeysBtn" class="btn btn-secondary">Get Primary Keys</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Output Column -->
+        <div class="col">
+          <!-- Result Output -->
+          <div class="card">
+            <div class="card-header">
+              <h2>📊 Result Output</h2>
+              <span id="resultMeta" class="badge">Ready</span>
+            </div>
+            <div class="card-body">
+              <pre id="jsonOutput" class="json-inspector">// Select an action on the left to see results...</pre>
+            </div>
+          </div>
+
+          <!-- Live Event Log -->
+          <div class="card log-card">
+            <div class="card-header">
+              <h2>⚡ Live Activity & Sync Stream</h2>
+              <button type="button" id="clearLogBtn" class="btn-link">Clear</button>
+            </div>
+            <div id="activityLog" class="log-entries">
+              <!-- Live events stream here -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab 2: Stress & Benchmarks -->
+    <section id="stressTab" class="tab-content">
+      <!-- Quick Stress Tests -->
+      <div class="card">
+        <div class="card-header">
+          <h2>🚀 Quick Stress Benchmarks</h2>
+        </div>
+        <div class="card-body">
+          <p class="text-secondary text-sm">
+            Execute automated high-throughput client tests against local IndexedDB and background WebSocket sync.
+          </p>
+
+          <div class="preset-grid">
+            <div class="preset-card">
+              <h3>⚡ Bulk Writes (`putAll`)</h3>
+              <p>Atomic batched insertion measuring raw IDB throughput.</p>
+              <div class="btn-group">
+                <button type="button" class="btn btn-primary btn-sm preset-btn" data-preset="putAll-1000">1,000 items</button>
+                <button type="button" class="btn btn-primary btn-sm preset-btn" data-preset="putAll-5000">5,000 items</button>
+              </div>
+            </div>
+
+            <div class="preset-card">
+              <h3>🔄 Sequential Writes (`put`)</h3>
+              <p>Measures unbatched single-transaction overhead.</p>
+              <div class="btn-group">
+                <button type="button" class="btn btn-secondary btn-sm preset-btn" data-preset="putSeq-100">100 items</button>
+                <button type="button" class="btn btn-secondary btn-sm preset-btn" data-preset="putSeq-500">500 items</button>
+              </div>
+            </div>
+
+            <div class="preset-card">
+              <h3>📖 Read Throughput</h3>
+              <p>Compares single `get` lookups vs table `getAll` scans.</p>
+              <div class="btn-group">
+                <button type="button" class="btn btn-secondary btn-sm preset-btn" data-preset="getSeq-500">500 Gets</button>
+                <button type="button" class="btn btn-secondary btn-sm preset-btn" data-preset="getAll-table">Table Scan</button>
+              </div>
+            </div>
+
+            <div class="preset-card">
+              <h3>🔀 Mixed Operations</h3>
+              <p>Simulates real-world concurrent read, write, and delete transactions.</p>
+              <div class="btn-group">
+                <button type="button" class="btn btn-secondary btn-sm preset-btn" data-preset="mixed-500">500 ops</button>
+                <button type="button" class="btn btn-secondary btn-sm preset-btn" data-preset="deleteAll-1000">Delete 1k</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Benchmark Progress & Results -->
+      <div class="card">
+        <div class="card-header">
+          <h2>📈 Benchmark Performance Results</h2>
+          <div class="header-actions">
+            <span id="benchStatusBadge" class="badge">Idle</span>
+            <button type="button" id="stopBenchBtn" class="btn btn-danger btn-sm" style="display: none;">Stop</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="progress-bar-container">
+            <div id="benchProgressBar" class="progress-bar" style="width: 0%;"></div>
+          </div>
+
+          <div class="metrics-grid">
+            <div class="metric-card">
+              <div class="metric-label">Operations</div>
+              <div id="metricOps" class="metric-value">0</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Total Time</div>
+              <div id="metricDuration" class="metric-value">0 ms</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Throughput</div>
+              <div id="metricThroughput" class="metric-value">0 ops/s</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Avg Latency</div>
+              <div id="metricAvgLatency" class="metric-value">0 ms</div>
+            </div>
+          </div>
+
+          <!-- History Table -->
+          <div class="history-section">
+            <h3>Recent Benchmark Runs</h3>
+            <table class="history-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Scenario</th>
+                  <th>Operations</th>
+                  <th>Duration</th>
+                  <th>Throughput</th>
+                  <th>Avg Latency</th>
+                </tr>
+              </thead>
+              <tbody id="benchHistoryBody">
+                <tr>
+                  <td colspan="6" class="text-center text-muted">Click a benchmark button above to run a test.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer-info">
+      TetherDB Explorer — Local-first IndexedDB with WebSocket sync. Open multiple browser tabs to observe multi-client concurrency.
+    </footer>
+  </main>
+
+  <!-- Auth Dialog Modal -->
+  <dialog id="authDialog">
+    <div class="modal-header">
+      <h2>Account Access</h2>
+      <button type="button" id="closeAuthModalBtn" class="modal-close">✕</button>
+    </div>
+
+    <div id="sessionSection" style="display: none;">
+      <div class="modal-user-info">
+        <span>Logged in as <strong id="modalUsername">demo</strong></span>
+        <button type="button" id="logoutBtn" class="btn btn-danger btn-sm">Sign Out</button>
+      </div>
+      <hr class="modal-divider">
+      <div class="modal-section-label">Switch Account</div>
+    </div>
+
+    <div class="modal-tabs">
+      <button type="button" id="tabLogin" class="modal-tab active">Login</button>
+      <button type="button" id="tabRegister" class="modal-tab">Register</button>
+    </div>
+
+    <form id="authForm" class="modal-form">
+      <div class="form-group">
+        <label for="authUsername">Username</label>
+        <input type="text" id="authUsername" required minlength="2" autocomplete="username">
+      </div>
+
+      <div class="form-group">
+        <label for="authPassword">Password</label>
+        <input type="password" id="authPassword" required minlength="4" autocomplete="current-password">
+      </div>
+
+      <div id="authError" class="modal-error"></div>
+
+      <button type="submit" id="authSubmitBtn" class="btn btn-primary">Login</button>
+    </form>
+  </dialog>
+
+  <script type="module" src="/src/client.ts"></script>
+</body>
+</html>

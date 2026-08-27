@@ -11,7 +11,6 @@ import {
   MIN_PASSWORD_LENGTH,
   MIN_USERNAME_LENGTH,
   normalizeUsername,
-  validateAppId,
   validateIdentifier,
   validatePassword,
   validateRecordId,
@@ -52,28 +51,6 @@ describe('Validation', () => {
           TetherServerErrorCode.InvalidInput,
         );
       }
-    });
-  });
-
-  describe('validateAppId', () => {
-    it('should accept valid filesystem-safe app identifiers', () => {
-      expect(validateAppId('my-app_v1')).toBe('my-app_v1');
-      expect(validateAppId('default')).toBe('default');
-      expect(validateAppId('users')).toBe('users');
-      expect(validateAppId('__proto__')).toBe('__proto__');
-    });
-
-    it('should reject invalid app IDs (dots, slashes, spaces, empty, traversal)', () => {
-      expect(() => validateAppId('../app')).toThrow(TetherServerError);
-      expect(() => validateAppId('../app')).toThrow('Invalid application ID');
-      expect(() => validateAppId('app/123')).toThrow(TetherServerError);
-      expect(() => validateAppId('my-app.v1')).toThrow(TetherServerError);
-      expect(() => validateAppId('')).toThrow(TetherServerError);
-      expect(() => validateAppId('a'.repeat(65))).toThrow(TetherServerError);
-      // @ts-expect-error Testing non-string handling
-      expect(() => validateAppId(null)).toThrow(TetherServerError);
-      // @ts-expect-error Testing non-string handling
-      expect(() => validateAppId(undefined)).toThrow(TetherServerError);
     });
   });
 

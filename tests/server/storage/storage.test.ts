@@ -4,7 +4,11 @@ import {
   TetherServerErrorCode,
 } from '../../../src/server/errors.js';
 import type { Storage } from '../../../src/server/storage/index.js';
-import { type ChangeRecord, OperationType } from '../../../src/shared/types.js';
+import {
+  type ChangeRecord,
+  OperationType,
+  Permission,
+} from '../../../src/shared/types.js';
 import { type StorageContext, storageDescriptors } from './matrix.js';
 
 describe.each(storageDescriptors)('$name', (descriptor) => {
@@ -26,10 +30,9 @@ function runStorageTestSuite(createStorage: () => Storage) {
 
   beforeEach(async () => {
     storage = createStorage();
-    const app = await storage.createApp('default');
-    await app.createTable('todos');
-    await app.createTable('notes');
-    await app.createTable('items');
+    await storage.createTable('todos');
+    await storage.createTable('notes');
+    await storage.createTable('items');
   });
 
   it('should create and authenticate users directly through UserStorage', async () => {
@@ -57,9 +60,7 @@ function runStorageTestSuite(createStorage: () => Storage) {
   });
 
   it('should apply changes and assign sequential numbers', async () => {
-    const app = await storage.getApp('default');
-    expect(app).toBeDefined();
-    const todosTable = await app?.getTable('todos');
+    const todosTable = await storage.getTable('todos');
     expect(todosTable).toBeDefined();
     const user = await storage.createUser('user_apply', 'pass');
 
@@ -82,9 +83,9 @@ function runStorageTestSuite(createStorage: () => Storage) {
       },
     ];
 
-    const res = await app?.applyChanges(user, changes);
-    expect(res?.applied).toHaveLength(2);
-    expect(res?.newSeq).toBe(2);
+    const res = await storage.applyChanges(user, changes);
+    expect(res.applied).toHaveLength(2);
+    expect(res.newSeq).toBe(2);
 
     const record = await todosTable?.getRecord(user, 't1');
     expect(record?.data).toEqual({ title: 'Item 1' });
@@ -92,19 +93,17 @@ function runStorageTestSuite(createStorage: () => Storage) {
     const all = await todosTable?.getAllRecords(user);
     expect(all).toHaveLength(2);
 
-    expect(await app?.getCurrentSeq(user)).toBe(2);
+    expect(await storage.getCurrentSeq(user)).toBe(2);
   });
 
-  it('should isolate data between different users', async () => {
-    const app = await storage.getApp('default');
-    expect(app).toBeDefined();
-    const notesTable = await app?.getTable('notes');
+  it('should isolate data between different users on user-private tables', async () => {
+    const notesTable = await storage.getTable('notes');
     expect(notesTable).toBeDefined();
 
     const userA = await storage.createUser('user_a', 'pass');
     const userB = await storage.createUser('user_b', 'pass');
 
-    await app?.applyChanges(userA, [
+    await storage.applyChanges(userA, [
       {
         table: 'notes',
         id: 'secret',
@@ -125,12 +124,41 @@ function runStorageTestSuite(createStorage: () => Storage) {
     expect(userBAll).toHaveLength(0);
   });
 
+  it('should share data between users on public-read-write tables', async () => {
+    const sharedTable = await storage.createTable('public_board', {
+      permissions: {
+        read: Permission.Everybody,
+        create: Permission.Everybody,
+        update: Permission.Everybody,
+        delete: Permission.Everybody,
+      },
+    });
+    expect(sharedTable).toBeDefined();
+
+    const userA = await storage.createUser('user_pub_a', 'pass');
+    const userB = await storage.createUser('user_pub_b', 'pass');
+
+    await storage.applyChanges(userA, [
+      {
+        table: 'public_board',
+        id: 'post1',
+        op: OperationType.Put,
+        data: { text: 'Hello everyone' },
+        timestamp: 1000,
+        clientId: 'c1',
+      },
+    ]);
+
+    const recordForA = await sharedTable.getRecord(userA, 'post1');
+    const recordForB = await sharedTable.getRecord(userB, 'post1');
+    expect(recordForA?.data).toEqual({ text: 'Hello everyone' });
+    expect(recordForB?.data).toEqual({ text: 'Hello everyone' });
+  });
+
   it('should handle diffs since sequence', async () => {
-    const app = await storage.getApp('default');
-    expect(app).toBeDefined();
     const user = await storage.createUser('user_diff', 'pass');
 
-    await app?.applyChanges(user, [
+    await storage.applyChanges(user, [
       {
         table: 'items',
         id: '1',
@@ -157,13 +185,13 @@ function runStorageTestSuite(createStorage: () => Storage) {
       },
     ]);
 
-    const diff = await app?.getChangesSince(user, 1);
-    expect(diff?.changes).toHaveLength(2);
-    expect(diff?.changes.map((c) => c.id)).toEqual(['2', '3']);
-    expect(diff?.currentSeq).toBe(3);
+    const diff = await storage.getChangesSince(user, 1);
+    expect(diff.changes).toHaveLength(2);
+    expect(diff.changes.map((c) => c.id)).toEqual(['2', '3']);
+    expect(diff.currentSeq).toBe(3);
 
     // Apply Delete operation and verify in changelog
-    await app?.applyChanges(user, [
+    await storage.applyChanges(user, [
       {
         table: 'items',
         id: '2',
@@ -173,36 +201,24 @@ function runStorageTestSuite(createStorage: () => Storage) {
       },
     ]);
 
-    const diffWithDelete = await app?.getChangesSince(user, 3);
-    expect(diffWithDelete?.changes).toHaveLength(1);
-    expect(diffWithDelete?.changes[0].op).toBe(OperationType.Delete);
-    expect(diffWithDelete?.changes[0].data).toBeUndefined();
+    const diffWithDelete = await storage.getChangesSince(user, 3);
+    expect(diffWithDelete.changes).toHaveLength(1);
+    expect(diffWithDelete.changes[0].op).toBe(OperationType.Delete);
+    expect(diffWithDelete.changes[0].data).toBeUndefined();
 
     // fromSeq > currentSeq requires snapshot
-    const invalidFutureSeq = await app?.getChangesSince(user, 9999);
-    expect(invalidFutureSeq?.requiresSnapshot).toBe(true);
-    expect(invalidFutureSeq?.changes).toHaveLength(0);
-  });
-
-  it('should throw an error when createApp is called with an existing appId', async () => {
-    await storage.createApp('unique_app');
-
-    await expect(storage.createApp('unique_app')).rejects.toThrow(
-      TetherServerError,
-    );
-    await expect(storage.createApp('unique_app')).rejects.toMatchObject({
-      code: TetherServerErrorCode.AlreadyExists,
-    });
+    const invalidFutureSeq = await storage.getChangesSince(user, 9999);
+    expect(invalidFutureSeq.requiresSnapshot).toBe(true);
+    expect(invalidFutureSeq.changes).toHaveLength(0);
   });
 
   it('should throw an error when createTable is called with an existing table name', async () => {
-    const app = await storage.createApp('table_test_app');
-    await app.createTable('duplicate_table');
+    await storage.createTable('duplicate_table');
 
-    await expect(app.createTable('duplicate_table')).rejects.toThrow(
+    await expect(storage.createTable('duplicate_table')).rejects.toThrow(
       TetherServerError,
     );
-    await expect(app.createTable('duplicate_table')).rejects.toMatchObject({
+    await expect(storage.createTable('duplicate_table')).rejects.toMatchObject({
       code: TetherServerErrorCode.AlreadyExists,
     });
   });
@@ -229,13 +245,9 @@ function runStorageTestSuite(createStorage: () => Storage) {
     });
   });
 
-  it('should delete a user and cascade their records across multiple apps', async () => {
-    const app1 = await storage.getApp('default');
-    const app2 = await storage.createApp('second_app');
-    await app2.createTable('items');
-
+  it('should delete a user and cascade their records across tables', async () => {
     const user = await storage.createUser('user_to_delete', 'pass');
-    await app1?.applyChanges(user, [
+    await storage.applyChanges(user, [
       {
         table: 'todos',
         id: 'td1',
@@ -244,22 +256,20 @@ function runStorageTestSuite(createStorage: () => Storage) {
         timestamp: 100,
         clientId: 'c1',
       },
-    ]);
-    await app2.applyChanges(user, [
       {
-        table: 'items',
-        id: 'it1',
+        table: 'notes',
+        id: 'nt1',
         op: OperationType.Put,
-        data: 'app2 data',
+        data: 'notes data',
         timestamp: 100,
         clientId: 'c1',
       },
     ]);
 
-    const todosTable = await app1?.getTable('todos');
-    const itemsTable = await app2.getTable('items');
+    const todosTable = await storage.getTable('todos');
+    const notesTable = await storage.getTable('notes');
     expect(await todosTable?.getRecord(user, 'td1')).toBeDefined();
-    expect(await itemsTable?.getRecord(user, 'it1')).toBeDefined();
+    expect(await notesTable?.getRecord(user, 'nt1')).toBeDefined();
 
     const deleted = await user.delete();
     expect(deleted).toBe(true);
@@ -267,41 +277,15 @@ function runStorageTestSuite(createStorage: () => Storage) {
     expect(await storage.getUser(user.id)).toBeUndefined();
     expect(await storage.getUserByUsername('user_to_delete')).toBeUndefined();
     expect(await todosTable?.getRecord(user, 'td1')).toBeUndefined();
-    expect(await itemsTable?.getRecord(user, 'it1')).toBeUndefined();
+    expect(await notesTable?.getRecord(user, 'nt1')).toBeUndefined();
   });
 
-  it('should delete an application and cascade its tables and data', async () => {
-    const app = await storage.createApp('temporary_app');
-    const table = await app.createTable('temp_data');
-    const user = await storage.createUser('temp_user', 'pass');
-
-    await table.applyChanges(user, [
-      {
-        table: 'temp_data',
-        id: 'rec1',
-        op: OperationType.Put,
-        data: 'temporary',
-        timestamp: 100,
-        clientId: 'c1',
-      },
-    ]);
-
-    expect(await storage.getApp('temporary_app')).toBeDefined();
-    const deleted = await app.delete();
-    expect(deleted).toBe(true);
-    expect(await storage.getApp('temporary_app')).toBeUndefined();
-  });
-
-  it('should delete a table via app.deleteTable and table.delete and clean up all data', async () => {
-    const app = await storage.getApp('default');
-    expect(app).toBeDefined();
-    if (!app) return;
-
+  it('should delete a table via table.delete and clean up all data', async () => {
     const user = await storage.createUser('table_del_user', 'pass');
-    const table = await app.createTable('to_be_deleted');
+    const table = await storage.createTable('to_be_deleted');
 
     // Put records into the table
-    await table.applyChanges(user, [
+    await storage.applyChanges(user, [
       {
         table: 'to_be_deleted',
         id: 'del_1',
@@ -314,7 +298,7 @@ function runStorageTestSuite(createStorage: () => Storage) {
 
     expect(await table.getRecord(user, 'del_1')).toBeDefined();
     expect(
-      (await app.getTables()).some((t) => t.name === 'to_be_deleted'),
+      (await storage.getTables()).some((t) => t.name === 'to_be_deleted'),
     ).toBe(true);
 
     // Delete table via table.delete()
@@ -323,61 +307,35 @@ function runStorageTestSuite(createStorage: () => Storage) {
 
     // Verify it is no longer in getTables()
     expect(
-      (await app.getTables()).some((t) => t.name === 'to_be_deleted'),
+      (await storage.getTables()).some((t) => t.name === 'to_be_deleted'),
     ).toBe(false);
-    expect(await app.getTable('to_be_deleted')).toBeUndefined();
+    expect(await storage.getTable('to_be_deleted')).toBeUndefined();
 
     // Deleting again should return false
-    expect(await app.deleteTable('to_be_deleted')).toBe(false);
-
-    // Create another table and delete via app.deleteTable
-    const table2 = await app.createTable('another_table');
-    await table2.applyChanges(user, [
-      {
-        table: 'another_table',
-        id: 'del_2',
-        op: OperationType.Put,
-        data: { text: 'Another' },
-        timestamp: 1000,
-        clientId: 'c1',
-      },
-    ]);
-    expect(await app.deleteTable('another_table')).toBe(true);
-    expect(await app.getTable('another_table')).toBeUndefined();
+    expect(await table.delete()).toBe(false);
 
     // Recreate deleted table and verify fresh empty state
-    const recreated = await app.createTable('to_be_deleted');
+    const recreated = await storage.createTable('to_be_deleted');
     expect(await recreated.getRecord(user, 'del_1')).toBeUndefined();
     expect(await recreated.getAllRecords(user)).toHaveLength(0);
   });
 
-  it('should return storage status for all apps and a specific app', async () => {
-    const statusAll = await storage.getStatus();
-    expect(statusAll.backend).toBeDefined();
-    expect(statusAll.appsCount).toBeGreaterThanOrEqual(1);
-    expect(statusAll.apps?.some((a) => a.id === 'default')).toBe(true);
-
-    const statusDefault = await storage.getStatus('default');
-    expect(statusDefault.apps).toHaveLength(1);
-    expect(statusDefault.apps?.[0].id).toBe('default');
-    expect(statusDefault.apps?.[0].tables).toEqual(
-      expect.arrayContaining(['todos', 'notes', 'items']),
-    );
-
-    await expect(storage.getStatus('nonexistent-app')).rejects.toThrow(
-      /not found/i,
-    );
+  it('should return storage status and tables list', async () => {
+    const status = await storage.getStatus();
+    expect(status.backend).toBeDefined();
+    expect(status.tablesCount).toBeGreaterThanOrEqual(3);
+    expect(status.tables?.some((t) => t.name === 'todos')).toBe(true);
   });
 
   it('should handle checkpoint and vacuum or throw NotSupported', async () => {
     const isSqlite = (await storage.getStatus()).backend === 'sqlite';
 
     if (isSqlite) {
-      const checkpointRes = await storage.checkpoint('default');
+      const checkpointRes = await storage.checkpoint('todos');
       expect(checkpointRes.action).toBe('checkpoint');
       expect(checkpointRes.affectedCount).toBeGreaterThan(0);
 
-      const vacuumRes = await storage.vacuum('default');
+      const vacuumRes = await storage.vacuum();
       expect(vacuumRes.action).toBe('vacuum');
       expect(vacuumRes.affectedCount).toBeGreaterThan(0);
     } else {
@@ -388,14 +346,12 @@ function runStorageTestSuite(createStorage: () => Storage) {
 
   it('should prune changelogs across storage backends', async () => {
     const user = await storage.createUser('prune_user', 'password');
-    const app = await storage.getApp('default');
-    expect(app).toBeDefined();
-    const table = await app?.getTable('todos');
+    const table = await storage.getTable('todos');
     expect(table).toBeDefined();
 
     // Apply 5 changes
     for (let i = 1; i <= 5; i++) {
-      await table?.applyChanges(user, [
+      await storage.applyChanges(user, [
         {
           table: 'todos',
           id: `todo_${i}`,
@@ -408,19 +364,17 @@ function runStorageTestSuite(createStorage: () => Storage) {
     }
 
     // Prune keeping 2
-    const pruneRes = await storage.prune('default', 2);
+    const pruneRes = await storage.prune(2, 'todos');
     expect(pruneRes.action).toBe('prune');
     expect(pruneRes.affectedCount).toBeGreaterThanOrEqual(3);
   });
 
   it('should reject mutations with timestamps far in the future', async () => {
     const user = await storage.createUser('time_user', 'password');
-    const app = await storage.getApp('default');
-    expect(app).toBeDefined();
 
     const farFuture = Date.now() + 10 * 60 * 1000; // 10 minutes in future
     await expect(
-      app?.applyChanges(user, [
+      storage.applyChanges(user, [
         {
           table: 'todos',
           id: 'future-task',

@@ -3,6 +3,7 @@ import { WebSocket } from 'ws';
 import {
   AuthStatus,
   DataMode,
+  OperationType,
   SyncStatus,
   TetherClient,
 } from '../../src/client/index.js';
@@ -30,9 +31,7 @@ describe.each(storageDescriptors)(
         storage: storageContext.storage,
       });
       serverPort = (server.httpServer.address() as { port: number }).port;
-      await server.server.storage.createApp('test-app');
-      const app = await server.server.storage.getApp('test-app');
-      await app?.createTable('todos');
+      await server.server.storage.createTable('todos');
     });
 
     afterEach(async () => {
@@ -48,7 +47,6 @@ describe.each(storageDescriptors)(
       const client = new TetherClient(
         `db-${Math.random().toString(36).substring(2, 8)}`,
         {
-          appId: 'test-app',
           host: '127.0.0.1',
           port: serverPort,
           webSocketClass: WebSocket,
@@ -58,14 +56,15 @@ describe.each(storageDescriptors)(
 
       expect(client.authStatus).toBe(AuthStatus.SignedOut);
       expect(client.username).toBeUndefined();
-      expect(client.syncStatus).toBe(SyncStatus.Disconnected);
+      expect([SyncStatus.Connecting, SyncStatus.Connected]).toContain(
+        client.syncStatus,
+      );
     });
 
     it('should register a new account and automatically connect sync', async () => {
       const client = new TetherClient(
         `db-reg-${Math.random().toString(36).substring(2, 8)}`,
         {
-          appId: 'test-app',
           host: '127.0.0.1',
           port: serverPort,
           webSocketClass: WebSocket,
@@ -95,7 +94,6 @@ describe.each(storageDescriptors)(
       const client = new TetherClient(
         `db-local-${Math.random().toString(36).substring(2, 8)}`,
         {
-          appId: 'test-app',
           host: '127.0.0.1',
           port: serverPort,
           webSocketClass: WebSocket,
@@ -120,11 +118,10 @@ describe.each(storageDescriptors)(
       expect(user).toBeDefined();
       if (!user) return;
 
-      const app = await server.server.storage.getApp('test-app');
-      const table = await app?.getTable('todos');
+      const table = await server.server.storage.getTable('todos');
       await waitForCondition(async () => {
-        const serverRecords = (await table?.getAllRecords(user)) ?? [];
-        return serverRecords.length === 1;
+        const rec = await table?.getRecord(user, 't1');
+        return Boolean(rec);
       });
 
       const serverRecords = (await table?.getAllRecords(user)) ?? [];
@@ -136,7 +133,6 @@ describe.each(storageDescriptors)(
       const client = new TetherClient(
         `db-clear-${Math.random().toString(36).substring(2, 8)}`,
         {
-          appId: 'test-app',
           host: '127.0.0.1',
           port: serverPort,
           webSocketClass: WebSocket,
@@ -163,7 +159,6 @@ describe.each(storageDescriptors)(
       const client = new TetherClient(
         `db-err-${Math.random().toString(36).substring(2, 8)}`,
         {
-          appId: 'test-app',
           host: '127.0.0.1',
           port: serverPort,
           webSocketClass: WebSocket,
@@ -181,7 +176,6 @@ describe.each(storageDescriptors)(
       const client2 = new TetherClient(
         `db-err2-${Math.random().toString(36).substring(2, 8)}`,
         {
-          appId: 'test-app',
           host: '127.0.0.1',
           port: serverPort,
           webSocketClass: WebSocket,
@@ -211,7 +205,6 @@ describe.each(storageDescriptors)(
       const clientA = new TetherClient(
         `db-a-${Math.random().toString(36).substring(2, 8)}`,
         {
-          appId: 'test-app',
           host: '127.0.0.1',
           port: serverPort,
           webSocketClass: WebSocket,
@@ -226,8 +219,7 @@ describe.each(storageDescriptors)(
       const todosA = clientA.table<{ title: string }>('todos');
       await todosA.put('r1', { title: 'Remote Item 1' });
       const userDiana = await server.server.storage.getUserByUsername('diana');
-      const app = await server.server.storage.getApp('test-app');
-      const table = await app?.getTable('todos');
+      const table = await server.server.storage.getTable('todos');
       if (userDiana) {
         await waitForCondition(async () => {
           return ((await table?.getAllRecords(userDiana)) ?? []).length === 1;
@@ -238,7 +230,6 @@ describe.each(storageDescriptors)(
       const clientB = new TetherClient(
         `db-b-${Math.random().toString(36).substring(2, 8)}`,
         {
-          appId: 'test-app',
           host: '127.0.0.1',
           port: serverPort,
           webSocketClass: WebSocket,
@@ -257,6 +248,7 @@ describe.each(storageDescriptors)(
       });
       expect(success).toBe(true);
 
+      await waitForCondition(() => clientB.syncStatus === SyncStatus.Connected);
       await waitForCondition(async () => (await todosB.getAll()).length === 2);
 
       // Both items should be present on Client B
@@ -273,7 +265,6 @@ describe.each(storageDescriptors)(
       const clientA = new TetherClient(
         `db-ra-${Math.random().toString(36).substring(2, 8)}`,
         {
-          appId: 'test-app',
           host: '127.0.0.1',
           port: serverPort,
           webSocketClass: WebSocket,
@@ -289,8 +280,7 @@ describe.each(storageDescriptors)(
       await todosA.put('r1', { title: 'Remote Item' });
       const userEvelyn =
         await server.server.storage.getUserByUsername('evelyn');
-      const app = await server.server.storage.getApp('test-app');
-      const table = await app?.getTable('todos');
+      const table = await server.server.storage.getTable('todos');
       if (userEvelyn) {
         await waitForCondition(async () => {
           return ((await table?.getAllRecords(userEvelyn)) ?? []).length === 1;
@@ -301,7 +291,6 @@ describe.each(storageDescriptors)(
       const clientB = new TetherClient(
         `db-rb-${Math.random().toString(36).substring(2, 8)}`,
         {
-          appId: 'test-app',
           host: '127.0.0.1',
           port: serverPort,
           webSocketClass: WebSocket,
@@ -337,7 +326,6 @@ describe.each(storageDescriptors)(
 
       // Session 1: Register with remember: true
       const client1 = new TetherClient(dbName, {
-        appId: 'test-app',
         host: '127.0.0.1',
         port: serverPort,
         webSocketClass: WebSocket,
@@ -359,7 +347,6 @@ describe.each(storageDescriptors)(
 
       // Session 2: Open same DB instance without credentials
       const client2 = new TetherClient(dbName, {
-        appId: 'test-app',
         host: '127.0.0.1',
         port: serverPort,
         webSocketClass: WebSocket,
@@ -384,7 +371,6 @@ describe.each(storageDescriptors)(
     it('should handle logout with default DataMode.Clear wiping data and DataMode.Local preserving data', async () => {
       const dbName = `db-logout-${Math.random().toString(36).substring(2, 8)}`;
       const client = new TetherClient(dbName, {
-        appId: 'test-app',
         host: '127.0.0.1',
         port: serverPort,
         webSocketClass: WebSocket,
@@ -415,7 +401,6 @@ describe.each(storageDescriptors)(
       await client.logout({ dataMode: DataMode.Local });
 
       expect(client.authStatus).toBe(AuthStatus.SignedOut);
-      expect(client.syncStatus).toBe(SyncStatus.Disconnected);
       expect(await todos.get('g1')).toEqual({ title: 'Grace todo' });
 
       // 2. Log back in
@@ -437,7 +422,6 @@ describe.each(storageDescriptors)(
       const client = new TetherClient(
         `db-reg-switch-${Math.random().toString(36).substring(2, 8)}`,
         {
-          appId: 'test-app',
           host: '127.0.0.1',
           port: serverPort,
           webSocketClass: WebSocket,
@@ -456,7 +440,14 @@ describe.each(storageDescriptors)(
       expect(client.authStatus).toBe(AuthStatus.SignedIn);
       expect(client.username).toBe('user_first');
 
-      await waitForCondition(() => client.syncStatus === SyncStatus.Connected);
+      await waitForCondition(async () => {
+        const user1 =
+          await server.server.storage.getUserByUsername('user_first');
+        if (!user1) return false;
+        const table = await server.server.storage.getTable('todos');
+        const records = (await table?.getAllRecords(user1)) ?? [];
+        return records.length === 1;
+      });
       expect((await todos.getAll()).length).toBe(1);
 
       // Register User 2 while already SignedIn (defaults to clearing previous user data)
@@ -470,13 +461,13 @@ describe.each(storageDescriptors)(
       await waitForCondition(() => client.syncStatus === SyncStatus.Connected);
 
       // New user should start with clean local state
+      await waitForCondition(async () => (await todos.getAll()).length === 0);
       expect(await todos.getAll()).toHaveLength(0);
     });
 
     it('should automatically refresh sliding session token on sync connection', async () => {
       const dbName = `db-sliding-${Math.random().toString(36).substring(2, 8)}`;
       const client = new TetherClient(dbName, {
-        appId: 'test-app',
         host: '127.0.0.1',
         port: serverPort,
         webSocketClass: WebSocket,
@@ -520,7 +511,6 @@ describe.each(storageDescriptors)(
       await rawStorage.close();
 
       const client = new TetherClient(dbName, {
-        appId: 'test-app',
         host: '127.0.0.1',
         port: serverPort,
         webSocketClass: WebSocket,
@@ -545,7 +535,6 @@ describe.each(storageDescriptors)(
       const client = new TetherClient(
         `db-switch-${Math.random().toString(36).substring(2, 8)}`,
         {
-          appId: 'test-app',
           host: '127.0.0.1',
           port: serverPort,
           webSocketClass: WebSocket,
@@ -572,12 +561,11 @@ describe.each(storageDescriptors)(
         'user_b',
         'password123',
       );
-      const app = await server.server.storage.getApp('test-app');
-      await app?.applyChanges(userB, [
+      await server.server.storage.applyChanges(userB, [
         {
           table: 'todos',
           id: 'b1',
-          op: 1, // Put
+          op: OperationType.Put,
           data: { title: 'User B Remote Todo' },
           timestamp: Date.now(),
           clientId: 'server-seed',

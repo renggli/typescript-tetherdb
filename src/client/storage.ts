@@ -655,38 +655,44 @@ export class Storage {
     await this.ensureTables(tableNames);
 
     await this.withDatabase(async (database) => {
-      const tx = database.transaction([...tableNames, META_STORE], 'readwrite');
-      const tableStores = new Map<string, IDBObjectStore>();
-      for (const name of tableNames) {
-        tableStores.set(name, tx.objectStore(name));
-      }
+      const existingRecords = new Map<string, StoredRecord>();
+      const txRead = database.transaction(tableNames, 'readonly');
       for (const item of records) {
-        const store = tableStores.get(item.table);
-        if (!store) continue;
-
-        const getReq = store.get(item.id);
-        getReq.onsuccess = () => {
-          const existing = getReq.result as StoredRecord | undefined;
-          if (!existing || shouldOverwrite(item, existing)) {
-            if (item.deleted) {
-              store.delete(item.id);
-            } else {
-              const record: StoredRecord = {
-                id: item.id,
-                data: item.data,
-                timestamp: item.timestamp,
-                version: item.version ?? 1,
-                clientId: item.clientId,
-              };
-              store.put(record);
-            }
-          }
-        };
+        const store = txRead.objectStore(item.table);
+        const req = store.get(item.id);
+        const rec = await promisifyRequest<StoredRecord | undefined>(req);
+        if (rec) {
+          existingRecords.set(`${item.table}:${item.id}`, rec);
+        }
       }
-      const metaStore = tx.objectStore(META_STORE);
+      await promisifyTransaction(txRead);
+
+      const txWrite = database.transaction(
+        [...tableNames, META_STORE],
+        'readwrite',
+      );
+      for (const item of records) {
+        const store = txWrite.objectStore(item.table);
+        const existing = existingRecords.get(`${item.table}:${item.id}`);
+        if (!existing || shouldOverwrite(item, existing)) {
+          if (item.deleted) {
+            store.delete(item.id);
+          } else {
+            const record: StoredRecord = {
+              id: item.id,
+              data: item.data,
+              timestamp: item.timestamp,
+              version: item.version ?? 1,
+              clientId: item.clientId,
+            };
+            store.put(record);
+          }
+        }
+      }
+      const metaStore = txWrite.objectStore(META_STORE);
       metaStore.put({ key: 'lastSyncSeq', value: seq });
       metaStore.put({ key: 'lastSyncTimestamp', value: Date.now() });
-      await promisifyTransaction(tx);
+      await promisifyTransaction(txWrite);
     });
   }
 

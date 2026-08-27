@@ -23,31 +23,23 @@ describe.each(storageDescriptors)(
       await storageContext.cleanup();
     });
 
-    describe('declareApp', () => {
-      it('should declare an app and its tables', async () => {
-        await server.declareApp('todo-app', ['tasks', 'categories']);
+    describe('declareTable', () => {
+      it('should declare a table and configure its settings', async () => {
+        await server.declareTable('tasks', { maxRecords: 500 });
 
-        const app = await server.storage.getApp('todo-app');
-        expect(app).toBeDefined();
-        expect(app?.id).toBe('todo-app');
-
-        const tasksTable = await app?.getTable('tasks');
-        expect(tasksTable).toBeDefined();
-        expect(tasksTable?.name).toBe('tasks');
-
-        const categoriesTable = await app?.getTable('categories');
-        expect(categoriesTable).toBeDefined();
-        expect(categoriesTable?.name).toBe('categories');
+        const table = await server.storage.getTable('tasks');
+        expect(table).toBeDefined();
+        expect(table?.name).toBe('tasks');
+        expect(table?.settings.maxRecords).toBe(500);
       });
 
-      it('should idempotently handle repeated declareApp calls and append new tables', async () => {
-        await server.declareApp('my-app', ['t1']);
-        await server.declareApp('my-app', ['t1', 't2']);
+      it('should idempotently handle repeated declareTable calls and update settings', async () => {
+        await server.declareTable('my-table', { maxRecords: 100 });
+        await server.declareTable('my-table', { maxRecords: 200 });
 
-        const app = await server.storage.getApp('my-app');
-        expect(app).toBeDefined();
-        const tables = await app?.getTables();
-        expect(tables?.map((t) => t.name).sort()).toEqual(['t1', 't2']);
+        const table = await server.storage.getTable('my-table');
+        expect(table).toBeDefined();
+        expect(table?.settings.maxRecords).toBe(200);
       });
     });
 
@@ -466,7 +458,7 @@ describe.each(storageDescriptors)(
           memoryUsage: { rss: number };
         };
         expect(metricsData.connectedClients).toBe(0);
-        expect(typeof metricsData.appsCount).toBe('number');
+        expect(typeof metricsData.tablesCount).toBe('number');
         expect(metricsData.memoryUsage?.rss).toBeGreaterThan(0);
       });
 
@@ -475,8 +467,8 @@ describe.each(storageDescriptors)(
         const addr = httpServer.address() as { port: number };
         const port = addr.port;
 
-        const getAppsSpy = vi
-          .spyOn(server.storage, 'getApps')
+        const getTablesSpy = vi
+          .spyOn(server.storage, 'getTables')
           .mockRejectedValueOnce(new Error('Disk read failure'));
 
         const res = await fetch(`http://127.0.0.1:${port}/ready`);
@@ -485,7 +477,7 @@ describe.each(storageDescriptors)(
         expect(data.status).toBe('unready');
         expect(data.error).toBe('Disk read failure');
 
-        getAppsSpy.mockRestore();
+        getTablesSpy.mockRestore();
       });
 
       it('should return 404 for invalid HTTP methods on observability endpoints', async () => {
@@ -1100,13 +1092,143 @@ describe.each(storageDescriptors)(
         }
       });
     });
+
+    describe('Admin API (/admin/*)', () => {
+      it('should require admin authorization header for all admin routes', async () => {
+        const httpServer = await server.listen(0, '127.0.0.1');
+        const port = (httpServer.address() as { port: number }).port;
+
+        // No auth header
+        const resNoAuth = await fetch(`http://127.0.0.1:${port}/admin/tables`);
+        expect(resNoAuth.status).toBe(401);
+
+        // Wrong secret
+        const resBadAuth = await fetch(
+          `http://127.0.0.1:${port}/admin/tables`,
+          {
+            headers: { Authorization: 'Bearer wrong-secret' },
+          },
+        );
+        expect(resBadAuth.status).toBe(401);
+      });
+
+      it('should manage tables, users, records, and maintenance via admin API', async () => {
+        const httpServer = await server.listen(0, '127.0.0.1');
+        const port = (httpServer.address() as { port: number }).port;
+        const authHeader = {
+          Authorization: `Bearer ${server.adminSecret}`,
+          'Content-Type': 'application/json',
+        };
+
+        // 1. Create table via POST /admin/tables
+        const createTableRes = await fetch(
+          `http://127.0.0.1:${port}/admin/tables`,
+          {
+            method: 'POST',
+            headers: authHeader,
+            body: JSON.stringify({
+              name: 'customers',
+              settings: { maxRecords: 100 },
+            }),
+          },
+        );
+        expect(createTableRes.status).toBe(201);
+        const tableData = (await createTableRes.json()) as { name: string };
+        expect(tableData.name).toBe('customers');
+
+        // 2. List tables via GET /admin/tables
+        const listTablesRes = await fetch(
+          `http://127.0.0.1:${port}/admin/tables`,
+          {
+            headers: authHeader,
+          },
+        );
+        expect(listTablesRes.status).toBe(200);
+        const tablesList = (await listTablesRes.json()) as Array<{
+          name: string;
+        }>;
+        expect(tablesList.some((t) => t.name === 'customers')).toBe(true);
+
+        // 3. Create user via POST /admin/users
+        const createUserRes = await fetch(
+          `http://127.0.0.1:${port}/admin/users`,
+          {
+            method: 'POST',
+            headers: authHeader,
+            body: JSON.stringify({
+              username: 'admin_created_user',
+              password: 'password123',
+            }),
+          },
+        );
+        expect(createUserRes.status).toBe(201);
+        const userData = (await createUserRes.json()) as {
+          id: string;
+          username: string;
+        };
+        expect(userData.username).toBe('admin_created_user');
+
+        // 4. Put record via POST /admin/records
+        const putRecordRes = await fetch(
+          `http://127.0.0.1:${port}/admin/records`,
+          {
+            method: 'POST',
+            headers: authHeader,
+            body: JSON.stringify({
+              table: 'customers',
+              id: 'c1',
+              data: { name: 'Acme Corp' },
+              userId: userData.id,
+            }),
+          },
+        );
+        expect(putRecordRes.status).toBe(200);
+
+        // 5. Query records via GET /admin/records
+        const getRecordsRes = await fetch(
+          `http://127.0.0.1:${port}/admin/records?table=customers&userId=${userData.id}`,
+          {
+            headers: authHeader,
+          },
+        );
+        expect(getRecordsRes.status).toBe(200);
+        const records = (await getRecordsRes.json()) as Array<{
+          id: string;
+          data: { name: string };
+        }>;
+        expect(records).toHaveLength(1);
+        expect(records[0].data.name).toBe('Acme Corp');
+
+        // 6. Get status via GET /admin/status
+        const statusRes = await fetch(`http://127.0.0.1:${port}/admin/status`, {
+          headers: authHeader,
+        });
+        expect(statusRes.status).toBe(200);
+        const status = (await statusRes.json()) as {
+          backend: string;
+          tablesCount: number;
+        };
+        expect(status.tablesCount).toBeGreaterThanOrEqual(1);
+
+        // 7. Prune via POST /admin/maintenance
+        const maintRes = await fetch(
+          `http://127.0.0.1:${port}/admin/maintenance`,
+          {
+            method: 'POST',
+            headers: authHeader,
+            body: JSON.stringify({ action: 'prune', keepCount: 10 }),
+          },
+        );
+        expect(maintRes.status).toBe(200);
+      });
+    });
   },
 );
 
 describe('TetherServer Standalone Lifecycle & Error Mapping', () => {
   it('should map TetherServerErrorCode.NotSupported to HTTP 501', async () => {
     const server = new TetherServer();
-    vi.spyOn(server.storage, 'getApps').mockRejectedValueOnce(
+    vi.spyOn(server.storage, 'getTables').mockRejectedValueOnce(
       new TetherServerError(
         TetherServerErrorCode.NotSupported,
         'Feature not implemented',

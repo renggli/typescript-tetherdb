@@ -38,9 +38,8 @@ describe('FileStorage', () => {
 
   it('should delete user accounts and their filesystem data', async () => {
     const user = await context.backend.createUser('charlie', 'password');
-    const app = await context.backend.createApp('app1');
-    const table = await app.createTable('data');
-    await table.applyChanges(user, [
+    const table = await context.backend.createTable('data');
+    await context.backend.applyChanges(user, [
       {
         table: 'data',
         id: '1',
@@ -59,8 +58,7 @@ describe('FileStorage', () => {
   });
 
   it('should persist tables, metadata, and changelog in bucketed directories', async () => {
-    const app = await context.backend.createApp('default');
-    const table = await app.createTable('settings');
+    const table = await context.backend.createTable('settings');
     const user = await context.backend.createUser('user_42', 'pass');
 
     const change: ChangeRecord = {
@@ -72,27 +70,25 @@ describe('FileStorage', () => {
       clientId: 'client-1',
     };
 
-    await app.applyChanges(user, [change]);
+    await context.backend.applyChanges(user, [change]);
 
-    // Direct layout: tmpDir / default / users / bucket / userId / tables / settings.json
     const bucket = user.id.slice(0, 2);
-    const userDir = path.join(context.dir, 'default', 'users', bucket, user.id);
-    const tableFile = path.join(userDir, 'tables', 'settings.json');
+    const userDir = path.join(context.dir, 'users', bucket, user.id);
+    const tableFile = path.join(userDir, 'settings', 'records.json');
     const metaFile = path.join(userDir, 'meta.json');
     const syncFile = path.join(userDir, 'sync.jsonl');
-    const manifestFile = path.join(context.dir, 'default', 'manifest.json');
-    const appsFile = path.join(context.dir, 'apps.json');
+    const tablesFile = path.join(context.dir, 'tables.json');
     const usersFile = path.join(context.dir, 'users.json');
 
-    expect(await fs.stat(appsFile)).toBeDefined();
+    expect(await fs.stat(tablesFile)).toBeDefined();
     expect(await fs.stat(usersFile)).toBeDefined();
-    expect(await fs.stat(manifestFile)).toBeDefined();
+    expect(await fs.stat(tableFile)).toBeDefined();
     expect(await fs.stat(syncFile)).toBeDefined();
 
-    const manifestContent = JSON.parse(
-      await fs.readFile(manifestFile, 'utf-8'),
-    );
-    expect(manifestContent.tables).toContain('settings');
+    const tablesContent = JSON.parse(
+      await fs.readFile(tablesFile, 'utf-8'),
+    ) as Array<{ name: string }>;
+    expect(tablesContent.some((t) => t.name === 'settings')).toBe(true);
 
     const fileContent = await fs.readFile(tableFile, 'utf-8');
     const tableRecords = JSON.parse(fileContent);
@@ -113,13 +109,12 @@ describe('FileStorage', () => {
     expect(record?.data).toEqual({ dark: true });
   });
 
-  it('should compact changelog beyond maxChangelogEntries and flag requiresSnapshot', async () => {
+  it('should compact changelog beyond maxHistoryEntries and flag requiresSnapshot', async () => {
     const compacting = await fileStorage.createBackend({
-      maxChangelogEntries: 5,
+      maxHistoryEntries: 5,
     });
     try {
-      const app = await compacting.backend.createApp('default');
-      await app.createTable('events');
+      await compacting.backend.createTable('events');
       const user = await compacting.backend.createUser(
         'user_compaction',
         'pass',
@@ -127,7 +122,7 @@ describe('FileStorage', () => {
 
       // Apply 10 changes sequentially
       for (let i = 1; i <= 10; i++) {
-        await app.applyChanges(user, [
+        await compacting.backend.applyChanges(user, [
           {
             table: 'events',
             id: `e-${i}`,
@@ -139,12 +134,15 @@ describe('FileStorage', () => {
         ]);
       }
 
+      // Prune down to 5
+      await compacting.backend.prune(5);
+
       // Asking for seq 1 (which was pruned) should return requiresSnapshot: true
-      const oldDiff = await app.getChangesSince(user, 1);
+      const oldDiff = await compacting.backend.getChangesSince(user, 1);
       expect(oldDiff.requiresSnapshot).toBe(true);
 
       // Asking for recent seq 7 (retained in window) should return delta diff
-      const recentDiff = await app.getChangesSince(user, 7);
+      const recentDiff = await compacting.backend.getChangesSince(user, 7);
       expect(recentDiff.requiresSnapshot).toBe(false);
       expect(recentDiff.changes).toHaveLength(3);
     } finally {
@@ -152,16 +150,15 @@ describe('FileStorage', () => {
     }
   });
 
-  it('should reject changes to undeclared tables or applications', async () => {
+  it('should reject changes to undeclared tables', async () => {
     const strict = await fileStorage.createBackend();
     try {
-      const app = await strict.backend.createApp('myapp');
-      await app.createTable('allowed_table');
+      await strict.backend.createTable('allowed_table');
       const user = await strict.backend.createUser('user_limits', 'pass');
 
       // Disallowed table
       await expect(
-        app.applyChanges(user, [
+        strict.backend.applyChanges(user, [
           {
             table: 'undeclared_table',
             id: '1',
@@ -174,9 +171,6 @@ describe('FileStorage', () => {
       ).rejects.toMatchObject({
         code: TetherServerErrorCode.NotFound,
       });
-
-      // Nonexistent app
-      expect(await strict.backend.getApp('nonexistent_app')).toBeUndefined();
     } finally {
       await strict.cleanup();
     }
@@ -184,8 +178,7 @@ describe('FileStorage', () => {
 
   it('should support concurrent writes across multiple storage instances without data corruption', async () => {
     const user = await context.backend.createUser('multi_user', 'pass123');
-    const app = await context.backend.createApp('multi_app');
-    const table = await app.createTable('shared_data');
+    await context.backend.createTable('shared_data');
 
     // Create a second storage instance targeting the same directory
     const storage2 = new FileStorage({ baseDir: context.dir });
@@ -193,14 +186,12 @@ describe('FileStorage', () => {
     try {
       const user2 = await storage2.getUser(user.id);
       expect(user2).toBeDefined();
-      const app2 = await storage2.getApp('multi_app');
-      expect(app2).toBeDefined();
-      const table2 = await app2?.getTable('shared_data');
+      const table2 = await storage2.getTable('shared_data');
       expect(table2).toBeDefined();
       if (!user2 || !table2) throw new Error('user2 or table2 not found');
 
       // Apply changes from instance 1
-      await table.applyChanges(user, [
+      await context.backend.applyChanges(user, [
         {
           table: 'shared_data',
           id: 'k1',
@@ -220,7 +211,7 @@ describe('FileStorage', () => {
       ]);
 
       // Apply changes from instance 2
-      await table2.applyChanges(user2, [
+      await storage2.applyChanges(user2, [
         {
           table: 'shared_data',
           id: 'k3',
@@ -242,8 +233,8 @@ describe('FileStorage', () => {
       // Verify records are intact and non-corrupted across both instances
       const rec1 = await table2.getRecord(user2, 'k1');
       const rec2 = await table2.getRecord(user2, 'k2');
-      const rec3 = await table.getRecord(user, 'k3');
-      const rec4 = await table.getRecord(user, 'k4');
+      const rec3 = await table2.getRecord(user2, 'k3');
+      const rec4 = await table2.getRecord(user2, 'k4');
 
       expect(rec1?.data).toEqual({ from: 'instance1' });
       expect(rec2?.data).toEqual({ from: 'instance1' });
@@ -272,12 +263,10 @@ describe('FileStorage', () => {
   });
 
   it('should reject checkpoint and vacuum with NotSupported code', async () => {
-    await expect(context.backend.checkpoint('app1')).rejects.toThrow(
+    await expect(context.backend.checkpoint('t1')).rejects.toThrow(
       /not supported/i,
     );
-    await expect(context.backend.vacuum('app1')).rejects.toThrow(
-      /not supported/i,
-    );
+    await expect(context.backend.vacuum()).rejects.toThrow(/not supported/i);
     try {
       await context.backend.checkpoint();
     } catch (err) {
@@ -288,12 +277,11 @@ describe('FileStorage', () => {
   });
 
   it('should prune file changelogs and update metadata', async () => {
-    const app = await context.backend.createApp('prune_file_app');
-    const table = await app.createTable('records');
+    await context.backend.createTable('records');
     const user = await context.backend.createUser('puser', 'pass');
 
     for (let i = 1; i <= 8; i++) {
-      await table.applyChanges(user, [
+      await context.backend.applyChanges(user, [
         {
           table: 'records',
           id: `rec-${i}`,
@@ -305,20 +293,15 @@ describe('FileStorage', () => {
       ]);
     }
 
-    const pruneRes = await context.backend.prune('prune_file_app', 3);
+    const pruneRes = await context.backend.prune(3, 'records');
     expect(pruneRes.action).toBe('prune');
     expect(pruneRes.backend).toBe('file');
     expect(pruneRes.affectedCount).toBe(5);
-
-    // Prune on non-existent app should fail
-    await expect(context.backend.prune('missing_app')).rejects.toThrow(
-      /not found/i,
-    );
   });
 
-  it('should enforce maxRecordsPerTable and maxRecordSizeBytes in FileStorage', async () => {
+  it('should enforce maxRecords and maxRecordSizeBytes in FileStorage', async () => {
     const limitedContext = await fileStorage.createBackend({
-      maxRecordsPerTable: 2,
+      maxRecords: 2,
       maxRecordSizeBytes: 25,
     });
     try {
@@ -326,12 +309,11 @@ describe('FileStorage', () => {
         'lim_file_u',
         'pass',
       );
-      const app = await limitedContext.backend.createApp('lim_file_app');
-      const table = await app.createTable('records');
+      await limitedContext.backend.createTable('records');
 
       // Exceed size
       await expect(
-        table.applyChanges(user, [
+        limitedContext.backend.applyChanges(user, [
           {
             table: 'records',
             id: 'r1',
@@ -344,7 +326,7 @@ describe('FileStorage', () => {
       ).rejects.toThrow('Record payload exceeds maximum allowed size');
 
       // Add up to limit
-      await table.applyChanges(user, [
+      await limitedContext.backend.applyChanges(user, [
         {
           table: 'records',
           id: 'r1',
@@ -365,7 +347,7 @@ describe('FileStorage', () => {
 
       // Exceed count
       await expect(
-        table.applyChanges(user, [
+        limitedContext.backend.applyChanges(user, [
           {
             table: 'records',
             id: 'r3',
@@ -383,10 +365,9 @@ describe('FileStorage', () => {
 
   it('should delete tables and remove table files from user directories', async () => {
     const user = await context.backend.createUser('del_user', 'pass');
-    const app = await context.backend.createApp('del_app');
-    const table = await app.createTable('to_delete');
+    await context.backend.createTable('to_delete');
 
-    await table.applyChanges(user, [
+    await context.backend.applyChanges(user, [
       {
         table: 'to_delete',
         id: '1',
@@ -397,12 +378,10 @@ describe('FileStorage', () => {
       },
     ]);
 
-    expect(await app.getTable('to_delete')).toBeDefined();
-    const deleted = await app.deleteTable('to_delete');
+    const tableToDelete = await context.backend.getTable('to_delete');
+    expect(tableToDelete).toBeDefined();
+    const deleted = await tableToDelete?.delete();
     expect(deleted).toBe(true);
-    expect(await app.getTable('to_delete')).toBeUndefined();
-
-    // Deleting again should return false
-    expect(await app.deleteTable('to_delete')).toBe(false);
+    expect(await context.backend.getTable('to_delete')).toBeUndefined();
   });
 });

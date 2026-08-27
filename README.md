@@ -24,7 +24,7 @@
 - **📱 Offline-First & Local-First**: Mutations apply immediately to browser IndexedDB with zero latency and queue in an atomic outbox for background synchronization.
 - **🔄 Real-Time Two-Way Sync**: Fast, bi-directional WebSocket sync with delta diff catch-up on reconnect, adaptive full snapshots, and automatic live broadcast to active sessions.
 - **⚖️ Deterministic Conflict Resolution**: Last-Write-Wins (LWW) conflict handling powered by monotonically increasing logical clocks and deterministic tie-breaking.
-- **🏢 Multi-Tenant & Multi-App**: Host multiple independent web applications on a single domain and server instance. Data and WebSocket streams are strictly isolated by `appId` and user account.
+- **🏢 Multi-Tenant & Table Sharing**: Isolate data strictly per-user or share tables globally or across teams with fine-grained access modes (`user-private`, `public-read`, `public-read-write`, `shared`).
 - **🚀 Seamless Offline-to-Cloud Onboarding**: Start using the local database immediately without an account; attach live cloud sync on demand with a single `client.login()` or `client.register()` call.
 - **🗄️ Pluggable Server Storage**: Built-in persistence engines for SQLite (`SqliteStorage`), sharded filesystem directories (`FileStorage`), and ephemeral testing (`MemoryStorage`).
 - **🔐 Built-in Authentication**: Password hashing using scrypt with salt and HMAC-signed session tokens with automatic session persistence and recovery.
@@ -195,8 +195,8 @@ export default defineConfig({
     tetherPlugin({
       // Optional persistent storage (defaults to in-memory)
       storage: new SqliteStorage({ baseDir: './data' }),
-      // Pre-declare applications and tables
-      apps: [{ appId: 'todo-app', tables: ['todos'] }],
+      // Pre-declare tables and access settings
+      tables: ['todos'],
       // Pre-provision default demo accounts
       users: [{ username: 'demo', password: 'password123' }],
     }),

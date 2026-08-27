@@ -22,7 +22,7 @@ describe('tetherPlugin (Vite Dev Server Integration)', () => {
       },
       plugins: [
         tetherPlugin({
-          apps: [{ appId: 'vite-app', tables: ['todos', 'notes'] }],
+          tables: ['todos', 'notes'],
           users: [{ username: 'vite-user', password: 'vite-password-123' }],
         }),
       ],
@@ -75,7 +75,6 @@ describe('tetherPlugin (Vite Dev Server Integration)', () => {
             protocolVersion: 1,
             clientId: 'vite-test-client',
             token: loginData.token,
-            appId: 'vite-app',
           }),
         );
       });
@@ -109,7 +108,7 @@ describe('tetherPlugin (Vite Dev Server Integration)', () => {
 
   it('should handle preview server configuration and close cleanly', async () => {
     const plugin = tetherPlugin({
-      apps: [{ appId: 'preview-app', tables: ['items'] }],
+      tables: ['items'],
     });
 
     let middlewareRegistered = false;

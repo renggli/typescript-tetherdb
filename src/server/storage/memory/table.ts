@@ -1,29 +1,42 @@
-import type { SnapshotRecord, StoredRecord } from '../../../shared/types.js';
+import type {
+  ChangeRecord,
+  SnapshotRecord,
+  StoredRecord,
+  TableSettings,
+} from '../../../shared/types.js';
 import { validateRecordId } from '../../validate.js';
-import { filterActiveRecords, TableBaseStorage } from '../base/index.js';
+import {
+  canRead,
+  filterActiveRecords,
+  TableBaseStorage,
+} from '../base/index.js';
 import type { UserStorage } from '../user.js';
-import type { AppMemoryStorage } from './app.js';
 import type { MemoryStorage } from './storage.js';
 
 /**
  * In-memory implementation of `TableStorage`.
  */
 export class TableMemoryStorage extends TableBaseStorage {
-  declare readonly app: AppMemoryStorage;
   private storage: MemoryStorage;
 
-  constructor(name: string, app: AppMemoryStorage, storage: MemoryStorage) {
-    super(name, app);
+  constructor(
+    name: string,
+    storage: MemoryStorage,
+    settings: TableSettings = {},
+  ) {
+    super(name, settings);
     this.storage = storage;
   }
 
   async getRecord(
-    user: UserStorage,
+    user: UserStorage | undefined,
     id: string,
   ): Promise<StoredRecord | undefined> {
     const safeId = validateRecordId(id);
-    const userState = this.storage.getUserState(user.id, this.app.id);
-    const tableMap = userState.tables.get(this.name);
+    if (!canRead(this, user)) {
+      return undefined;
+    }
+    const tableMap = this.storage.getTableRecordsMap(this.name, user?.id);
     const record = tableMap?.get(safeId);
 
     if (!record || record.deleted) {
@@ -33,13 +46,26 @@ export class TableMemoryStorage extends TableBaseStorage {
     return record;
   }
 
-  async getAllRecords(user: UserStorage): Promise<SnapshotRecord[]> {
-    const userState = this.storage.getUserState(user.id, this.app.id);
-    const tableMap = userState.tables.get(this.name);
+  async getAllRecords(user?: UserStorage): Promise<SnapshotRecord[]> {
+    if (!canRead(this, user)) {
+      return [];
+    }
+    const tableMap = this.storage.getTableRecordsMap(this.name, user?.id);
     return tableMap ? filterActiveRecords(this.name, tableMap.values()) : [];
   }
 
+  async applyChanges(
+    user: UserStorage | undefined,
+    changes: ChangeRecord[],
+  ): Promise<{ applied: ChangeRecord[]; newSeq: number }> {
+    const targeted = changes.map((c) => ({
+      ...c,
+      table: this.name,
+    }));
+    return this.storage.applyChanges(user, targeted);
+  }
+
   async delete(): Promise<boolean> {
-    return this.app.deleteTable(this.name);
+    return this.storage.deleteTable(this.name);
   }
 }

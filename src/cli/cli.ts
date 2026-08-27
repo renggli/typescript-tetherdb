@@ -9,10 +9,11 @@ import {
 import { parseCliArgs } from './args.js';
 import { createBackend } from './backend.js';
 import {
-  handleAppsCommand,
   handleMaintenanceCommand,
+  handleRecordsCommand,
   handleServeCommand,
   handleStatusCommand,
+  handleStopCommand,
   handleTablesCommand,
   handleUsersCommand,
   printHelp,
@@ -40,19 +41,22 @@ export async function runCli(
         await handleServeCommand(storage, backend, dir, port, host);
         break;
       case 'status':
-        await handleStatusCommand(storage, positionalArgs);
+        await handleStatusCommand(storage, positionalArgs, dir);
+        break;
+      case 'stop':
+        await handleStopCommand(dir);
         break;
       case 'maintenance':
-        await handleMaintenanceCommand(storage, positionalArgs);
-        break;
-      case 'apps':
-        await handleAppsCommand(storage, positionalArgs);
+        await handleMaintenanceCommand(storage, positionalArgs, dir);
         break;
       case 'tables':
-        await handleTablesCommand(storage, positionalArgs);
+        await handleTablesCommand(storage, positionalArgs, dir);
+        break;
+      case 'records':
+        await handleRecordsCommand(storage, positionalArgs, dir);
         break;
       case 'users':
-        await handleUsersCommand(storage, positionalArgs);
+        await handleUsersCommand(storage, positionalArgs, dir);
         break;
       default:
         throw new TetherServerError(

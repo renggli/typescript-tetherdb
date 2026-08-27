@@ -28,14 +28,12 @@ describe.each(storageDescriptors)(
       server = new TetherServer({
         storage: storageContext.storage,
       });
-      await server.declareApp('default', [
-        'todos',
-        'notes',
-        'items',
-        'tasks',
-        'messages',
-        'docs',
-      ]);
+      await server.declareTable('todos');
+      await server.declareTable('notes');
+      await server.declareTable('items');
+      await server.declareTable('tasks');
+      await server.declareTable('messages');
+      await server.declareTable('docs');
 
       const httpServer = await server.listen(0, '127.0.0.1');
       const addr = httpServer.address();
@@ -61,7 +59,6 @@ describe.each(storageDescriptors)(
       const client = new TetherClient(
         `${name}-${Math.random().toString(36).substring(2, 8)}`,
         {
-          appId: 'default',
           host: '127.0.0.1',
           port,
           webSocketClass: WebSocket,
@@ -83,8 +80,7 @@ describe.each(storageDescriptors)(
       const user = await server.storage.getUserByUsername('testuser');
       expect(user).toBeDefined();
       if (!user) return;
-      const defaultApp = await server.storage.getApp('default');
-      const todosTable = await defaultApp?.getTable('todos');
+      const todosTable = await server.storage.getTable('todos');
 
       await waitForCondition(async () => {
         const records = (await todosTable?.getAllRecords(user)) ?? [];
@@ -103,8 +99,7 @@ describe.each(storageDescriptors)(
 
     it('should perform initial snapshot sync on new client connection', async () => {
       const user = await server.storage.getUserByUsername('testuser');
-      const defaultApp = await server.storage.getApp('default');
-      const todosTable = await defaultApp?.getTable('todos');
+      const todosTable = await server.storage.getTable('todos');
 
       // Client A creates data
       const clientA = createClient('client-a');
@@ -183,8 +178,7 @@ describe.each(storageDescriptors)(
 
     it('should catch up with diff sync after being offline', async () => {
       const user = await server.storage.getUserByUsername('testuser');
-      const defaultApp = await server.storage.getApp('default');
-      const itemsTable = await defaultApp?.getTable('items');
+      const itemsTable = await server.storage.getTable('items');
 
       const clientA = createClient('client-a');
       await clientA.login({ username: 'testuser', password: 'password123' });
@@ -203,7 +197,6 @@ describe.each(storageDescriptors)(
       // Client B connects and gets initial sync
       const clientBName = `client-b-${Math.random().toString(36).substring(2, 8)}`;
       let clientB = new TetherClient(clientBName, {
-        appId: 'default',
         host: '127.0.0.1',
         port,
         webSocketClass: WebSocket,
@@ -230,7 +223,6 @@ describe.each(storageDescriptors)(
 
       // Client B comes back online with the same IndexedDB database
       clientB = new TetherClient(clientBName, {
-        appId: 'default',
         host: '127.0.0.1',
         port,
         webSocketClass: WebSocket,
@@ -277,8 +269,7 @@ describe.each(storageDescriptors)(
       await docs1.put('doc1', { secret: 'top secret 1' });
 
       const user1 = await server.storage.getUserByUsername('testuser');
-      const defaultApp = await server.storage.getApp('default');
-      const docsTable = await defaultApp?.getTable('docs');
+      const docsTable = await server.storage.getTable('docs');
       if (user1) {
         await waitForCondition(async () => {
           const recs = (await docsTable?.getAllRecords(user1)) ?? [];
@@ -310,10 +301,8 @@ describe.each(storageDescriptors)(
           clientId: 'prepop',
         });
       }
-      const defaultApp = await server.storage.getApp('default');
-      expect(defaultApp).toBeDefined();
       if (!user) return;
-      await defaultApp?.applyChanges(user, changes);
+      await server.storage.applyChanges(user, changes);
 
       // New client connects with lastSyncSeq: 1 (so 59 changes diff > 50 threshold)
       const client = createClient('client-bulk');

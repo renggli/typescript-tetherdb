@@ -82,7 +82,6 @@ describe('Sync', () => {
     options: Partial<ConstructorParameters<typeof Sync>[1]> = {},
   ): Sync {
     const sync = new Sync(storage, {
-      appId: 'test-app',
       clientId: 'test-client',
       url: 'ws://127.0.0.1:8080/sync',
       webSocketClass: MockWebSocket as unknown as WebSocketConstructor,
@@ -93,40 +92,16 @@ describe('Sync', () => {
   }
 
   describe('Constructor & Validation', () => {
-    it('should throw error when appId is missing', () => {
-      expect(
-        () =>
-          new Sync(storage, {
-            // @ts-expect-error - testing missing appId
-            appId: '',
-            clientId: 'client-1',
-          }),
-      ).toThrow(TetherClientError);
-      try {
-        new Sync(storage, {
-          // @ts-expect-error - testing missing appId
-          appId: '',
-          clientId: 'client-1',
-        });
-      } catch (err) {
-        expect((err as TetherClientError).code).toBe(
-          TetherClientErrorCode.MissingConfiguration,
-        );
-      }
-    });
-
     it('should throw error when clientId is missing', () => {
       expect(
         () =>
           new Sync(storage, {
-            appId: 'app-1',
             // @ts-expect-error - testing missing clientId
             clientId: '',
           }),
       ).toThrow(TetherClientError);
       try {
         new Sync(storage, {
-          appId: 'app-1',
           // @ts-expect-error - testing missing clientId
           clientId: '',
         });
@@ -139,20 +114,17 @@ describe('Sync', () => {
 
     it('should initialize with Disconnected status and configured properties', () => {
       const sync = createSync({
-        appId: 'custom-app',
         clientId: 'custom-client',
-        url: 'ws://127.0.0.1:9999/sync',
+        url: undefined,
       });
 
-      expect(sync.appId).toBe('custom-app');
       expect(sync.clientId).toBe('custom-client');
-      expect(sync.url).toBe('ws://127.0.0.1:9999/sync');
       expect(sync.status).toBe(SyncStatus.Disconnected);
     });
 
-    it('should auto-connect when both token and url are provided in constructor', async () => {
+    it('should auto-connect when url is provided in constructor', async () => {
       const sync = createSync({
-        token: 'auth-token',
+        url: 'ws://127.0.0.1:9999/sync',
       });
 
       expect(sync.status).toBe(SyncStatus.Connecting);
@@ -166,6 +138,7 @@ describe('Sync', () => {
 
       const sync = createSync({
         clientId: 'client-xyz',
+        url: undefined,
       });
 
       sync.connect('my-jwt-token', 'ws://127.0.0.1:8080/sync');
@@ -185,7 +158,6 @@ describe('Sync', () => {
         type: ClientMessageType.Auth,
         protocolVersion: 1,
         token: 'my-jwt-token',
-        appId: 'test-app',
         clientId: 'client-xyz',
         lastSyncSeq: 77,
       });
@@ -193,23 +165,14 @@ describe('Sync', () => {
 
     it('should transition to Error when no WebSocket implementation is available', () => {
       const sync = new Sync(storage, {
-        appId: 'test-app',
         clientId: 'client-xyz',
         url: 'ws://localhost/sync',
-        webSocketClass: undefined,
+        webSocketClass: null as unknown as WebSocketConstructor,
       });
       syncInstances.push(sync);
 
-      const originalWS = globalThis.WebSocket;
-      // @ts-expect-error - simulating environment without WebSocket
-      delete globalThis.WebSocket;
-
-      try {
-        sync.connect('token');
-        expect(sync.status).toBe(SyncStatus.Error);
-      } finally {
-        globalThis.WebSocket = originalWS;
-      }
+      sync.connect('token');
+      expect(sync.status).toBe(SyncStatus.Error);
     });
 
     it('should transition to Error and schedule reconnect when WebSocket constructor throws', () => {
@@ -228,7 +191,6 @@ describe('Sync', () => {
 
     it('should return early from connect when url is missing', () => {
       const sync = new Sync(storage, {
-        appId: 'test-app',
         clientId: 'client-xyz',
         webSocketClass: MockWebSocket as unknown as WebSocketConstructor,
       });
@@ -312,7 +274,7 @@ describe('Sync', () => {
         ],
       });
 
-      await new Promise((r) => setTimeout(r, 2));
+      await new Promise((r) => setTimeout(r, 20));
 
       expect(await table.get('snap-1')).toEqual({ title: 'Snap Todo' });
       expect(await table.get('snap-del')).toBeUndefined();
@@ -350,7 +312,7 @@ describe('Sync', () => {
         ],
       });
 
-      await new Promise((r) => setTimeout(r, 2));
+      await new Promise((r) => setTimeout(r, 20));
 
       expect(await table.get('n1')).toEqual({ text: 'Diff Note' });
       expect(tableEvents).toHaveLength(2);

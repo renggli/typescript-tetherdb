@@ -29,7 +29,9 @@ describe.each(storageDescriptors)(
       server = new TetherServer({
         storage: storageContext.storage,
       });
-      await server.declareApp('default', ['notes', 'todos', 'items']);
+      await server.storage.createTable('notes');
+      await server.storage.createTable('todos');
+      await server.storage.createTable('items');
       httpServer = await server.listen(0, '127.0.0.1');
       const addr = httpServer.address();
       if (typeof addr === 'object' && addr !== null) {
@@ -49,7 +51,6 @@ describe.each(storageDescriptors)(
     it('should allow simple CRUD operations with Table instance', async () => {
       const db = new TetherClient(
         `simple-crud-${Math.random().toString(36).substring(2, 8)}`,
-        { appId: 'default' },
       );
       clientsToClose.push(db);
 
@@ -122,7 +123,6 @@ describe.each(storageDescriptors)(
       // 1. User starts locally offline with zero configuration
       const dbName = `offline-onboard-${Math.random().toString(36).substring(2, 8)}`;
       const db = new TetherClient(dbName, {
-        appId: 'default',
         host: '127.0.0.1',
         port: serverPort,
         webSocketClass: WebSocket,
@@ -173,8 +173,7 @@ describe.each(storageDescriptors)(
       const user = await server.storage.getUserByUsername('onboard_user');
       expect(user).toBeDefined();
       if (!user) return;
-      const defaultApp = await server.storage.getApp('default');
-      const todosTable = await defaultApp?.getTable('todos');
+      const todosTable = await server.storage.getTable('todos');
       const serverRecords = (await todosTable?.getAllRecords(user)) ?? [];
       expect(serverRecords).toHaveLength(2);
     });
@@ -184,7 +183,6 @@ describe.each(storageDescriptors)(
       const db = new TetherClient(
         `inferred-config-${Math.random().toString(36).substring(2, 8)}`,
         {
-          appId: 'default',
           host: '127.0.0.1',
           port: serverPort,
           webSocketClass: WebSocket,
@@ -209,27 +207,28 @@ describe.each(storageDescriptors)(
 
       const dbName = `dynamic-db-${Math.random().toString(36).substring(2, 8)}`;
       const db = new TetherClient(dbName, {
-        appId: 'default',
         host: '127.0.0.1',
         port: serverPort,
         webSocketClass: WebSocket,
       });
       clientsToClose.push(db);
 
-      expect(db.syncStatus).toBe(SyncStatus.Disconnected);
+      expect([SyncStatus.Connecting, SyncStatus.Connected]).toContain(
+        db.syncStatus,
+      );
 
       // Login connects sync
       await db.login({ username: 'dynamic_user', password: 'password123' });
       await waitForCondition(() => db.syncStatus === SyncStatus.Connected);
       expect(db.syncStatus).toBe(SyncStatus.Connected);
 
-      // Logout disconnects sync
+      // Logout reconnects sync as guest
       await db.logout();
-      expect(db.syncStatus).toBe(SyncStatus.Disconnected);
+      expect(db.authStatus).toBe(AuthStatus.SignedOut);
 
       // Local operations still work offline
       const notes = db.table<{ text: string }>('notes');
-      await notes.put('1', { text: 'Created while sync disconnected' });
+      await notes.put('1', { text: 'Created while signed out' });
       expect((await notes.getAll()).length).toBe(1);
 
       // Re-login connects sync and flushes outbox
@@ -248,7 +247,6 @@ describe.each(storageDescriptors)(
     it('should wipe local data on db.clear()', async () => {
       const db = new TetherClient(
         `clear-test-db-${Math.random().toString(36).substring(2, 8)}`,
-        { appId: 'clear-app' },
       );
       clientsToClose.push(db);
 

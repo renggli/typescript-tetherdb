@@ -229,11 +229,15 @@ describe('ServerLock', () => {
       code: TetherServerErrorCode.NotSupported,
     });
 
-    // Mutating app operations should be blocked
-    await expect(fileStorage.createApp('blocked_app')).rejects.toMatchObject({
+    // Mutating table operations should be blocked
+    await expect(
+      fileStorage.createTable('blocked_table'),
+    ).rejects.toMatchObject({
       code: TetherServerErrorCode.NotSupported,
     });
-    await expect(fileStorage.deleteApp('blocked_app')).rejects.toMatchObject({
+    await expect(
+      fileStorage.deleteTable('blocked_table'),
+    ).rejects.toMatchObject({
       code: TetherServerErrorCode.NotSupported,
     });
 
@@ -244,10 +248,10 @@ describe('ServerLock', () => {
     const parentPid = process.ppid;
     if (!isProcessAlive(parentPid)) return;
 
-    // First create user and app before locking
+    // First create user and table before locking
     const prepStorage = new FileStorage({ baseDir: tmpDir });
     const user = await prepStorage.createUser('alice_user', 'password123');
-    await prepStorage.createApp('demo_app');
+    await prepStorage.createTable('demo_table');
     await prepStorage.close();
 
     // Now set external server lock
@@ -271,11 +275,11 @@ describe('ServerLock', () => {
     expect(fetchedUser).toBeDefined();
     expect(fetchedUser?.username).toBe('alice_user');
 
-    const fetchedApp = await readerStorage.getApp('demo_app');
-    expect(fetchedApp).toBeDefined();
+    const fetchedTable = await readerStorage.getTable('demo_table');
+    expect(fetchedTable).toBeDefined();
 
     const status = await readerStorage.getStatus();
-    expect(status.appsCount).toBe(1);
+    expect(status.tablesCount).toBe(1);
     expect(status.usersCount).toBe(1);
 
     await readerStorage.close();
@@ -287,11 +291,10 @@ describe('ServerLock', () => {
 
     const sqlite = new SqliteStorage({ baseDir: tmpDir });
     const user = await sqlite.createUser('sqlite_user', 'password123');
-    const app = await sqlite.createApp('sqlite_app');
-    const table = await app.createTable('items');
+    const table = await sqlite.createTable('items');
 
     // Writes succeed even if external lock is present (SQLite handles OS WAL locking)
-    await table.applyChanges(user, [
+    await sqlite.applyChanges(user, [
       {
         table: 'items',
         id: 'item_1',

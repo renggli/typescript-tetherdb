@@ -10,6 +10,8 @@ export enum TetherServerErrorCode {
   AlreadyExists,
   /** Authentication is missing, invalid, or expired. */
   Unauthorized,
+  /** The authenticated user does not have permission for the requested resource. */
+  Forbidden,
   /** The provided credentials are invalid. */
   AuthenticationFailed,
   /** A storage capacity or payload size limit was exceeded. */
@@ -56,6 +58,8 @@ function getDefaultServerErrorMessage(code: TetherServerErrorCode): string {
       return 'Resource already exists';
     case TetherServerErrorCode.Unauthorized:
       return 'Authentication required';
+    case TetherServerErrorCode.Forbidden:
+      return 'Access forbidden';
     case TetherServerErrorCode.AuthenticationFailed:
       return 'Authentication failed';
     case TetherServerErrorCode.LimitExceeded:

@@ -7,10 +7,11 @@ describe('printHelp', () => {
     printHelp();
     expect(testLogger.hasMessage('TetherDB CLI')).toBe(true);
     expect(testLogger.hasMessage('serve (default)')).toBe(true);
-    expect(testLogger.hasMessage('status [appid]')).toBe(true);
+    expect(testLogger.hasMessage('status')).toBe(true);
+    expect(testLogger.hasMessage('stop')).toBe(true);
     expect(testLogger.hasMessage('maintenance checkpoint')).toBe(true);
-    expect(testLogger.hasMessage('apps [list]')).toBe(true);
     expect(testLogger.hasMessage('tables [list]')).toBe(true);
+    expect(testLogger.hasMessage('records list')).toBe(true);
     expect(testLogger.hasMessage('users [list]')).toBe(true);
   });
 });

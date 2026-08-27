@@ -89,9 +89,8 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
     storage = context.storage;
     sync = new Sync(storage);
 
-    const app = await storage.createApp('todo-app');
-    await app.createTable('todos');
-    await app.createTable('notes');
+    await storage.createTable('todos');
+    await storage.createTable('notes');
 
     const user = await storage.createUser('alice', 'password123');
     testUserId = user.id;
@@ -111,7 +110,6 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         type: ClientMessageType.Auth,
         protocolVersion: 99,
         token: validToken,
-        appId: 'todo-app',
       });
 
       await ws.waitForMessages(1);
@@ -125,25 +123,24 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       expect(ws.isClosed).toBe(true);
     });
 
-    it('should reject connection if token is missing or empty', async () => {
+    it('should allow guest connection when token is omitted', async () => {
       const ws = new MockServerWebSocket();
       sync.handleConnection(ws as unknown as WebSocket);
 
       ws.emitClientMessage({
         type: ClientMessageType.Auth,
-        token: '',
-        appId: 'todo-app',
+        clientId: 'guest-1',
+        lastSyncSeq: 0,
       });
 
-      await ws.waitForMessages(1);
+      await ws.waitForMessages(2);
 
       const messages = ws.getParsedMessages();
-      expect(messages).toHaveLength(1);
-      expect(messages[0]).toEqual({
-        type: ServerMessageType.AuthError,
-        message: 'Missing or invalid authentication token',
-      });
-      expect(ws.isClosed).toBe(true);
+      expect(messages).toHaveLength(2);
+      expect(messages[0].type).toBe(ServerMessageType.AuthSuccess);
+      if (messages[0].type === ServerMessageType.AuthSuccess) {
+        expect(messages[0].userId).toBe('anonymous');
+      }
     });
 
     it('should reject connection if token is invalid or expired', async () => {
@@ -153,7 +150,6 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       ws.emitClientMessage({
         type: ClientMessageType.Auth,
         token: 'invalid-token-xyz',
-        appId: 'todo-app',
       });
 
       await ws.waitForMessages(1);
@@ -167,48 +163,6 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       expect(ws.isClosed).toBe(true);
     });
 
-    it('should reject connection if appId is missing or empty', async () => {
-      const ws = new MockServerWebSocket();
-      sync.handleConnection(ws as unknown as WebSocket);
-
-      ws.emitClientMessage({
-        type: ClientMessageType.Auth,
-        token: validToken,
-        appId: '',
-      });
-
-      await ws.waitForMessages(1);
-
-      const messages = ws.getParsedMessages();
-      expect(messages).toHaveLength(1);
-      expect(messages[0]).toEqual({
-        type: ServerMessageType.AuthError,
-        message: 'Missing required field: appId',
-      });
-      expect(ws.isClosed).toBe(true);
-    });
-
-    it('should reject connection if application does not exist', async () => {
-      const ws = new MockServerWebSocket();
-      sync.handleConnection(ws as unknown as WebSocket);
-
-      ws.emitClientMessage({
-        type: ClientMessageType.Auth,
-        token: validToken,
-        appId: 'non-existent-app',
-      });
-
-      await ws.waitForMessages(1);
-
-      const messages = ws.getParsedMessages();
-      expect(messages).toHaveLength(1);
-      expect(messages[0]).toEqual({
-        type: ServerMessageType.AuthError,
-        message: 'Application not found',
-      });
-      expect(ws.isClosed).toBe(true);
-    });
-
     it('should successfully authenticate and return AuthSuccess + initial snapshot for seq 0', async () => {
       const ws = new MockServerWebSocket();
       sync.handleConnection(ws as unknown as WebSocket);
@@ -216,7 +170,6 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       ws.emitClientMessage({
         type: ClientMessageType.Auth,
         token: validToken,
-        appId: 'todo-app',
         clientId: 'client-1',
         lastSyncSeq: 0,
       });
@@ -249,8 +202,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       expect(user).toBeDefined();
       if (!user) return;
 
-      const app = await storage.getApp('todo-app');
-      await app?.applyChanges(user, [
+      await storage.applyChanges(user, [
         {
           table: 'todos',
           id: 't1',
@@ -267,7 +219,6 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       ws.emitClientMessage({
         type: ClientMessageType.Auth,
         token: validToken,
-        appId: 'todo-app',
         clientId: 'client-1',
         lastSyncSeq: 0,
       });
@@ -288,8 +239,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       expect(user).toBeDefined();
       if (!user) return;
 
-      const app = await storage.getApp('todo-app');
-      await app?.applyChanges(user, [
+      await storage.applyChanges(user, [
         {
           table: 'todos',
           id: 't1',
@@ -314,7 +264,6 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       ws.emitClientMessage({
         type: ClientMessageType.Auth,
         token: validToken,
-        appId: 'todo-app',
         clientId: 'client-1',
         lastSyncSeq: 1,
       });
@@ -337,7 +286,6 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       expect(user).toBeDefined();
       if (!user) return;
 
-      const app = await storage.getApp('todo-app');
       const changes = [];
       for (let i = 1; i <= 55; i++) {
         changes.push({
@@ -349,7 +297,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
           clientId: 'client-0',
         });
       }
-      await app?.applyChanges(user, changes);
+      await storage.applyChanges(user, changes);
 
       const ws = new MockServerWebSocket();
       sync.handleConnection(ws as unknown as WebSocket);
@@ -358,7 +306,6 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       ws.emitClientMessage({
         type: ClientMessageType.Auth,
         token: validToken,
-        appId: 'todo-app',
         clientId: 'client-1',
         lastSyncSeq: 1,
       });
@@ -377,45 +324,56 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
   });
 
   describe('Change Ingestion & Real-Time Broadcasting (ClientMessageType.ChangeBatch)', () => {
-    it('should reject ChangeBatch when client is not authenticated', async () => {
+    it('should reject ChangeBatch when client writes to private table without auth', async () => {
       const ws = new MockServerWebSocket();
       sync.handleConnection(ws as unknown as WebSocket);
+
+      ws.emitClientMessage({
+        type: ClientMessageType.Auth,
+        clientId: 'c1',
+        lastSyncSeq: 0,
+      });
+      await ws.waitForMessages(2);
 
       ws.emitClientMessage({
         type: ClientMessageType.ChangeBatch,
         clientId: 'c1',
         batchId: 'b1',
-        changes: [],
+        changes: [
+          {
+            table: 'todos',
+            id: 'item-1',
+            op: OperationType.Put,
+            data: { title: 'Todo' },
+            timestamp: Date.now(),
+            clientId: 'c1',
+          },
+        ],
       });
-      await ws.waitForMessages(1);
+      await ws.waitForMessages(3);
 
       const messages = ws.getParsedMessages();
-      expect(messages).toHaveLength(1);
-      expect(messages[0]).toEqual({
-        type: ServerMessageType.AuthError,
-        message: 'Not authenticated',
-      });
+      const errMsg = messages.find((m) => m.type === ServerMessageType.Error);
+      expect(errMsg).toBeDefined();
     });
 
-    it('should apply changes, send ChangeAck to sender, and broadcast to other clients of the same app and user', async () => {
+    it('should apply changes, send ChangeAck to sender, and broadcast to other clients of the same user', async () => {
       // Client 1 (Sender)
       const ws1 = new MockServerWebSocket();
       sync.handleConnection(ws1 as unknown as WebSocket);
       ws1.emitClientMessage({
         type: ClientMessageType.Auth,
         token: validToken,
-        appId: 'todo-app',
         clientId: 'client-1',
         lastSyncSeq: 0,
       });
 
-      // Client 2 (Receiver - same app, same user)
+      // Client 2 (Receiver - same user)
       const ws2 = new MockServerWebSocket();
       sync.handleConnection(ws2 as unknown as WebSocket);
       ws2.emitClientMessage({
         type: ClientMessageType.Auth,
         token: validToken,
-        appId: 'todo-app',
         clientId: 'client-2',
         lastSyncSeq: 0,
       });
@@ -478,7 +436,6 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       ws.emitClientMessage({
         type: ClientMessageType.Auth,
         token: validToken,
-        appId: 'todo-app',
         clientId: 'client-1',
         lastSyncSeq: 0,
       });
@@ -536,7 +493,6 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       ws.emitClientMessage({
         type: ClientMessageType.Auth,
         token: validToken,
-        appId: 'todo-app',
         clientId: 'client-disconnect',
         lastSyncSeq: 0,
       });
@@ -550,41 +506,21 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       expect(sync.webSocketToClient.has(ws)).toBe(false);
     });
 
-    it('should send error when appId does not exist during auth sync', async () => {
+    it('should send error if table is deleted when client sends change batch', async () => {
       const ws = new MockServerWebSocket();
       sync.handleConnection(ws as unknown as WebSocket);
 
       ws.emitClientMessage({
         type: ClientMessageType.Auth,
         token: validToken,
-        appId: 'nonexistent-app',
-        clientId: 'client-no-app',
-      });
-      await ws.waitForMessages(1);
-
-      const messages = ws.getParsedMessages();
-      expect(messages).toHaveLength(1);
-      expect(messages[0].type).toBe(ServerMessageType.AuthError);
-      expect((messages[0] as { message: string }).message).toContain(
-        'Application not found',
-      );
-    });
-
-    it('should send error if app is deleted when client sends change batch', async () => {
-      const ws = new MockServerWebSocket();
-      sync.handleConnection(ws as unknown as WebSocket);
-
-      ws.emitClientMessage({
-        type: ClientMessageType.Auth,
-        token: validToken,
-        appId: 'todo-app',
-        clientId: 'client-app-del',
+        clientId: 'client-table-del',
         lastSyncSeq: 0,
       });
       await ws.waitForMessages(2);
 
-      // Now delete the app
-      await (await storage.getApp('todo-app'))?.delete();
+      // Now delete the table
+      const todosTable = await storage.getTable('todos');
+      await todosTable?.delete();
 
       // Send change batch
       ws.emitClientMessage({
@@ -606,7 +542,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       const lastMsg = messages[messages.length - 1];
       expect(lastMsg.type).toBe(ServerMessageType.Error);
       expect((lastMsg as { message: string }).message).toContain(
-        'Application not found',
+        'Table "todos" not found',
       );
     });
   });
@@ -666,7 +602,6 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       ws1.emitClientMessage({
         type: ClientMessageType.Auth,
         token: 'bad-token-1',
-        appId: 'todo-app',
       });
       await ws1.waitForClose();
       expect(ws1.isClosed).toBe(true);
@@ -677,7 +612,6 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       ws2.emitClientMessage({
         type: ClientMessageType.Auth,
         token: 'bad-token-2',
-        appId: 'todo-app',
       });
       await ws2.waitForClose();
       expect(ws2.isClosed).toBe(true);
@@ -703,7 +637,6 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       ws1.emitClientMessage({
         type: ClientMessageType.Auth,
         token: validToken,
-        appId: 'todo-app',
         clientId: 'c1',
       });
       await ws1.waitForMessages(2);
@@ -715,7 +648,6 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       ws2.emitClientMessage({
         type: ClientMessageType.Auth,
         token: validToken,
-        appId: 'todo-app',
         clientId: 'c2',
       });
       await ws2.waitForMessages(2);
@@ -727,7 +659,6 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       ws3.emitClientMessage({
         type: ClientMessageType.Auth,
         token: validToken,
-        appId: 'todo-app',
         clientId: 'c3',
       });
       await ws3.waitForClose();
@@ -749,7 +680,6 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       ws4.emitClientMessage({
         type: ClientMessageType.Auth,
         token: validToken,
-        appId: 'todo-app',
         clientId: 'c4',
       });
       await ws4.waitForMessages(2);
@@ -786,7 +716,6 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       ws.emitClientMessage({
         type: ClientMessageType.Auth,
         token: validToken,
-        appId: 'todo-app',
         clientId: 'client-reauth',
       });
       await ws.waitForMessages(2);
@@ -795,7 +724,6 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       ws.emitClientMessage({
         type: ClientMessageType.Auth,
         token: token2,
-        appId: 'todo-app',
         clientId: 'client-reauth',
       });
       await ws.waitForMessages(4);
@@ -809,7 +737,6 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       wsUser1.emitClientMessage({
         type: ClientMessageType.Auth,
         token: validToken,
-        appId: 'todo-app',
         clientId: 'client-other',
       });
       await wsUser1.waitForMessages(2);
@@ -838,39 +765,10 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       expect(broadcastMsgs).toHaveLength(0);
     });
 
-    it('should return error when synchronizing an application that was removed or does not exist', async () => {
-      const ws = new MockServerWebSocket();
-      sync.handleConnection(ws as unknown as WebSocket);
-
-      ws.emitClientMessage({
-        type: ClientMessageType.Auth,
-        token: validToken,
-        appId: 'todo-app',
-        clientId: 'client-app-del',
-      });
-      await ws.waitForMessages(2);
-
-      // Delete the app
-      await storage.deleteApp('todo-app');
-      ws.sentMessages = [];
-
-      // Send Sync request
-      ws.emitClientMessage({
-        type: ClientMessageType.Sync,
-        lastSyncSeq: 0,
-      });
-      await ws.waitForMessages(1);
-
-      const msgs = ws.getParsedMessages();
-      expect(msgs.some((m) => m.type === ServerMessageType.Error)).toBe(true);
-    });
-
     it('should deliver full snapshot when lastSyncSeq is older than pruned changelog', async () => {
-      // Add data to produce changes
-      const app = await storage.getApp('todo-app');
-      const table = await app?.getTable('todos');
+      const table = await storage.getTable('todos');
       const user = await storage.getUser(testUserId);
-      if (!app || !table || !user) throw new Error('Setup missing');
+      if (!table || !user) throw new Error('Setup missing');
 
       for (let i = 1; i <= 6; i++) {
         await table.applyChanges(user, [
@@ -886,7 +784,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       }
 
       // Prune to keep only last 2 changes
-      await storage.prune('todo-app', 2);
+      await storage.prune(2, 'todos');
 
       const ws = new MockServerWebSocket();
       sync.handleConnection(ws as unknown as WebSocket);
@@ -896,7 +794,6 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         type: ClientMessageType.Auth,
         protocolVersion: PROTOCOL_VERSION,
         token: validToken,
-        appId: 'todo-app',
         clientId: 'client-pruned',
         lastSyncSeq: 1,
       });

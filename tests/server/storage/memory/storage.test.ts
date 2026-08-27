@@ -10,13 +10,12 @@ import {
 import { memoryStorage } from '../matrix.js';
 
 describe('MemoryStorage', () => {
-  it('should enforce maxRecordsPerTable quota in memory', async () => {
+  it('should enforce maxRecords quota in memory', async () => {
     const { backend, cleanup } = await memoryStorage.createBackend({
-      maxRecordsPerTable: 2,
+      maxRecords: 2,
     });
     try {
-      const app = await backend.createApp('quota-app');
-      await app.createTable('items');
+      await backend.createTable('items');
       const user = await backend.createUser('user1', 'pass');
 
       const c1: ChangeRecord = {
@@ -44,12 +43,12 @@ describe('MemoryStorage', () => {
         clientId: 'c1',
       };
 
-      await app.applyChanges(user, [c1, c2]);
+      await backend.applyChanges(user, [c1, c2]);
 
-      await expect(app.applyChanges(user, [c3])).rejects.toThrow(
+      await expect(backend.applyChanges(user, [c3])).rejects.toThrow(
         TetherServerError,
       );
-      await expect(app.applyChanges(user, [c3])).rejects.toMatchObject({
+      await expect(backend.applyChanges(user, [c3])).rejects.toMatchObject({
         code: TetherServerErrorCode.LimitExceeded,
       });
     } finally {
@@ -62,13 +61,12 @@ describe('MemoryStorage', () => {
       maxRecordSizeBytes: 50,
     });
     try {
-      const app = await backend.createApp('size-app');
-      await app.createTable('items');
+      await backend.createTable('items');
       const user = await backend.createUser('user1', 'pass');
 
       const bigPayload = 'x'.repeat(100);
       await expect(
-        app.applyChanges(user, [
+        backend.applyChanges(user, [
           {
             table: 'items',
             id: 'big',
@@ -89,8 +87,7 @@ describe('MemoryStorage', () => {
   it('should delete tables and cascade state cleanup in memory', async () => {
     const { backend, cleanup } = await memoryStorage.createBackend();
     try {
-      const app = await backend.createApp('test-app');
-      const table = await app.createTable('temp_table');
+      const table = await backend.createTable('temp_table');
       const user = await backend.createUser('user1', 'pass');
 
       await table.applyChanges(user, [
@@ -105,8 +102,8 @@ describe('MemoryStorage', () => {
       ]);
 
       expect(await table.getAllRecords(user)).toHaveLength(1);
-      app.deleteTable('temp_table');
-      expect(await app.getTable('temp_table')).toBeUndefined();
+      await table.delete();
+      expect(await backend.getTable('temp_table')).toBeUndefined();
     } finally {
       await cleanup();
     }
@@ -115,13 +112,11 @@ describe('MemoryStorage', () => {
   it('should support getStatus, prune and reject checkpoint/vacuum with NotSupported in memory', async () => {
     const { backend, cleanup } = await memoryStorage.createBackend();
     try {
-      const app = await backend.createApp('mem_app');
-      await app.createTable('records');
+      const table = await backend.createTable('records');
       const user = await backend.createUser('mem_user', 'pass');
 
       for (let i = 1; i <= 6; i++) {
-        const table = await app.getTable('records');
-        await table?.applyChanges(user, [
+        await table.applyChanges(user, [
           {
             table: 'records',
             id: `k_${i}`,
@@ -133,12 +128,12 @@ describe('MemoryStorage', () => {
         ]);
       }
 
-      const status = await backend.getStatus('mem_app');
+      const status = await backend.getStatus();
       expect(status.backend).toBe('memory');
-      expect(status.appsCount).toBe(1);
-      expect(status.apps?.[0].tables).toEqual(['records']);
+      expect(status.tablesCount).toBe(1);
+      expect(status.tables?.[0].name).toBe('records');
 
-      const pruneRes = await backend.prune('mem_app', 2);
+      const pruneRes = await backend.prune(2, 'records');
       expect(pruneRes.action).toBe('prune');
       expect(pruneRes.affectedCount).toBe(4);
 
@@ -156,8 +151,7 @@ describe('MemoryStorage', () => {
   it('should guarantee atomic batch application without partial state commit on error', async () => {
     const { backend, cleanup } = await memoryStorage.createBackend();
     try {
-      const app = await backend.createApp('atomic-app');
-      await app.createTable('tasks');
+      await backend.createTable('tasks');
       const user = await backend.createUser('atomic_user', 'pass');
 
       // Valid change 1
@@ -180,17 +174,17 @@ describe('MemoryStorage', () => {
       };
 
       // Applying batch [c1, c2] must reject
-      await expect(app.applyChanges(user, [c1, c2])).rejects.toThrow(
-        'Table not found',
+      await expect(backend.applyChanges(user, [c1, c2])).rejects.toThrow(
+        /not found/i,
       );
 
       // Verify task-1 was NOT committed to 'tasks' table
-      const table = await app.getTable('tasks');
+      const table = await backend.getTable('tasks');
       const records = await table?.getAllRecords(user);
       expect(records).toEqual([]);
 
       // Verify sequence number did not advance
-      expect(await app.getCurrentSeq(user)).toBe(0);
+      expect(await backend.getCurrentSeq(user)).toBe(0);
     } finally {
       await cleanup();
     }

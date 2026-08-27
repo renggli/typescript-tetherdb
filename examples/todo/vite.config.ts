@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [
     tetherPlugin({
       storage: new SqliteStorage({ baseDir: './data' }),
-      apps: [{ appId: 'todo-example', tables: ['todos'] }],
+      tables: ['todos'],
       users: [{ username: 'demo', password: 'password123' }],
     }),
   ],

@@ -446,7 +446,7 @@ describe('Auth', () => {
         dataMode: DataMode.Merge,
       });
       expect(clearSpy).not.toHaveBeenCalled();
-      expect(setMetaSpy).not.toHaveBeenCalledWith('lastSyncSeq', 0);
+      expect(setMetaSpy).toHaveBeenCalledWith('lastSyncSeq', 0);
     });
 
     it('should handle HTTP failure during login', async () => {

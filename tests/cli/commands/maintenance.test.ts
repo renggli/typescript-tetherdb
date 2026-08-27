@@ -96,31 +96,23 @@ describe('handleMaintenanceCommand', () => {
     }
   });
 
-  it('should reject invalid or malicious appId and handle non-existent apps', async () => {
-    // Path traversal in appId
-    await expect(
-      handleMaintenanceCommand(sqliteStorage, [
-        'maintenance',
-        'checkpoint',
-        '../../etc/passwd',
-      ]),
-    ).rejects.toThrow(TetherServerError);
+  it('should support optional table parameter for checkpoint and prune', async () => {
+    await sqliteStorage.createTable('tasks');
+    await handleMaintenanceCommand(sqliteStorage, [
+      'maintenance',
+      'checkpoint',
+      'tasks',
+    ]);
+    expect(testLogger.hasMessage('Checkpoint completed successfully')).toBe(
+      true,
+    );
 
-    // Non-existent app
-    await expect(
-      handleMaintenanceCommand(sqliteStorage, [
-        'maintenance',
-        'checkpoint',
-        'nonexistent_app_123',
-      ]),
-    ).rejects.toThrow(/not found/i);
-
-    await expect(
-      handleMaintenanceCommand(sqliteStorage, [
-        'maintenance',
-        'prune',
-        'nonexistent_app_123',
-      ]),
-    ).rejects.toThrow(/not found/i);
+    await handleMaintenanceCommand(sqliteStorage, [
+      'maintenance',
+      'prune',
+      'tasks',
+      '50',
+    ]);
+    expect(testLogger.hasMessage('Prune completed successfully')).toBe(true);
   });
 });

@@ -263,8 +263,6 @@ describe('TetherClient', () => {
 
       // @ts-expect-error - inspecting internal sync
       const connectSpy = vi.spyOn(client.sync, 'connect');
-      // @ts-expect-error - inspecting internal sync
-      const disconnectSpy = vi.spyOn(client.sync, 'disconnect');
 
       const authEvents: AuthStatus[] = [];
       client.onAuthStatusChange.register((s) => authEvents.push(s));
@@ -280,10 +278,10 @@ describe('TetherClient', () => {
       expect(authEvents).toContain(AuthStatus.SignedIn);
       expect(connectSpy).toHaveBeenCalledWith('token-123');
 
-      // Logout should trigger disconnect
+      // Logout should reconnect sync as guest
       await client.logout();
       expect(client.authStatus).toBe(AuthStatus.SignedOut);
-      expect(disconnectSpy).toHaveBeenCalled();
+      expect(connectSpy).toHaveBeenCalledWith(undefined);
     });
 
     it('should forward sync status change events to onSyncStatusChange', () => {

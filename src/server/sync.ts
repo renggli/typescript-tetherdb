@@ -2,6 +2,7 @@ import type { WebSocket } from 'ws';
 import {
   type AuthClientMessage,
   type ChangeBatchClientMessage,
+  type ChangeRecord,
   type ClientMessage,
   ClientMessageType,
   PROTOCOL_VERSION,
@@ -12,14 +13,11 @@ import {
 import { TetherServerError, TetherServerErrorCode } from './errors.js';
 import type { RateLimiter } from './rate-limiter.js';
 import type { TetherLogger } from './server.js';
-import type { AppStorage } from './storage/app.js';
+import { canRead, isPrivateTable } from './storage/base/index.js';
 import type { Storage } from './storage/storage.js';
+import type { TableStorage } from './storage/table.js';
 import type { UserStorage } from './storage/user.js';
-import {
-  calculateByteSize,
-  validateAppId,
-  validateIdentifier,
-} from './validate.js';
+import { calculateByteSize, validateIdentifier } from './validate.js';
 
 /**
  * Configuration options for the WebSocket synchronization coordinator.
@@ -37,7 +35,7 @@ export interface SyncOptions {
 
 /**
  * Real-time WebSocket synchronization coordinator managing authentication handshakes,
- * snapshot/diff delivery, change ingestion, acknowledgments, and peer broadcasts per application and user.
+ * snapshot/diff delivery, change ingestion, acknowledgments, and peer broadcasts per table and user.
  */
 export class Sync {
   private readonly storage: Storage;
@@ -45,7 +43,7 @@ export class Sync {
   private readonly authTimeoutMs: number;
   private readonly rateLimiter: RateLimiter | null;
   private readonly logger: TetherLogger | null;
-  private readonly userClients = new Map<string, Set<ActiveClient>>(); // key = `${appId}:${userId}`
+  private readonly clients = new Set<ActiveClient>();
   private readonly webSocketToClient = new Map<WebSocket, ActiveClient>();
   private readonly pendingAuthTimers = new Map<WebSocket, NodeJS.Timeout>();
   private readonly webSocketToIp = new Map<WebSocket, string>();
@@ -108,7 +106,7 @@ export class Sync {
     webSocket.on('message', (data) => {
       const client = this.webSocketToClient.get(webSocket);
       const userContext = client
-        ? ` (app: "${client.appId}", user: "${client.user.id}", client: "${client.clientId}")`
+        ? ` (user: "${client.user?.id ?? 'guest'}", client: "${client.clientId}")`
         : '';
 
       messageQueue = messageQueue
@@ -141,7 +139,7 @@ export class Sync {
     webSocket.on('error', (err) => {
       const client = this.webSocketToClient.get(webSocket);
       const userContext = client
-        ? ` (app: "${client.appId}", user: "${client.user.id}", client: "${client.clientId}")`
+        ? ` (user: "${client.user?.id ?? 'guest'}", client: "${client.clientId}")`
         : '';
       this.logger?.error(
         `[TetherServer.Sync] WebSocket connection error${userContext}:`,
@@ -214,61 +212,33 @@ export class Sync {
       return;
     }
 
-    if (typeof msg.token !== 'string' || !msg.token) {
-      this.rateLimiter?.recordFailure(ip);
-      this.send(webSocket, {
-        type: ServerMessageType.AuthError,
-        message: 'Missing or invalid authentication token',
-      });
-      webSocket.close();
-      return;
+    let user: UserStorage | undefined;
+    if (typeof msg.token === 'string' && msg.token) {
+      user = await this.storage.getUserByToken(msg.token);
+      if (!user) {
+        this.rateLimiter?.recordFailure(ip);
+        this.send(webSocket, {
+          type: ServerMessageType.AuthError,
+          message: 'Invalid or expired authentication token',
+        });
+        webSocket.close();
+        return;
+      }
     }
 
-    const user = await this.storage.getUserByToken(msg.token);
-    if (!user) {
-      this.rateLimiter?.recordFailure(ip);
-      this.send(webSocket, {
-        type: ServerMessageType.AuthError,
-        message: 'Invalid or expired authentication token',
-      });
-      webSocket.close();
-      return;
-    }
-
-    if (typeof msg.appId !== 'string' || !msg.appId) {
-      this.send(webSocket, {
-        type: ServerMessageType.AuthError,
-        message: 'Missing required field: appId',
-      });
-      webSocket.close();
-      return;
-    }
-
-    const appId = validateAppId(msg.appId);
-    const app = await this.storage.getApp(appId);
-    if (!app) {
-      this.send(webSocket, {
-        type: ServerMessageType.AuthError,
-        message: 'Application not found',
-      });
-      webSocket.close();
-      return;
-    }
-
-    const channelKey = `${appId}:${user.id}`;
-    let set = this.userClients.get(channelKey);
-    if (!set) {
-      set = new Set();
-      this.userClients.set(channelKey, set);
-    }
-
-    if (set.size >= this.maxConcurrentConnectionsPerUser) {
-      this.send(webSocket, {
-        type: ServerMessageType.AuthError,
-        message: 'Maximum concurrent connections exceeded for this user',
-      });
-      webSocket.close();
-      return;
+    if (user) {
+      let userCount = 0;
+      for (const c of this.clients) {
+        if (c.user?.id === user.id) userCount++;
+      }
+      if (userCount >= this.maxConcurrentConnectionsPerUser) {
+        this.send(webSocket, {
+          type: ServerMessageType.AuthError,
+          message: 'Maximum concurrent connections exceeded for this user',
+        });
+        webSocket.close();
+        return;
+      }
     }
 
     this.rateLimiter?.reset(ip);
@@ -279,14 +249,7 @@ export class Sync {
     );
     const existingClient = this.webSocketToClient.get(webSocket);
     if (existingClient) {
-      const oldChannelKey = `${existingClient.appId}:${existingClient.user.id}`;
-      const oldSet = this.userClients.get(oldChannelKey);
-      if (oldSet) {
-        oldSet.delete(existingClient);
-        if (oldSet.size === 0) {
-          this.userClients.delete(oldChannelKey);
-        }
-      }
+      this.clients.delete(existingClient);
       this.webSocketToClient.delete(webSocket);
     }
 
@@ -294,24 +257,24 @@ export class Sync {
       webSocket,
       clientId,
       user,
-      appId,
+      tables: Array.isArray(msg.tables) ? msg.tables : undefined,
     };
 
     this.webSocketToClient.set(webSocket, client);
-    set.add(client);
+    this.clients.add(client);
 
-    const currentSeq = await app.getCurrentSeq(user);
-    const refreshedToken = await user.createToken();
+    const currentSeq = await this.storage.getCurrentSeq(user);
+    const refreshedToken = user ? await user.createToken() : undefined;
     this.send(webSocket, {
       type: ServerMessageType.AuthSuccess,
       protocolVersion: PROTOCOL_VERSION,
-      userId: user.id,
+      userId: user?.id ?? 'anonymous',
       currentSeq,
       token: refreshedToken,
     });
 
     // Initial sync: snapshot or diff
-    await this.performSync(client, msg.lastSyncSeq);
+    await this.performSync(client, msg.lastSyncSeq, msg.tables);
   }
 
   private async handleChangeBatchMessage(
@@ -346,15 +309,7 @@ export class Sync {
 
     const batchId = validateIdentifier(msg.batchId, 'batchId');
 
-    const app = await this.storage.getApp(client.appId);
-    if (!app) {
-      throw new TetherServerError(
-        TetherServerErrorCode.NotFound,
-        'Application not found',
-      );
-    }
-
-    const { applied, newSeq } = await app.applyChanges(
+    const { applied, newSeq } = await this.storage.applyChanges(
       client.user,
       msg.changes,
     );
@@ -366,14 +321,14 @@ export class Sync {
       appliedSeq: newSeq,
     });
 
-    // Broadcast applied changes to other active clients of the same app and user
+    // Broadcast applied changes to other active clients who have access to the modified tables
     if (applied.length > 0) {
-      this.broadcastToAppUser(client.appId, client.user.id, client.clientId, {
-        type: ServerMessageType.BroadcastChanges,
-        fromClientId: client.clientId,
-        changes: applied,
-        seq: newSeq,
-      });
+      await this.broadcastChanges(
+        client.clientId,
+        client.user,
+        applied,
+        newSeq,
+      );
     }
   }
 
@@ -397,14 +352,7 @@ export class Sync {
     if (!client) return;
 
     this.webSocketToClient.delete(webSocket);
-    const channelKey = `${client.appId}:${client.user.id}`;
-    const set = this.userClients.get(channelKey);
-    if (set) {
-      set.delete(client);
-      if (set.size === 0) {
-        this.userClients.delete(channelKey);
-      }
-    }
+    this.clients.delete(client);
   }
 
   private send(webSocket: WebSocket, msg: ServerMessage): void {
@@ -416,85 +364,109 @@ export class Sync {
   private async performSync(
     client: ActiveClient,
     lastSyncSeq?: number,
+    tableFilters?: string[],
   ): Promise<void> {
-    const app = await this.storage.getApp(client.appId);
-    if (!app) {
-      throw new TetherServerError(
-        TetherServerErrorCode.NotFound,
-        'Application not found',
-      );
-    }
-
     const seq = lastSyncSeq ?? 0;
+
     if (seq === 0) {
-      // Client has no sync point: deliver full snapshot for this app
-      const snapshot = await this.getAppSnapshot(app, client.user);
-      const currentSeq = await app.getCurrentSeq(client.user);
+      const snapshot = await this.buildSnapshot(client.user, tableFilters);
+      const currentSeq = await this.storage.getCurrentSeq(client.user);
       this.send(client.webSocket, {
         type: ServerMessageType.SyncSnapshot,
         seq: currentSeq,
         snapshot,
       });
-    } else {
-      // Client has lastSyncSeq: deliver diff or snapshot if compacted
-      const { changes, currentSeq, requiresSnapshot } =
-        await app.getChangesSince(client.user, seq);
-
-      // If changelog was pruned or compacted, deliver full snapshot
-      if (requiresSnapshot) {
-        const snapshot = await this.getAppSnapshot(app, client.user);
-        this.send(client.webSocket, {
-          type: ServerMessageType.SyncSnapshot,
-          seq: currentSeq,
-          snapshot,
-        });
-      } else {
-        this.send(client.webSocket, {
-          type: ServerMessageType.SyncDiff,
-          fromSeq: seq,
-          toSeq: currentSeq,
-          changes,
-        });
-      }
+      return;
     }
+
+    const { changes, currentSeq, requiresSnapshot } =
+      await this.storage.getChangesSince(client.user, seq, tableFilters);
+
+    if (requiresSnapshot) {
+      const snapshot = await this.buildSnapshot(client.user, tableFilters);
+      this.send(client.webSocket, {
+        type: ServerMessageType.SyncSnapshot,
+        seq: currentSeq,
+        snapshot,
+      });
+      return;
+    }
+
+    this.send(client.webSocket, {
+      type: ServerMessageType.SyncDiff,
+      fromSeq: seq,
+      toSeq: currentSeq,
+      changes,
+    });
   }
 
-  private async getAppSnapshot(
-    app: AppStorage,
-    user: UserStorage,
+  private async buildSnapshot(
+    user?: UserStorage,
+    tableFilters?: string[],
   ): Promise<SnapshotRecord[]> {
-    const tables = await app.getTables();
+    const tables = await this.storage.getTables();
     const snapshot: SnapshotRecord[] = [];
+
     for (const table of tables) {
+      if (tableFilters && !tableFilters.includes(table.name)) continue;
+      if (!canRead(table, user)) continue;
       const records = await table.getAllRecords(user);
       snapshot.push(...records);
     }
+
     return snapshot;
   }
 
-  private broadcastToAppUser(
-    appId: string,
-    userId: string,
-    excludeClientId: string,
-    msg: ServerMessage,
-  ): void {
-    const channelKey = `${appId}:${userId}`;
-    const clients = this.userClients.get(channelKey);
-    if (!clients) return;
+  private async broadcastChanges(
+    senderClientId: string,
+    senderUser: UserStorage | undefined,
+    changes: ChangeRecord[],
+    seq: number,
+  ): Promise<void> {
+    const tableCache = new Map<string, TableStorage | undefined>();
 
-    for (const client of clients) {
-      if (client.clientId !== excludeClientId) {
-        this.send(client.webSocket, msg);
+    for (const client of this.clients) {
+      if (client.clientId === senderClientId) continue;
+
+      const clientChanges: ChangeRecord[] = [];
+      for (const change of changes) {
+        if (client.tables && !client.tables.includes(change.table)) continue;
+
+        let table = tableCache.get(change.table);
+        if (!table && !tableCache.has(change.table)) {
+          table = await this.storage.getTable(change.table);
+          tableCache.set(change.table, table);
+        }
+
+        if (table && canRead(table, client.user)) {
+          const isPrivate = isPrivateTable(table);
+          if (isPrivate) {
+            if (client.user && senderUser && client.user.id === senderUser.id) {
+              clientChanges.push(change);
+            }
+          } else {
+            clientChanges.push(change);
+          }
+        }
+      }
+
+      if (clientChanges.length > 0) {
+        this.send(client.webSocket, {
+          type: ServerMessageType.BroadcastChanges,
+          fromClientId: senderClientId,
+          changes: clientChanges,
+          seq,
+        });
       }
     }
   }
 }
 
-// -- Private Helpers --------------------------------------------------------
+// -- Private Types ----------------------------------------------------------
 
 interface ActiveClient {
   webSocket: WebSocket;
   clientId: string;
-  user: UserStorage;
-  appId: string;
+  user?: UserStorage;
+  tables?: string[];
 }

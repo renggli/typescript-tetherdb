@@ -82,21 +82,35 @@ describe('runCli', () => {
     exitSpy.mockRestore();
   });
 
-  it('should route subcommands correctly (apps, tables, users)', async () => {
-    // Apps command
-    await runCli(['apps', 'add', 'my-app', `--sqlite=${tmpDir}`]);
-    expect(testLogger.hasMessage('Created application: my-app')).toBe(true);
-
+  it('should route subcommands correctly (tables, users, records, status, maintenance, help)', async () => {
     // Tables command
+    await runCli([
+      'tables',
+      'add',
+      'items',
+      '--read=everybody',
+      '--create=everybody',
+      `--sqlite=${tmpDir}`,
+    ]);
+    expect(testLogger.hasMessage('Created table "items"')).toBe(true);
+
+    // Records command
     testLogger.clear();
-    await runCli(['tables', 'add', 'my-app', 'items', `--sqlite=${tmpDir}`]);
-    expect(
-      testLogger.hasMessage('Added table "items" to application "my-app"'),
-    ).toBe(true);
+    await runCli([
+      'records',
+      'put',
+      'items',
+      'i1',
+      '{"text":"hello"}',
+      `--sqlite=${tmpDir}`,
+    ]);
+    expect(testLogger.hasMessage('Put record "i1" in table "items"')).toBe(
+      true,
+    );
 
     // Users command
     testLogger.clear();
-    await runCli(['users', 'add', 'alice', 'secret', `--sqlite=${tmpDir}`]);
+    await runCli(['users', 'add', 'alice', 'secret123', `--sqlite=${tmpDir}`]);
     expect(testLogger.hasMessage('Created user: [')).toBe(true);
 
     // Status command
@@ -135,20 +149,16 @@ describe('runCli', () => {
       ) => never);
 
     testLogger.clear();
-    // tables rm on non-existent app throws TetherServerError
+    // tables show on non-existent table throws TetherServerError
     await runCli([
       'tables',
-      'rm',
-      'non-existent-app',
-      'users',
+      'show',
+      'non-existent-table',
       `--sqlite=${tmpDir}`,
     ]);
     expect(testLogger.hasMessage('Command failed:', 'error')).toBe(true);
     expect(
-      testLogger.hasMessage(
-        'Application "non-existent-app" not found',
-        'error',
-      ),
+      testLogger.hasMessage('Table "non-existent-table" not found', 'error'),
     ).toBe(true);
     expect(exitSpy).toHaveBeenCalledWith(1);
 

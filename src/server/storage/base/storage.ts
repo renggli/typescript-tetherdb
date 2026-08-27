@@ -1,13 +1,12 @@
+import type { ChangeRecord, TableSettings } from '../../../shared/types.js';
 import { verifySessionToken } from '../../crypto.js';
-import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
-import { validateAppId } from '../../validate.js';
-import type { AppStorage } from '../app.js';
 import type {
   MaintenanceResult,
   Storage,
   StorageOptions,
   StorageStatus,
 } from '../storage.js';
+import type { TableStorage } from '../table.js';
 import type { UserStorage } from '../user.js';
 
 /**
@@ -31,20 +30,42 @@ export abstract class BaseStorage implements Storage {
     return undefined;
   }
 
-  abstract createApp(id: string): Promise<AppStorage>;
-  abstract getApp(id: string): Promise<AppStorage | undefined>;
-  abstract getApps(): Promise<AppStorage[]>;
+  abstract createTable(
+    name: string,
+    settings?: TableSettings,
+  ): Promise<TableStorage>;
+  abstract getTable(name: string): Promise<TableStorage | undefined>;
+  abstract getTables(): Promise<TableStorage[]>;
+
   abstract createUser(username: string, password: string): Promise<UserStorage>;
   abstract getUser(id: string): Promise<UserStorage | undefined>;
   abstract getUserByUsername(
     username: string,
   ): Promise<UserStorage | undefined>;
   abstract getUsers(): Promise<UserStorage[]>;
-  abstract checkpoint(appId?: string): Promise<MaintenanceResult>;
-  abstract vacuum(appId?: string): Promise<MaintenanceResult>;
+
+  abstract applyChanges(
+    user: UserStorage | undefined,
+    changes: ChangeRecord[],
+  ): Promise<{ applied: ChangeRecord[]; newSeq: number }>;
+
+  abstract getChangesSince(
+    user: UserStorage | undefined,
+    fromSeq: number,
+    tableFilters?: string[],
+  ): Promise<{
+    changes: ChangeRecord[];
+    currentSeq: number;
+    requiresSnapshot?: boolean;
+  }>;
+
+  abstract getCurrentSeq(user?: UserStorage): Promise<number>;
+
+  abstract checkpoint(tableName?: string): Promise<MaintenanceResult>;
+  abstract vacuum(): Promise<MaintenanceResult>;
   abstract prune(
-    appId?: string,
     keepCount?: number,
+    tableName?: string,
   ): Promise<MaintenanceResult>;
 
   async getUserByToken(token: string): Promise<UserStorage | undefined> {
@@ -53,17 +74,16 @@ export abstract class BaseStorage implements Storage {
     return this.getUser(payload.userId);
   }
 
-  async getStatus(appId?: string): Promise<StorageStatus> {
+  async getStatus(): Promise<StorageStatus> {
     const users = await this.getUsers();
-    const allApps = await this.getApps();
-    const targetApps = filterTargetApps(allApps, appId);
-    const apps = await buildAppSummaries(targetApps);
+    const tables = await this.getTables();
+    const tableSummaries = await buildTableSummaries(tables);
 
     const status: StorageStatus = {
       backend: this.backend,
       usersCount: users.length,
-      appsCount: allApps.length,
-      apps,
+      tablesCount: tables.length,
+      tables: tableSummaries,
     };
     const baseDir = this.getBaseDir();
     if (baseDir !== undefined) {
@@ -74,39 +94,23 @@ export abstract class BaseStorage implements Storage {
 }
 
 /**
- * Filters the list of applications by an optional target appId, validating format and existence.
+ * Builds array of table summaries including read permissions and record counts.
  */
-export function filterTargetApps(
-  allApps: AppStorage[],
-  appId?: string,
-): AppStorage[] {
-  const targetApps = appId
-    ? allApps.filter((a) => a.id === validateAppId(appId))
-    : allApps;
-
-  if (appId && targetApps.length === 0) {
-    throw new TetherServerError(
-      TetherServerErrorCode.NotFound,
-      `Application "${appId}" not found`,
-    );
-  }
-
-  return targetApps;
-}
-
-/**
- * Builds array of application summaries including their table names.
- */
-export async function buildAppSummaries(
-  apps: AppStorage[],
-): Promise<Array<{ id: string; tables: string[] }>> {
-  const appSummaries: Array<{ id: string; tables: string[] }> = [];
-  for (const app of apps) {
-    const tables = await app.getTables();
-    appSummaries.push({
-      id: app.id,
-      tables: tables.map((t) => t.name),
+export async function buildTableSummaries(
+  tables: TableStorage[],
+): Promise<Array<{ name: string; read: string; recordsCount: number }>> {
+  const summaries: Array<{
+    name: string;
+    read: string;
+    recordsCount: number;
+  }> = [];
+  for (const table of tables) {
+    const records = await table.getAllRecords();
+    summaries.push({
+      name: table.name,
+      read: table.settings.permissions?.read ?? 'owner',
+      recordsCount: records.length,
     });
   }
-  return appSummaries;
+  return summaries;
 }

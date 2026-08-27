@@ -42,10 +42,10 @@ export interface SyncOptions {
   url?: string;
   /** Signed authentication session token. */
   token?: string;
-  /** Application namespace identifier. */
-  appId: string;
   /** Unique client instance identifier. */
   clientId: string;
+  /** Optional table filter array. */
+  tables?: string[];
   /** Initial reconnection backoff delay in milliseconds (defaults to 1000). */
   reconnectIntervalMs?: number;
   /** Maximum reconnection backoff delay in milliseconds (defaults to 30000). */
@@ -63,14 +63,24 @@ export interface SyncOptions {
 }
 
 /**
+ * Metadata stored locally tracking synchronization progress.
+ */
+export interface SyncMetadata {
+  /** Unique client instance identifier. */
+  clientId: string;
+  /** Latest sequence number synchronized with the server. */
+  lastSyncSeq: number;
+  /** Epoch timestamp of the last successful synchronization. */
+  lastSyncTimestamp: number;
+}
+
+/**
  * Two-way WebSocket sync coordinator managing initial snapshot / diff downloads,
  * batched outbox queue flushing, acknowledgments, and auto-reconnect backoff.
  */
 export class Sync {
   /** Remote WebSocket endpoint URL. */
   url?: string;
-  /** Application namespace identifier for partitioning synchronization channels. */
-  readonly appId: string;
   /** Client identifier used for conflict resolution tie-breaking. */
   readonly clientId: string;
   /** Reactive event registry triggered whenever synchronization status transitions. */
@@ -99,12 +109,6 @@ export class Sync {
    * @param options - Configuration options for sync and connection.
    */
   constructor(storage: Storage, options: SyncOptions) {
-    if (!options.appId) {
-      throw new TetherClientError(
-        TetherClientErrorCode.MissingConfiguration,
-        'Missing required appId in SyncOptions',
-      );
-    }
     if (!options.clientId) {
       throw new TetherClientError(
         TetherClientErrorCode.MissingConfiguration,
@@ -114,7 +118,6 @@ export class Sync {
     this.url = options.url;
     this.token = options.token;
     this.storage = storage;
-    this.appId = options.appId;
     this.clientId = options.clientId;
     this.options = {
       reconnectIntervalMs: 1000,
@@ -131,7 +134,7 @@ export class Sync {
       window.addEventListener('offline', this.handleOffline);
     }
 
-    if (this.token && this.url) {
+    if (this.url) {
       this.connect();
     }
   }
@@ -150,37 +153,52 @@ export class Sync {
    * @param url - Optional WebSocket URL override.
    */
   connect(token?: string, url?: string): void {
-    if (token) this.token = token;
-    if (url) this.url = url;
+    if (token !== undefined) {
+      this.token = token;
+    }
+    if (url) {
+      this.url = url;
+    }
 
-    if (!this.url) {
+    if (this.isDestroyed || !this.url) {
       return;
     }
 
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
     if (this.webSocket) {
-      this.disconnect();
+      if (this.webSocket.readyState === (this.webSocket.OPEN ?? 1)) {
+        this.setStatus(SyncStatus.Connecting);
+        this.sendAuth();
+        return;
+      }
+      if (this.webSocket.readyState === (this.webSocket.CONNECTING ?? 0)) {
+        this.setStatus(SyncStatus.Connecting);
+        return;
+      }
     }
 
     this.setStatus(SyncStatus.Connecting);
 
-    const wsUrl = this.url;
-    const WebSocketImpl =
-      this.options.webSocketClass ??
-      (typeof WebSocket !== 'undefined' ? WebSocket : null);
-
-    if (!WebSocketImpl) {
-      this.setStatus(SyncStatus.Error);
-      this.onError.publish(
-        new TetherClientError(
-          TetherClientErrorCode.MissingConfiguration,
-          'No WebSocket implementation available in this environment',
-        ),
-      );
-      return;
-    }
-
     try {
-      this.webSocket = new WebSocketImpl(wsUrl);
+      const WebSocketClass =
+        this.options.webSocketClass !== undefined
+          ? this.options.webSocketClass
+          : typeof WebSocket !== 'undefined'
+            ? WebSocket
+            : null;
+
+      if (!WebSocketClass) {
+        throw new TetherClientError(
+          TetherClientErrorCode.MissingConfiguration,
+          'No WebSocket implementation available',
+        );
+      }
+
+      this.webSocket = new WebSocketClass(this.url);
     } catch (err) {
       this.setStatus(SyncStatus.Error);
       this.onError.publish(
@@ -404,7 +422,7 @@ export class Sync {
   }
 
   private handleOnline = () => {
-    if (this.isDestroyed || !this.token || !this.url) return;
+    if (this.isDestroyed || !this.url) return;
     this.reconnectAttempts = 0;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -447,14 +465,15 @@ export class Sync {
   }
 
   private async sendAuth() {
+    this.pendingBatches.clear();
     const lastSyncSeq =
       (await this.storage.getMeta<number>('lastSyncSeq')) ?? 0;
     this.send({
       type: ClientMessageType.Auth,
       protocolVersion: PROTOCOL_VERSION,
-      token: this.token ?? '',
-      appId: this.options.appId,
+      token: this.token,
       clientId: this.clientId,
+      tables: this.options.tables,
       lastSyncSeq,
     });
   }
@@ -513,6 +532,7 @@ export class Sync {
       case ServerMessageType.Pong:
         break;
       case ServerMessageType.Error:
+        this.pendingBatches.clear();
         this.onError.publish(
           new TetherClientError(TetherClientErrorCode.SyncError, msg.message),
         );
