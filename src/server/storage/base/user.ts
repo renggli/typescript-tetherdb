@@ -6,29 +6,44 @@ import {
 } from '../../crypto.js';
 import { normalizePassword, validatePassword } from '../../validate.js';
 import type { UserStorage } from '../user.js';
+import type { BaseStorage } from './storage.js';
 
 /**
  * Common abstract base class for UserStorage implementations.
  */
-export abstract class UserBaseStorage implements UserStorage {
+export abstract class UserBaseStorage<
+  TStorage extends BaseStorage = BaseStorage,
+> implements UserStorage
+{
   readonly id: string;
   readonly username: string;
   readonly createdAt: number;
+  protected readonly storage: TStorage;
 
-  constructor(id: string, username: string, createdAt: number) {
+  constructor(
+    id: string,
+    username: string,
+    createdAt: number,
+    storage: TStorage,
+  ) {
     this.id = id;
     this.username = username;
     this.createdAt = createdAt;
+    this.storage = storage;
   }
 
   /** Retrieves the secret key used for signing session tokens. */
-  protected abstract getSecret(): string;
+  protected getSecret(): string {
+    return this.storage.secret;
+  }
 
   abstract verifyPassword(password: string): Promise<boolean>;
 
   abstract changePassword(newPassword: string): Promise<void>;
 
-  abstract delete(): Promise<boolean>;
+  async delete(): Promise<boolean> {
+    return this.storage.deleteUser(this.id);
+  }
 
   /** Creates a signed session token for this user. */
   async createToken(expiresInSeconds?: number): Promise<string> {

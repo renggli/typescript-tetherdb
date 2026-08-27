@@ -8,16 +8,9 @@ import type { FileStorage, FileUserData } from './storage.js';
 /**
  * Filesystem-backed implementation of `UserStorage`.
  */
-export class UserFileStorage extends UserBaseStorage {
-  private storage: FileStorage;
-
+export class UserFileStorage extends UserBaseStorage<FileStorage> {
   constructor(data: FileUserData, storage: FileStorage) {
-    super(data.id, data.username, data.createdAt);
-    this.storage = storage;
-  }
-
-  protected getSecret(): string {
-    return this.storage.secret;
+    super(data.id, data.username, data.createdAt, storage);
   }
 
   async verifyPassword(password: string): Promise<boolean> {
@@ -28,9 +21,5 @@ export class UserFileStorage extends UserBaseStorage {
   async changePassword(newPassword: string): Promise<void> {
     const newHash = await hashUserPassword(newPassword);
     await this.storage.updateUserData(this.id, { passwordHash: newHash });
-  }
-
-  async delete(): Promise<boolean> {
-    return this.storage.deleteUser(this.id);
   }
 }

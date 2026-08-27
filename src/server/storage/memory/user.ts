@@ -16,16 +16,9 @@ export interface MemoryUserData {
 /**
  * In-memory implementation of `UserStorage`.
  */
-export class UserMemoryStorage extends UserBaseStorage {
-  private storage: MemoryStorage;
-
+export class UserMemoryStorage extends UserBaseStorage<MemoryStorage> {
   constructor(data: MemoryUserData, storage: MemoryStorage) {
-    super(data.id, data.username, data.createdAt);
-    this.storage = storage;
-  }
-
-  protected getSecret(): string {
-    return this.storage.secret;
+    super(data.id, data.username, data.createdAt, storage);
   }
 
   private getUserData(): MemoryUserData {
@@ -47,9 +40,5 @@ export class UserMemoryStorage extends UserBaseStorage {
   async changePassword(newPassword: string): Promise<void> {
     const data = this.getUserData();
     data.passwordHash = await hashUserPassword(newPassword);
-  }
-
-  async delete(): Promise<boolean> {
-    return this.storage.deleteUser(this.id);
   }
 }

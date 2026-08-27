@@ -8,16 +8,9 @@ import type { SqliteStorage, SqliteUserData } from './storage.js';
 /**
  * SQLite-backed implementation of `UserStorage`.
  */
-export class UserSqliteStorage extends UserBaseStorage {
-  private storage: SqliteStorage;
-
+export class UserSqliteStorage extends UserBaseStorage<SqliteStorage> {
   constructor(data: SqliteUserData, storage: SqliteStorage) {
-    super(data.id, data.username, data.createdAt);
-    this.storage = storage;
-  }
-
-  protected getSecret(): string {
-    return this.storage.secret;
+    super(data.id, data.username, data.createdAt, storage);
   }
 
   async verifyPassword(password: string): Promise<boolean> {
@@ -28,9 +21,5 @@ export class UserSqliteStorage extends UserBaseStorage {
   async changePassword(newPassword: string): Promise<void> {
     const newHash = await hashUserPassword(newPassword);
     this.storage.updateUserData(this.id, newHash);
-  }
-
-  async delete(): Promise<boolean> {
-    return this.storage.deleteUser(this.id);
   }
 }
