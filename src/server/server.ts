@@ -591,7 +591,13 @@ export class TetherServer {
         ? xAdmin.trim()
         : '';
 
-    if (token !== this.adminSecret) {
+    const tokenBuf = Buffer.from(token, 'utf-8');
+    const secretBuf = Buffer.from(this.adminSecret, 'utf-8');
+
+    if (
+      tokenBuf.length !== secretBuf.length ||
+      !crypto.timingSafeEqual(tokenBuf, secretBuf)
+    ) {
       throw new TetherServerError(
         TetherServerErrorCode.Unauthorized,
         'Invalid or missing admin authorization token',
@@ -1131,8 +1137,11 @@ export class TetherServer {
     if (this.trustProxy) {
       const forwarded = req.headers['x-forwarded-for'];
       if (typeof forwarded === 'string') {
-        const first = forwarded.split(',')[0].trim();
-        if (first) return first;
+        const ips = forwarded
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        if (ips.length > 0) return ips[ips.length - 1];
       }
     }
     return req.socket.remoteAddress ?? '127.0.0.1';

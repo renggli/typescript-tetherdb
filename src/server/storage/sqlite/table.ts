@@ -16,6 +16,7 @@ interface RawRecordRow {
   client_id: string;
   deleted: number;
   data: string | null;
+  owner_id?: string | null;
 }
 
 /**
@@ -82,6 +83,7 @@ export class TableSqliteStorage extends TableBaseStorage<SqliteStorage> {
       clientId: row.client_id ?? '',
       deleted: Boolean(row.deleted),
       data: this.parseData(row.data),
+      ownerId: row.owner_id ?? undefined,
     };
   }
 
@@ -105,6 +107,7 @@ export class TableSqliteStorage extends TableBaseStorage<SqliteStorage> {
       timestamp: row.timestamp,
       clientId: row.client_id ?? '',
       data: this.parseData(row.data),
+      ownerId: row.owner_id ?? undefined,
     }));
   }
 }

@@ -329,23 +329,24 @@ export class SqliteStorage extends BaseStorage {
           recordId,
         ) as
           | {
-              id: string;
               version: number;
               timestamp: number;
               client_id: string;
               deleted: number;
-              data: string | null;
+              data?: string | null;
+              owner_id?: string | null;
             }
           | undefined;
 
         const existing: StoredRecord | undefined = existingRow
           ? {
-              id: existingRow.id,
+              id: recordId,
               version: existingRow.version,
               timestamp: existingRow.timestamp,
               clientId: existingRow.client_id,
               deleted: Boolean(existingRow.deleted),
               data: existingRow.data ? JSON.parse(existingRow.data) : null,
+              ownerId: existingRow.owner_id ?? undefined,
             }
           : undefined;
 
@@ -376,6 +377,7 @@ export class SqliteStorage extends BaseStorage {
             change.op === OperationType.Delete
               ? null
               : JSON.stringify(change.data ?? null);
+          const ownerId = existing?.ownerId ?? user?.id ?? null;
 
           if (existingRow) {
             dbHandle.stmtUpdateRecord.run(
@@ -384,6 +386,7 @@ export class SqliteStorage extends BaseStorage {
               change.clientId,
               isDeleted,
               dataStr,
+              ownerId,
               tableName,
               effectiveUserId,
               recordId,
@@ -398,6 +401,7 @@ export class SqliteStorage extends BaseStorage {
               change.clientId,
               isDeleted,
               dataStr,
+              ownerId,
             );
           }
 
@@ -411,6 +415,7 @@ export class SqliteStorage extends BaseStorage {
             change.clientId,
             isDeleted,
             dataStr,
+            ownerId,
           ) as { lastInsertRowid: number | bigint };
 
           const assignedSeq = Number(res.lastInsertRowid);
@@ -499,6 +504,7 @@ export class SqliteStorage extends BaseStorage {
       client_id: string;
       deleted: number;
       data: string | null;
+      owner_id?: string | null;
     }>;
 
     const changes: ChangeRecord[] = [];
@@ -519,6 +525,7 @@ export class SqliteStorage extends BaseStorage {
         timestamp: r.timestamp,
         clientId: r.client_id,
         data: r.data ? JSON.parse(r.data) : undefined,
+        ownerId: r.owner_id ?? undefined,
       });
     }
 
@@ -663,19 +670,19 @@ export class SqliteStorage extends BaseStorage {
       ),
       stmtDeleteTable: db.prepare('DELETE FROM tables WHERE name = ?'),
       stmtGetRecord: db.prepare(
-        'SELECT id, version, timestamp, client_id, deleted, data FROM records WHERE table_name = ? AND user_id = ? AND id = ?',
+        'SELECT id, version, timestamp, client_id, deleted, data, owner_id FROM records WHERE table_name = ? AND user_id = ? AND id = ?',
       ),
       stmtGetRecordForUpdate: db.prepare(
-        'SELECT version, timestamp, client_id, deleted FROM records WHERE table_name = ? AND user_id = ? AND id = ?',
+        'SELECT version, timestamp, client_id, deleted, owner_id FROM records WHERE table_name = ? AND user_id = ? AND id = ?',
       ),
       stmtGetSnapshotByTable: db.prepare(
-        'SELECT table_name, user_id, id, version, timestamp, client_id, deleted, data FROM records WHERE table_name = ? AND user_id = ? AND deleted = 0',
+        'SELECT table_name, user_id, id, version, timestamp, client_id, deleted, data, owner_id FROM records WHERE table_name = ? AND user_id = ? AND deleted = 0',
       ),
       stmtInsertRecord: db.prepare(
-        'INSERT INTO records (table_name, user_id, id, version, timestamp, client_id, deleted, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO records (table_name, user_id, id, version, timestamp, client_id, deleted, data, owner_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       ),
       stmtUpdateRecord: db.prepare(
-        'UPDATE records SET version = ?, timestamp = ?, client_id = ?, deleted = ?, data = ? WHERE table_name = ? AND user_id = ? AND id = ?',
+        'UPDATE records SET version = ?, timestamp = ?, client_id = ?, deleted = ?, data = ?, owner_id = ? WHERE table_name = ? AND user_id = ? AND id = ?',
       ),
       stmtCountTableRecords: db.prepare(
         'SELECT COUNT(*) as count FROM records WHERE table_name = ? AND user_id = ? AND deleted = 0',
@@ -684,10 +691,10 @@ export class SqliteStorage extends BaseStorage {
         'DELETE FROM records WHERE table_name = ?',
       ),
       stmtInsertChangelog: db.prepare(
-        'INSERT INTO changelog (table_name, user_id, id, op, version, timestamp, client_id, deleted, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO changelog (table_name, user_id, id, op, version, timestamp, client_id, deleted, data, owner_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       ),
       stmtGetChangelogSince: db.prepare(
-        'SELECT seq, table_name, user_id, id, op, version, timestamp, client_id, deleted, data FROM changelog WHERE seq > ? ORDER BY seq ASC',
+        'SELECT seq, table_name, user_id, id, op, version, timestamp, client_id, deleted, data, owner_id FROM changelog WHERE seq > ? ORDER BY seq ASC',
       ),
       stmtPruneChangelog: db.prepare('DELETE FROM changelog WHERE seq < ?'),
       stmtDeleteTableChangelog: db.prepare(
@@ -801,6 +808,7 @@ function initTablesSchema(db: DatabaseSync): void {
       client_id TEXT NOT NULL,
       deleted INTEGER NOT NULL,
       data TEXT,
+      owner_id TEXT,
       PRIMARY KEY (table_name, user_id, id)
     );
 
@@ -817,7 +825,8 @@ function initTablesSchema(db: DatabaseSync): void {
       timestamp INTEGER NOT NULL,
       client_id TEXT NOT NULL,
       deleted INTEGER NOT NULL,
-      data TEXT
+      data TEXT,
+      owner_id TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_changelog_seq
@@ -829,6 +838,17 @@ function initTablesSchema(db: DatabaseSync): void {
       min_seq INTEGER NOT NULL
     );
   `);
+
+  try {
+    db.exec('ALTER TABLE records ADD COLUMN owner_id TEXT;');
+  } catch {
+    // Column already present
+  }
+  try {
+    db.exec('ALTER TABLE changelog ADD COLUMN owner_id TEXT;');
+  } catch {
+    // Column already present
+  }
 }
 
 function createDatabase(

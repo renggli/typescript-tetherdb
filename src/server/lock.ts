@@ -118,10 +118,30 @@ export function acquireServerLock(
     adminSecret,
   };
 
-  fs.writeFileSync(lockPath, JSON.stringify(info, null, 2), {
-    encoding: 'utf-8',
-    mode: 0o600,
-  });
+  const payload = JSON.stringify(info, null, 2);
+  try {
+    fs.writeFileSync(lockPath, payload, {
+      encoding: 'utf-8',
+      mode: 0o600,
+      flag: existing?.pid === process.pid ? 'w' : 'wx',
+    });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+      const active = readServerLock(baseDir);
+      if (active && active.pid !== process.pid) {
+        throw new TetherServerError(
+          TetherServerErrorCode.AlreadyExists,
+          'A TetherDB server is already running on this data directory',
+        );
+      }
+      fs.writeFileSync(lockPath, payload, {
+        encoding: 'utf-8',
+        mode: 0o600,
+      });
+    } else {
+      throw err;
+    }
+  }
 
   let isReleased = false;
   const release = () => {

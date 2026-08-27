@@ -188,7 +188,9 @@ export function assertCanMutate(
 
   if (change.op === OperationType.Delete) {
     const perm = perms.delete;
-    if (!isPermissionAllowed(perm, user, existing?.ownerId)) {
+    const ownerId =
+      existing?.ownerId ?? (perm === Permission.Owner ? '' : undefined);
+    if (!isPermissionAllowed(perm, user, ownerId)) {
       throw new TetherServerError(
         TetherServerErrorCode.Forbidden,
         `User does not have delete access to record "${change.id}" in table "${table.name}"`,
@@ -210,7 +212,9 @@ export function assertCanMutate(
   } else {
     // Updating an existing record
     const perm = perms.update;
-    if (!isPermissionAllowed(perm, user, existing.ownerId)) {
+    const ownerId =
+      existing.ownerId ?? (perm === Permission.Owner ? '' : undefined);
+    if (!isPermissionAllowed(perm, user, ownerId)) {
       throw new TetherServerError(
         TetherServerErrorCode.Forbidden,
         `User does not have update access to record "${change.id}" in table "${table.name}"`,
@@ -237,5 +241,7 @@ export function canReadRecord(
 ): boolean {
   if (!record || record.deleted) return false;
   const readPerm = table.settings.permissions?.read ?? Permission.Owner;
-  return isPermissionAllowed(readPerm, user, record.ownerId);
+  const ownerId =
+    record.ownerId ?? (readPerm === Permission.Owner ? '' : undefined);
+  return isPermissionAllowed(readPerm, user, ownerId);
 }
