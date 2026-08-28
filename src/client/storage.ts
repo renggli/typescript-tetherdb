@@ -328,6 +328,27 @@ export class Storage {
     });
   }
 
+  /** Current active authenticated user name. */
+  currentUserName?: string;
+
+  /**
+   * Updates the current active authenticated user credentials for metadata attribution.
+   *
+   * @param userName - Current authenticated username or `undefined` if signed out.
+   */
+  setCurrentUser(userName?: string): void {
+    this.currentUserName = userName;
+  }
+
+  /**
+   * Updates the current active authenticated user name for metadata attribution.
+   *
+   * @param userName - Optional authenticated username.
+   */
+  setCurrentUserName(userName?: string): void {
+    this.currentUserName = userName;
+  }
+
   /**
    * Atomically persists a batch of local mutations alongside outbox changelog entries
    * within a single IndexedDB transaction.
@@ -358,6 +379,7 @@ export class Storage {
           version: item.change.version ?? 1,
           clientId: item.change.clientId,
           deleted: isDelete,
+          userName: item.change.userName ?? this.currentUserName,
         };
         if (isDelete) {
           dataStore.delete(item.id);
@@ -576,6 +598,7 @@ export class Storage {
       version: change.version ?? 1,
       deleted: change.op === OperationType.Delete,
       clientId: change.clientId,
+      userName: change.userName,
     }));
 
     await this.applyBatchRecords(records, seq);
@@ -593,6 +616,16 @@ export class Storage {
         if (name === OUTBOX_STORE && !clearOutbox) return false;
         return true;
       });
+      await this.clearStores(db, storeNames);
+    });
+  }
+
+  /**
+   * Clears all tables, internal metadata, and pending outbox mutations.
+   */
+  async clearAll(): Promise<void> {
+    return this.withDatabase(async (db) => {
+      const storeNames = Array.from(db.objectStoreNames);
       await this.clearStores(db, storeNames);
     });
   }
@@ -642,38 +675,44 @@ export class Storage {
 
   private async applyBatchRecords(
     records: SnapshotRecord[],
-    seq: number,
+    seq?: number,
   ): Promise<void> {
     if (records.length === 0) {
-      await this.setMeta('lastSyncSeq', seq);
+      if (seq !== undefined) {
+        await this.setMeta('lastSyncSeq', seq);
+        await this.setMeta('lastSyncTimestamp', Date.now());
+      }
       return;
     }
 
-    const tableNames = Array.from(
-      new Set(records.map((item) => item.table)),
-    ).filter(Boolean);
-    await this.ensureTables(tableNames);
+    const tables = Array.from(new Set(records.map((r) => r.table)));
+    for (const table of tables) {
+      await this.ensureTable(table);
+    }
 
-    await this.withDatabase(async (database) => {
-      const existingRecords = new Map<string, StoredRecord>();
-      const txRead = database.transaction(tableNames, 'readonly');
+    return this.withDatabase(async (db) => {
+      const txRead = db.transaction(tables, 'readonly');
+      const existingMap = new Map<string, StoredRecord>();
+
       for (const item of records) {
+        const key = `${item.table}:${item.id}`;
         const store = txRead.objectStore(item.table);
         const req = store.get(item.id);
-        const rec = await promisifyRequest<StoredRecord | undefined>(req);
-        if (rec) {
-          existingRecords.set(`${item.table}:${item.id}`, rec);
+        const existing = (await promisifyRequest(req)) as
+          | StoredRecord
+          | undefined;
+        if (existing) {
+          existingMap.set(key, existing);
         }
       }
       await promisifyTransaction(txRead);
 
-      const txWrite = database.transaction(
-        [...tableNames, META_STORE],
-        'readwrite',
-      );
+      const txWrite = db.transaction([...tables, META_STORE], 'readwrite');
       for (const item of records) {
+        const key = `${item.table}:${item.id}`;
+        const existing = existingMap.get(key);
         const store = txWrite.objectStore(item.table);
-        const existing = existingRecords.get(`${item.table}:${item.id}`);
+
         if (!existing || shouldOverwrite(item, existing)) {
           if (item.deleted) {
             store.delete(item.id);
@@ -684,6 +723,7 @@ export class Storage {
               timestamp: item.timestamp,
               version: item.version ?? 1,
               clientId: item.clientId,
+              userName: item.userName,
             };
             store.put(record);
           }
@@ -814,6 +854,7 @@ const RESERVED_METADATA_FIELDS = new Set([
   'version',
   'clientId',
   'deleted',
+  'userId',
 ]);
 
 function promisifyRequest<T>(request: IDBRequest<T>): Promise<T> {

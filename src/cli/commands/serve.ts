@@ -1,10 +1,6 @@
 import * as path from 'node:path';
-import {
-  type RunningServer,
-  type Storage,
-  startServer,
-} from '../../server/index.js';
-import { BackendType } from '../../shared/types.js';
+import { type RunningServer, startServer } from '../../server/server.js';
+import { BackendType, type Storage } from '../../server/storage/index.js';
 
 /**
  * Handles the 'serve' command to launch the HTTP and WebSocket synchronization server.

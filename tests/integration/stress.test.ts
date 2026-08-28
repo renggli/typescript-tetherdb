@@ -72,7 +72,7 @@ describe.each(storageDescriptors)(
 
     it('should handle thousands of records in parallel creation and verify data integrity', async () => {
       const client = createClient('bulk-creator');
-      await client.login({ username: 'stressuser', password: 'stresspass123' });
+      await client.login({ userName: 'stressuser', password: 'stresspass123' });
 
       const totalRecords = 2000;
       const table = client.table<{ index: number; payload: string }>('records');
@@ -106,7 +106,7 @@ describe.each(storageDescriptors)(
       expect(sampleParallel).toEqual({ index: 1750, payload: 'payload-1750' });
 
       // Wait for outbox to drain across multiple batch chunks (each max 500 items)
-      const user = await server.storage.getUserByUsername('stressuser');
+      const user = await server.storage.getUserByUserName('stressuser');
       expect(user).toBeDefined();
       if (!user) return;
 
@@ -130,7 +130,7 @@ describe.each(storageDescriptors)(
       for (let i = 0; i < clientCount; i++) {
         const client = createClient(`concurrent-client-${i}`);
         await client.login({
-          username: 'stressuser',
+          userName: 'stressuser',
           password: 'stresspass123',
         });
         clients.push(client);
@@ -233,7 +233,7 @@ describe.each(storageDescriptors)(
 
       // Now log in to connect and drain outbox across multiple batches
       await offlineClient.login({
-        username: 'stressuser',
+        userName: 'stressuser',
         password: 'stresspass123',
         dataMode: DataMode.Local,
       });
@@ -245,7 +245,7 @@ describe.each(storageDescriptors)(
       }, 20000);
 
       // Wait for server to receive all mutations through multiple outbox chunks
-      const user = await server.storage.getUserByUsername('stressuser');
+      const user = await server.storage.getUserByUserName('stressuser');
       expect(user).toBeDefined();
       if (!user) return;
 
@@ -260,7 +260,7 @@ describe.each(storageDescriptors)(
       // Connect a second client to receive the full snapshot
       const clientB = createClient('snapshot-receiver');
       await clientB.login({
-        username: 'stressuser',
+        userName: 'stressuser',
         password: 'stresspass123',
       });
 
@@ -289,7 +289,7 @@ describe.each(storageDescriptors)(
       for (let i = 0; i < clientCount; i++) {
         const client = createClient(`conflict-client-${i}`);
         await client.login({
-          username: 'stressuser',
+          userName: 'stressuser',
           password: 'stresspass123',
         });
         clients.push(client);
@@ -325,7 +325,7 @@ describe.each(storageDescriptors)(
       await Promise.all(racePromises);
 
       // Wait for server to receive all outboxes and for all clients to settle
-      const user = await server.storage.getUserByUsername('stressuser');
+      const user = await server.storage.getUserByUserName('stressuser');
       expect(user).toBeDefined();
       if (!user) return;
 
@@ -397,7 +397,7 @@ describe.each(storageDescriptors)(
 
     it('should handle multi-table parallel stress operations concurrently', async () => {
       const client = createClient('multi-table-stresser');
-      await client.login({ username: 'stressuser', password: 'stresspass123' });
+      await client.login({ userName: 'stressuser', password: 'stresspass123' });
 
       const logsTable = client.table<{ message: string; level: string }>(
         'logs',
@@ -442,7 +442,7 @@ describe.each(storageDescriptors)(
       expect((await itemsTable.getAll()).length).toBe(count);
 
       // Verify sync to server for all 3 tables
-      const user = await server.storage.getUserByUsername('stressuser');
+      const user = await server.storage.getUserByUserName('stressuser');
       expect(user).toBeDefined();
       if (!user) return;
 
@@ -460,7 +460,7 @@ describe.each(storageDescriptors)(
 
     it('should preserve consistency during rapid session disconnect/reconnect flapping under write load', async () => {
       const client = createClient('flapping-client');
-      await client.login({ username: 'stressuser', password: 'stresspass123' });
+      await client.login({ userName: 'stressuser', password: 'stresspass123' });
 
       const streamTable = client.table<{ step: number; text: string }>(
         'stream',
@@ -486,7 +486,7 @@ describe.each(storageDescriptors)(
         await client.logout({ dataMode: DataMode.Local });
         await delay(10);
         await client.login({
-          username: 'stressuser',
+          userName: 'stressuser',
           password: 'stresspass123',
           dataMode: DataMode.Local,
         });
@@ -498,14 +498,14 @@ describe.each(storageDescriptors)(
       // Ensure client ends in connected state
       if (client.syncStatus !== SyncStatus.Connected) {
         await client.login({
-          username: 'stressuser',
+          userName: 'stressuser',
           password: 'stresspass123',
           dataMode: DataMode.Local,
         });
       }
 
       // Wait for all writes to be synced to the server
-      const user = await server.storage.getUserByUsername('stressuser');
+      const user = await server.storage.getUserByUserName('stressuser');
       expect(user).toBeDefined();
       if (!user) return;
 
@@ -524,7 +524,7 @@ describe.each(storageDescriptors)(
       const userCount = 10;
       const recordsPerUser = 15;
       const userCredentials = Array.from({ length: userCount }, (_, i) => ({
-        username: `stress_u_${i}_${Math.random().toString(36).substring(2, 6)}`,
+        userName: `stress_u_${i}_${Math.random().toString(36).substring(2, 6)}`,
         password: `stress_pass_${i}`,
       }));
 
@@ -534,7 +534,7 @@ describe.each(storageDescriptors)(
         const client = createClient(`user-client-${idx}`);
         userClients.push(client);
         const registered = await client.register({
-          username: cred.username,
+          userName: cred.userName,
           password: cred.password,
           dataMode: DataMode.Local,
         });
@@ -587,8 +587,8 @@ describe.each(storageDescriptors)(
 
       await waitForCondition(async () => {
         for (const cred of userCredentials) {
-          const serverUser = await server.storage.getUserByUsername(
-            cred.username,
+          const serverUser = await server.storage.getUserByUserName(
+            cred.userName,
           );
           if (!serverUser) return false;
           const serverRecords =
@@ -605,7 +605,7 @@ describe.each(storageDescriptors)(
         expect(client.authStatus).toBe(0 /* SignedOut */);
 
         const loggedIn = await client.login({
-          username: cred.username,
+          userName: cred.userName,
           password: cred.password,
           dataMode: DataMode.Remote,
         });

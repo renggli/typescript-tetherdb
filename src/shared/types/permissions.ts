@@ -1,4 +1,10 @@
 /**
+ * Table access control policies and permission rules.
+ *
+ * @module tetherdb/shared/types/permissions
+ */
+
+/**
  * Table-level permission policy.
  */
 export enum Permission {
@@ -24,18 +30,4 @@ export interface TablePermissions {
   update?: Permission;
   /** Permission required to delete existing rows. */
   delete?: Permission;
-}
-
-/**
- * Configuration options, resource limits, and access policies for a table.
- */
-export interface TableSettings {
-  /** Table CRUD permissions. */
-  permissions?: TablePermissions;
-  /** Maximum number of active records per partition or shared table. */
-  maxRecords?: number;
-  /** Maximum allowed payload size in bytes for an individual record. */
-  maxRecordSizeBytes?: number;
-  /** Maximum changelog history entries retained per partition before compaction. */
-  maxHistoryEntries?: number;
 }

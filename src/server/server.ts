@@ -5,6 +5,7 @@ import { normalizeBasePath } from '../shared/path.js';
 import {
   type ChangeRecord,
   OperationType,
+  type TableRow,
   type TableSettings,
 } from '../shared/types.js';
 import { verifyDummyPasswordHash } from './crypto.js';
@@ -21,7 +22,7 @@ import { MemoryStorage } from './storage/memory/index.js';
 import { Sync } from './sync.js';
 import {
   normalizePassword,
-  normalizeUsername,
+  normalizeUserName,
   validateTableName,
 } from './validate.js';
 
@@ -287,16 +288,18 @@ export class TetherServer {
   }
 
   /**
-   * Declares a table with optional settings.
-   * Creates the table if not already present or updates its settings.
+   * Declares a table with optional settings and initial rows.
+   * Creates the table if not already present, updates its settings, and inserts initial rows.
    *
    * @param name - Name of the table.
    * @param settings - Optional table settings.
+   * @param rows - Optional array of table rows to insert if not already present.
    * @returns TableStorage handle for the declared table.
    */
   async declareTable(
     name: string,
     settings?: TableSettings,
+    rows?: TableRow[],
   ): Promise<TableStorage> {
     const safeName = validateTableName(name);
     let table = await this.storage.getTable(safeName);
@@ -305,6 +308,10 @@ export class TetherServer {
     } else if (settings) {
       await table.updateSettings(settings);
     }
+    const initialRows = rows ?? settings?.rows;
+    if (initialRows && initialRows.length > 0 && table.insertRows) {
+      await table.insertRows(initialRows);
+    }
     return table;
   }
 
@@ -312,17 +319,17 @@ export class TetherServer {
    * Declares a user account with the specified username and password.
    * Creates the user if not already registered, or updates the existing user's password.
    *
-   * @param username - Username for the account.
+   * @param userName - Username for the account.
    * @param password - Plaintext password for the account.
    * @returns UserStorage handle for the declared user.
    */
-  async declareUser(username: string, password: string): Promise<UserStorage> {
-    const user = await this.storage.getUserByUsername(username);
+  async declareUser(userName: string, password: string): Promise<UserStorage> {
+    const user = await this.storage.getUserByUserName(userName);
     if (user) {
       await user.changePassword(password);
       return user;
     }
-    return this.storage.createUser(username, password);
+    return this.storage.createUser(userName, password);
   }
 
   /**
@@ -734,8 +741,8 @@ export class TetherServer {
     if (method === 'GET' && adminPath === '/users') {
       const users = await this.storage.getUsers();
       const list = users.map((u) => ({
-        id: u.id,
-        username: u.username,
+        userId: u.userId,
+        userName: u.userName,
         createdAt: u.createdAt,
       }));
       this.sendJson(res, 200, list, req);
@@ -744,20 +751,25 @@ export class TetherServer {
 
     if (method === 'POST' && adminPath === '/users') {
       const body = (await this.readJsonBody(req)) as {
-        username?: string;
+        userName?: string;
         password?: string;
       };
-      if (!body.username || !body.password) {
+      const name = body.userName;
+      if (!name || !body.password) {
         throw new TetherServerError(
           TetherServerErrorCode.InvalidInput,
           'Username and password are required',
         );
       }
-      const user = await this.storage.createUser(body.username, body.password);
+      const user = await this.storage.createUser(name, body.password);
       this.sendJson(
         res,
         201,
-        { id: user.id, username: user.username, createdAt: user.createdAt },
+        {
+          userId: user.userId,
+          userName: user.userName,
+          createdAt: user.createdAt,
+        },
         req,
       );
       return true;
@@ -800,7 +812,7 @@ export class TetherServer {
         }
         const user = userParam
           ? ((await this.storage.getUser(userParam)) ??
-            (await this.storage.getUserByUsername(userParam)))
+            (await this.storage.getUserByUserName(userParam)))
           : undefined;
         const records = await table.getAllRecords(user);
         this.sendJson(res, 200, records, req);
@@ -818,7 +830,7 @@ export class TetherServer {
         };
         const user = body.userId
           ? ((await this.storage.getUser(body.userId)) ??
-            (await this.storage.getUserByUsername(body.userId)))
+            (await this.storage.getUserByUserName(body.userId)))
           : undefined;
 
         let changes = body.changes;
@@ -1023,7 +1035,7 @@ export class TetherServer {
 
     try {
       const user = await this.storage.createUser(
-        credentials.username,
+        credentials.userName,
         credentials.password,
       );
       const token = await user.createToken();
@@ -1031,8 +1043,8 @@ export class TetherServer {
         res,
         201,
         {
-          userId: user.id,
-          username: user.username,
+          userId: user.userId,
+          userName: user.userName,
           token,
         },
         req,
@@ -1062,7 +1074,7 @@ export class TetherServer {
     const credentials = await this.readCredentials(req, res);
     if (!credentials) return;
 
-    const userKey = `${ip}:${credentials.username}`;
+    const userKey = `${ip}:${credentials.userName}`;
     if (this.userLoginLimiter && !this.userLoginLimiter.consume(userKey)) {
       this.sendJson(
         res,
@@ -1073,7 +1085,7 @@ export class TetherServer {
       return;
     }
 
-    const user = await this.storage.getUserByUsername(credentials.username);
+    const user = await this.storage.getUserByUserName(credentials.userName);
     const valid = user
       ? await user.verifyPassword(credentials.password)
       : await verifyDummyPasswordHash(credentials.password);
@@ -1100,8 +1112,8 @@ export class TetherServer {
       res,
       200,
       {
-        userId: user.id,
-        username: user.username,
+        userId: user.userId,
+        userName: user.userName,
         token,
       },
       req,
@@ -1111,15 +1123,15 @@ export class TetherServer {
   private async readCredentials(
     req: http.IncomingMessage,
     res: http.ServerResponse,
-  ): Promise<{ username: string; password: string } | null> {
+  ): Promise<{ userName: string; password: string } | null> {
     const body = await this.readJsonBody(req);
-    const { username, password } = body as {
-      username?: string;
+    const { userName, password } = body as {
+      userName?: string;
       password?: string;
     };
-    const normUsername = normalizeUsername(username ?? '');
+    const normUserName = normalizeUserName(userName ?? '');
     const normPassword = normalizePassword(password ?? '');
-    if (!normUsername || !normPassword) {
+    if (!normUserName || !normPassword) {
       this.sendJson(
         res,
         400,
@@ -1130,7 +1142,7 @@ export class TetherServer {
       );
       return null;
     }
-    return { username: normUsername, password: normPassword };
+    return { userName: normUserName, password: normPassword };
   }
 
   private getClientIp(req: http.IncomingMessage): string {

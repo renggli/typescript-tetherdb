@@ -70,7 +70,7 @@ describe('SqliteStorage', () => {
     const storage2 = new SqliteStorage({ baseDir: context.dir });
 
     try {
-      const user2 = await storage2.getUser(user.id);
+      const user2 = await storage2.getUser(user.userId);
       expect(user2).toBeDefined();
       const table2 = await storage2.getTable('shared_records');
       expect(table2).toBeDefined();

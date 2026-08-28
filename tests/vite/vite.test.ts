@@ -1,7 +1,12 @@
+import * as fs from 'node:fs/promises';
 import type * as http from 'node:http';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { createServer as createViteServer, type ViteDevServer } from 'vite';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
+import { SqliteStorage } from '../../src/server/index.js';
+import { readServerLock } from '../../src/server/lock.js';
 import { tetherPlugin } from '../../src/vite/index.js';
 
 describe('tetherPlugin (Vite Dev Server Integration)', () => {
@@ -23,7 +28,7 @@ describe('tetherPlugin (Vite Dev Server Integration)', () => {
       plugins: [
         tetherPlugin({
           tables: ['todos', 'notes'],
-          users: [{ username: 'vite-user', password: 'vite-password-123' }],
+          users: [{ userName: 'vite-user', password: 'vite-password-123' }],
         }),
       ],
     });
@@ -47,7 +52,7 @@ describe('tetherPlugin (Vite Dev Server Integration)', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        username: 'vite-user',
+        userName: 'vite-user',
         password: 'vite-password-123',
       }),
     });
@@ -147,12 +152,6 @@ describe('tetherPlugin (Vite Dev Server Integration)', () => {
   });
 
   it('should acquire server.lock with persistent storage and release on shutdown', async () => {
-    const os = await import('node:os');
-    const path = await import('node:path');
-    const fs = await import('node:fs/promises');
-    const { SqliteStorage } = await import('../../src/server/index.js');
-    const { readServerLock } = await import('../../src/server/lock.js');
-
     const tmpDir = path.join(
       os.tmpdir(),
       `tetherdb-vite-lock-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,

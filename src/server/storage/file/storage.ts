@@ -3,7 +3,6 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { shouldOverwrite } from '../../../shared/clock.js';
 import {
-  BackendType,
   type ChangeRecord,
   OperationType,
   type StoredRecord,
@@ -14,11 +13,11 @@ import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
 import { readServerLock } from '../../lock.js';
 import {
   getUserBucket,
-  normalizeUsername,
+  normalizeUserName,
   validatePassword,
   validateTableName,
   validateUserId,
-  validateUsername,
+  validateUserName,
 } from '../../validate.js';
 import {
   applyChangeToRecord,
@@ -30,14 +29,15 @@ import {
   validateBatchChanges,
 } from '../base/index.js';
 import type { MaintenanceResult, StorageOptions } from '../storage.js';
-import type { TableStorage } from '../table.js';
+import { BackendType } from '../storage.js';
+import type { ApplyChangesOptions, TableStorage } from '../table.js';
 import type { UserStorage } from '../user.js';
 import { TableFileStorage } from './table.js';
 import { UserFileStorage } from './user.js';
 
 export interface FileUserData {
-  id: string;
-  username: string;
+  userId: string;
+  userName: string;
   passwordHash: string | null;
   createdAt: number;
 }
@@ -108,17 +108,19 @@ export class FileStorage extends BaseStorage {
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((t) => new TableFileStorage(t.name, this, t.settings));
   }
-  async createUser(username: string, password: string): Promise<UserStorage> {
+
+  async createUser(userName: string, password: string): Promise<UserStorage> {
     assertNoActiveServerLock(this.baseDir);
-    const safeUsername = validateUsername(username);
+    const safeUserName = validateUserName(userName);
     const validPassword = validatePassword(password);
     const passwordHash = await hashPassword(validPassword);
+    const userId = crypto.randomUUID();
 
     return this.withLock('__users__', async () => {
       const users = await this.readUsersFile();
 
       for (const u of users.values()) {
-        if (u.username.toLowerCase() === safeUsername.toLowerCase()) {
+        if (u.userName.toLowerCase() === safeUserName.toLowerCase()) {
           throw new TetherServerError(
             TetherServerErrorCode.AlreadyExists,
             'Username is already registered',
@@ -126,10 +128,9 @@ export class FileStorage extends BaseStorage {
         }
       }
 
-      const userId = crypto.randomUUID();
       const userData: FileUserData = {
-        id: userId,
-        username: safeUsername,
+        userId,
+        userName: safeUserName,
         passwordHash,
         createdAt: Date.now(),
       };
@@ -140,8 +141,8 @@ export class FileStorage extends BaseStorage {
     });
   }
 
-  async getUser(id: string): Promise<UserStorage | undefined> {
-    const safeUserId = validateUserId(id);
+  async getUser(userId: string): Promise<UserStorage | undefined> {
+    const safeUserId = validateUserId(userId);
     const data = await this.findUserDataById(safeUserId);
     if (data) {
       return new UserFileStorage(data, this);
@@ -149,12 +150,12 @@ export class FileStorage extends BaseStorage {
     return undefined;
   }
 
-  async getUserByUsername(username: string): Promise<UserStorage | undefined> {
-    const safeUsername = normalizeUsername(username);
-    if (!safeUsername) return undefined;
+  async getUserByUserName(userName: string): Promise<UserStorage | undefined> {
+    const safeUserName = normalizeUserName(userName);
+    if (!safeUserName) return undefined;
     const users = await this.readUsersFile();
     for (const u of users.values()) {
-      if (u.username.toLowerCase() === safeUsername) {
+      if (u.userName.toLowerCase() === safeUserName) {
         return new UserFileStorage(u, this);
       }
     }
@@ -171,6 +172,7 @@ export class FileStorage extends BaseStorage {
   async applyChanges(
     user: UserStorage | undefined,
     changes: ChangeRecord[],
+    options?: ApplyChangesOptions,
   ): Promise<{ applied: ChangeRecord[]; newSeq: number }> {
     const defaultMaxRecords = this.options.maxRecords ?? 10_000;
     const defaultMaxRecordSize = this.options.maxRecordSizeBytes ?? 512 * 1024;
@@ -190,8 +192,10 @@ export class FileStorage extends BaseStorage {
         const table = await this.getTable(change.table);
         if (!table) continue;
         const isPrivate = isPrivateTable(table);
-        const partitionId = isPrivate ? user?.id : '__shared__';
-        if (isPrivate && !user) {
+        const partitionId = isPrivate
+          ? (user?.userId ?? '__shared__')
+          : '__shared__';
+        if (isPrivate && !user && !options?.skipPermissionCheck) {
           throw new TetherServerError(
             TetherServerErrorCode.Forbidden,
             `Authentication required for private table "${change.table}"`,
@@ -235,7 +239,9 @@ export class FileStorage extends BaseStorage {
           }
 
           const existing = map.get(change.id);
-          assertCanMutate(table, user, change, existing);
+          if (!options?.skipPermissionCheck) {
+            assertCanMutate(table, user, change, existing);
+          }
 
           if (
             change.op === OperationType.Put &&
@@ -313,7 +319,7 @@ export class FileStorage extends BaseStorage {
     requiresSnapshot?: boolean;
   }> {
     const partitions: string[] = ['__shared__'];
-    if (user) partitions.push(user.id);
+    if (user) partitions.push(user.userId);
 
     let maxCurrentSeq = 0;
     let minSeq = 0;
@@ -378,7 +384,7 @@ export class FileStorage extends BaseStorage {
 
   async getCurrentSeq(user?: UserStorage): Promise<number> {
     const partitions: string[] = ['__shared__'];
-    if (user) partitions.push(user.id);
+    if (user) partitions.push(user.userId);
     let maxSeq = 0;
 
     for (const partitionId of partitions) {
@@ -416,7 +422,7 @@ export class FileStorage extends BaseStorage {
   ): Promise<MaintenanceResult> {
     const keep = keepCount ?? this.options.maxHistoryEntries ?? 1000;
     const users = await this.getUsers();
-    const partitions = ['__shared__', ...users.map((u) => u.id)];
+    const partitions = ['__shared__', ...users.map((u) => u.userId)];
     let totalPruned = 0;
 
     for (const partitionId of partitions) {
@@ -520,7 +526,7 @@ export class FileStorage extends BaseStorage {
       const list = JSON.parse(content) as FileUserData[];
       const map = new Map<string, FileUserData>();
       for (const u of list) {
-        map.set(u.id, u);
+        map.set(u.userId, u);
       }
       return map;
     } catch {
@@ -602,26 +608,26 @@ export class FileStorage extends BaseStorage {
     }
   }
 
-  async findUserDataById(id: string): Promise<FileUserData | undefined> {
+  async findUserDataById(userId: string): Promise<FileUserData | undefined> {
     const users = await this.readUsersFile();
-    return users.get(id);
+    return users.get(userId);
   }
 
   async updateUserData(
-    id: string,
+    userId: string,
     update: Partial<FileUserData>,
   ): Promise<void> {
     assertNoActiveServerLock(this.baseDir);
     return this.withLock('__users__', async () => {
       const users = await this.readUsersFile();
-      const existing = users.get(id);
+      const existing = users.get(userId);
       if (!existing) {
         throw new TetherServerError(
           TetherServerErrorCode.NotFound,
           'User not found',
         );
       }
-      users.set(id, { ...existing, ...update });
+      users.set(userId, { ...existing, ...update });
       await this.writeUsersFile(users);
     });
   }
@@ -671,9 +677,9 @@ export class FileStorage extends BaseStorage {
     });
   }
 
-  async deleteUser(id: string): Promise<boolean> {
+  async deleteUser(userId: string): Promise<boolean> {
     assertNoActiveServerLock(this.baseDir);
-    const safeUserId = validateUserId(id);
+    const safeUserId = validateUserId(userId);
     return this.withLock('__users__', async () => {
       let deleted = false;
       const bucket = getUserBucket(safeUserId);

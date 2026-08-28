@@ -1,10 +1,15 @@
-import type {
-  BackendType,
-  ChangeRecord,
-  TableSettings,
-} from '../../shared/types.js';
-import type { TableStorage } from './table.js';
+import type { ChangeRecord, TableSettings } from '../../shared/types.js';
+import type { ApplyChangesOptions, TableStorage } from './table.js';
 import type { UserStorage } from './user.js';
+
+/**
+ * Persistence backend storage engine type.
+ */
+export enum BackendType {
+  Memory = 'memory',
+  File = 'file',
+  Sqlite = 'sqlite',
+}
 
 /**
  * Configuration options and resource limits for storage engines.
@@ -97,28 +102,28 @@ export interface Storage {
    * Creates a new user account with credentials.
    * Throws an error if a user with the same username already exists.
    *
-   * @param username - Username for the account.
+   * @param userName - Username for the account.
    * @param password - Account password.
    * @returns Created UserStorage handle.
    * @throws Error if the username is already registered.
    */
-  createUser(username: string, password: string): Promise<UserStorage>;
+  createUser(userName: string, password: string): Promise<UserStorage>;
 
   /**
    * Retrieves a user handle by user account ID.
    *
-   * @param id - Unique user identifier.
+   * @param userId - Unique user identifier.
    * @returns UserStorage handle or `undefined` if not found.
    */
-  getUser(id: string): Promise<UserStorage | undefined>;
+  getUser(userId: string): Promise<UserStorage | undefined>;
 
   /**
    * Retrieves a user handle by username.
    *
-   * @param username - User account username.
+   * @param userName - User account username.
    * @returns UserStorage handle or `undefined` if not found.
    */
-  getUserByUsername(username: string): Promise<UserStorage | undefined>;
+  getUserByUserName(userName: string): Promise<UserStorage | undefined>;
 
   /**
    * Retrieves a user handle by validating a session token.
@@ -140,11 +145,13 @@ export interface Storage {
    *
    * @param user - Target user handle (if authenticated).
    * @param changes - Array of change records.
+   * @param options - Optional application options.
    * @returns Applied changes and new sequence number.
    */
   applyChanges(
     user: UserStorage | undefined,
     changes: ChangeRecord[],
+    options?: ApplyChangesOptions,
   ): Promise<{ applied: ChangeRecord[]; newSeq: number }>;
 
   /**

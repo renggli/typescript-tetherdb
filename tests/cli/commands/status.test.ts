@@ -4,7 +4,11 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createBackend } from '../../../src/cli/backend.js';
 import { handleStatusCommand } from '../../../src/cli/commands/status.js';
-import { LocalAdminTarget, type Storage } from '../../../src/server/index.js';
+import {
+  LocalAdminTarget,
+  type ServerLockInfo,
+  type Storage,
+} from '../../../src/server/index.js';
 import { testLogger } from '../../logger.js';
 
 describe('handleStatusCommand', () => {
@@ -66,7 +70,7 @@ describe('handleStatusCommand', () => {
     await handleStatusCommand(
       target,
       ['status'],
-      lock as unknown as import('../../../src/server/lock.js').ServerLockInfo,
+      lock as unknown as ServerLockInfo,
     );
 
     expect(testLogger.hasMessage(/Server:\s+Running \(PID:/)).toBe(true);

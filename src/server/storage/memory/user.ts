@@ -7,8 +7,8 @@ import {
 import type { MemoryStorage } from './storage.js';
 
 export interface MemoryUserData {
-  id: string;
-  username: string;
+  userId: string;
+  userName: string;
   passwordHash: string | null;
   createdAt: number;
 }
@@ -18,11 +18,11 @@ export interface MemoryUserData {
  */
 export class UserMemoryStorage extends UserBaseStorage<MemoryStorage> {
   constructor(data: MemoryUserData, storage: MemoryStorage) {
-    super(data.id, data.username, data.createdAt, storage);
+    super(data.userId, data.userName, data.createdAt, storage);
   }
 
   private getUserData(): MemoryUserData {
-    const data = this.storage.getUserData(this.id);
+    const data = this.storage.getUserData(this.userId);
     if (!data) {
       throw new TetherServerError(
         TetherServerErrorCode.NotFound,

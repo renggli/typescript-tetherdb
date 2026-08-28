@@ -99,8 +99,8 @@ describe.each(storageDescriptors)(
       const client1 = createClient();
       const client2 = createClient();
 
-      await client1.login({ username: 'alice_user', password: 'password123' });
-      await client2.login({ username: 'bob_user', password: 'password123' });
+      await client1.login({ userName: 'alice_user', password: 'password123' });
+      await client2.login({ userName: 'bob_user', password: 'password123' });
 
       await waitForCondition(
         () =>
@@ -115,8 +115,8 @@ describe.each(storageDescriptors)(
       await table2.put('n2', { title: "Bob's Secret" });
 
       // Wait for server sync
-      const userAlice = await server.storage.getUserByUsername('alice_user');
-      const userBob = await server.storage.getUserByUsername('bob_user');
+      const userAlice = await server.storage.getUserByUserName('alice_user');
+      const userBob = await server.storage.getUserByUserName('bob_user');
       const serverTable = await server.storage.getTable('private_notes');
 
       await waitForCondition(async () => {
@@ -137,7 +137,7 @@ describe.each(storageDescriptors)(
       await server.declareUser('admin_user', 'password123');
       const publisher = createClient();
       await publisher.login({
-        username: 'admin_user',
+        userName: 'admin_user',
         password: 'password123',
       });
       await waitForCondition(
@@ -187,7 +187,7 @@ describe.each(storageDescriptors)(
       const guest = createClient();
       const user = createClient();
 
-      await user.login({ username: 'charlie', password: 'password123' });
+      await user.login({ userName: 'charlie', password: 'password123' });
       await waitForCondition(
         () =>
           guest.syncStatus === SyncStatus.Connected &&
@@ -233,8 +233,8 @@ describe.each(storageDescriptors)(
       const clientA = createClient();
       const clientB = createClient();
 
-      await clientA.login({ username: 'logger_a', password: 'password123' });
-      await clientB.login({ username: 'logger_b', password: 'password123' });
+      await clientA.login({ userName: 'logger_a', password: 'password123' });
+      await clientB.login({ userName: 'logger_b', password: 'password123' });
 
       await waitForCondition(
         () =>
@@ -276,7 +276,7 @@ describe.each(storageDescriptors)(
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              username: 'starter_user',
+              userName: 'starter_user',
               password: 'password123',
             }),
           },
@@ -284,9 +284,9 @@ describe.each(storageDescriptors)(
         expect(regRes.ok).toBe(true);
         const body = (await regRes.json()) as {
           userId: string;
-          username: string;
+          userName: string;
         };
-        expect(body.username).toBe('starter_user');
+        expect(body.userName).toBe('starter_user');
 
         await runner.close();
       } finally {

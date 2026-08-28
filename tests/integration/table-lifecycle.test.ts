@@ -73,8 +73,8 @@ describe.each(storageDescriptors)(
       const client1 = createClient('c1');
       const client2 = createClient('c2');
 
-      await client1.login({ username: 'alice', password: 'password123' });
-      await client2.login({ username: 'alice', password: 'password123' });
+      await client1.login({ userName: 'alice', password: 'password123' });
+      await client2.login({ userName: 'alice', password: 'password123' });
 
       await waitForCondition(
         () =>
@@ -118,7 +118,7 @@ describe.each(storageDescriptors)(
       // Server recreates table "notes" - should start clean on server
       const recreatedNotes = await serverStorage.createTable('notes');
       expect(recreatedNotes).toBeDefined();
-      const userAlice = await serverStorage.getUserByUsername('alice');
+      const userAlice = await serverStorage.getUserByUserName('alice');
       expect(userAlice).toBeDefined();
       if (userAlice) {
         expect(await recreatedNotes?.getAllRecords(userAlice)).toHaveLength(0);
@@ -129,7 +129,7 @@ describe.each(storageDescriptors)(
       const dbName = `bobby-local-db-${Date.now()}`;
       const client1 = createClient('bobby-client-1', dbName);
 
-      await client1.login({ username: 'bobby', password: 'password123' });
+      await client1.login({ userName: 'bobby', password: 'password123' });
       await waitForCondition(() => client1.syncStatus === SyncStatus.Connected);
 
       const todos = client1.table<TodoItem>('todos');
@@ -137,7 +137,7 @@ describe.each(storageDescriptors)(
       await todos.put('t-2', { text: 'Item 2' });
 
       // Wait for server to receive the pushed items
-      const userBobby = await serverStorage.getUserByUsername('bobby');
+      const userBobby = await serverStorage.getUserByUserName('bobby');
       const todosTable = await serverStorage.getTable('todos');
       await waitForCondition(async () => {
         if (!userBobby || !todosTable) return false;
@@ -150,7 +150,7 @@ describe.each(storageDescriptors)(
 
       // Create fresh client with empty new local DB, login, and verify full snapshot restore
       const client2 = createClient('bobby-client-2');
-      await client2.login({ username: 'bobby', password: 'password123' });
+      await client2.login({ userName: 'bobby', password: 'password123' });
       await waitForCondition(
         async () =>
           (await client2.table<TodoItem>('todos').getAll()).length === 2,

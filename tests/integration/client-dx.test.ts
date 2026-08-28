@@ -99,11 +99,11 @@ describe.each(storageDescriptors)(
       });
 
       const regSuccess = await auth.register({
-        username: 'dxuser',
+        userName: 'dxuser',
         password: 'password123',
       });
       expect(regSuccess).toBe(true);
-      expect(auth.username).toBe('dxuser');
+      expect(auth.userName).toBe('dxuser');
       expect(auth.token).toBeDefined();
       expect(auth.status).toBe(AuthStatus.SignedIn);
 
@@ -111,7 +111,7 @@ describe.each(storageDescriptors)(
       expect(auth.status).toBe(AuthStatus.SignedOut);
 
       const loginSuccess = await auth.login({
-        username: 'dxuser',
+        userName: 'dxuser',
         password: 'password123',
       });
       expect(loginSuccess).toBe(true);
@@ -149,12 +149,12 @@ describe.each(storageDescriptors)(
 
       // 3. User registers account -> seamlessly connects sync & uploads local data
       const success = await db.register({
-        username: 'onboard_user',
+        userName: 'onboard_user',
         password: 'secretpassword',
       });
 
       expect(success).toBe(true);
-      expect(db.username).toBe('onboard_user');
+      expect(db.userName).toBe('onboard_user');
 
       // Wait for sync to establish and outbox to drain
       await waitForCondition(() => db.syncStatus === SyncStatus.Connected);
@@ -171,7 +171,7 @@ describe.each(storageDescriptors)(
       await checkStorage.close();
 
       // Server storage should now have the 2 records
-      const user = await server.storage.getUserByUsername('onboard_user');
+      const user = await server.storage.getUserByUserName('onboard_user');
       expect(user).toBeDefined();
       if (!user) return;
       const todosTable = await server.storage.getTable('todos');
@@ -193,11 +193,11 @@ describe.each(storageDescriptors)(
 
       // Calling register with username and password should just work by default!
       const success = await db.register({
-        username: 'auto_inferred_user',
+        userName: 'auto_inferred_user',
         password: 'password123',
       });
       expect(success).toBe(true);
-      expect(db.username).toBe('auto_inferred_user');
+      expect(db.userName).toBe('auto_inferred_user');
 
       await waitForCondition(() => db.syncStatus === SyncStatus.Connected);
       expect(db.syncStatus).toBe(SyncStatus.Connected);
@@ -220,7 +220,7 @@ describe.each(storageDescriptors)(
       );
 
       // Login connects sync
-      await db.login({ username: 'dynamic_user', password: 'password123' });
+      await db.login({ userName: 'dynamic_user', password: 'password123' });
       await waitForCondition(() => db.syncStatus === SyncStatus.Connected);
       expect(db.syncStatus).toBe(SyncStatus.Connected);
 
@@ -234,7 +234,7 @@ describe.each(storageDescriptors)(
       expect((await notes.getAll()).length).toBe(1);
 
       // Re-login connects sync and flushes outbox
-      await db.login({ username: 'dynamic_user', password: 'password123' });
+      await db.login({ userName: 'dynamic_user', password: 'password123' });
       await waitForCondition(() => db.syncStatus === SyncStatus.Connected);
       expect(db.syncStatus).toBe(SyncStatus.Connected);
 

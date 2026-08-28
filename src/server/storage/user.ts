@@ -3,9 +3,9 @@
  */
 export interface UserStorage {
   /** Unique user account identifier. */
-  readonly id: string;
+  readonly userId: string;
   /** Normalized username. */
-  readonly username: string;
+  readonly userName: string;
   /** Epoch timestamp when the user account was created. */
   readonly createdAt: number;
 

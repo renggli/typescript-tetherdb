@@ -16,7 +16,7 @@
 [Framework Integration](#framework-integration) •
 [CLI & Server](#cli--server-administration) •
 [Production Deployment](#production-deployment) •
-[Example App](#example-application) •
+[Example Applications](#example-applications) •
 [Changelog](CHANGELOG.md)
 
 ## Features
@@ -121,7 +121,7 @@ Define type-safe indexes on tables declaratively and query data with full range,
 import { IndexDirection, IndexRange, TetherClient } from 'tetherdb/client';
 
 interface User {
-  username: string;
+  userName: string;
   email: string;
   age: number;
   tags: string[];
@@ -167,7 +167,7 @@ Connect your local data to the cloud whenever the user registers or signs in:
 ```typescript
 // Register or login to initiate real-time synchronization
 await client.register({
-  username: 'alice',
+  userName: 'alice',
   password: 'secure-password',
   remember: true, // Persists session token across browser reloads
 });
@@ -199,7 +199,7 @@ export default defineConfig({
       // Pre-declare tables and access settings
       tables: ['todos'],
       // Pre-provision default demo accounts
-      users: [{ username: 'demo', password: 'password123' }],
+      users: [{ userName: 'demo', password: 'password123' }],
     }),
   ],
 });
@@ -353,17 +353,21 @@ server {
 }
 ```
 
-## Example Application
+## Example Applications
 
-Check out the included real-time multi-client collaborative Todo app in [`examples/todo/`](examples/todo):
+Check out the included example applications demonstrating TetherDB features:
 
-```bash
-# Build packages and start example app
-npm run build
-npm run example:todo
-```
+- **Collaborative Todo App** ([`examples/todo/`](examples/todo)): Real-time multi-client collaborative task manager with filters and status indexes.
+  ```bash
+  npm run example:todo
+  ```
+  Open `http://localhost:3000` to test.
 
-Open `http://localhost:3000` in multiple browser windows or simulate offline mode in DevTools to see seamless local-first persistence and instant background synchronization.
+- **Community Forum ("TetherForum")** ([`examples/forum/`](examples/forum)): Reddit-style community discussion board with sub-communities (`c/tech`, `c/general`), multi-user upvoting/downvoting, threaded comments, and multi-persona switching.
+  ```bash
+  npm run example:forum
+  ```
+  Open `http://localhost:3002` to test.
 
 ## Development & Testing
 

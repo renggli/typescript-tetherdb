@@ -15,19 +15,19 @@ export abstract class UserBaseStorage<
   TStorage extends BaseStorage = BaseStorage,
 > implements UserStorage
 {
-  readonly id: string;
-  readonly username: string;
+  readonly userId: string;
+  readonly userName: string;
   readonly createdAt: number;
   protected readonly storage: TStorage;
 
   constructor(
-    id: string,
-    username: string,
+    userId: string,
+    userName: string,
     createdAt: number,
     storage: TStorage,
   ) {
-    this.id = id;
-    this.username = username;
+    this.userId = userId;
+    this.userName = userName;
     this.createdAt = createdAt;
     this.storage = storage;
   }
@@ -42,14 +42,14 @@ export abstract class UserBaseStorage<
   abstract changePassword(newPassword: string): Promise<void>;
 
   async delete(): Promise<boolean> {
-    return this.storage.deleteUser(this.id);
+    return this.storage.deleteUser(this.userId);
   }
 
   /** Creates a signed session token for this user. */
   async createToken(expiresInSeconds?: number): Promise<string> {
     return createSessionToken(
-      this.id,
-      this.username,
+      this.userId,
+      this.userName,
       this.getSecret(),
       expiresInSeconds,
     );
@@ -58,7 +58,7 @@ export abstract class UserBaseStorage<
   /** Verifies whether the session token is valid for this user. */
   async verifyToken(token: string): Promise<boolean> {
     const payload = verifySessionToken(token, this.getSecret());
-    return payload !== null && payload.userId === this.id;
+    return payload !== null && payload.userId === this.userId;
   }
 }
 

@@ -1,5 +1,5 @@
-import { TetherServerError, TetherServerErrorCode } from '../server/index.js';
-import { BackendType } from '../shared/types.js';
+import { TetherServerError, TetherServerErrorCode } from '../server/errors.js';
+import { BackendType } from '../server/storage/index.js';
 
 /**
  * Parsed CLI arguments and configuration options.

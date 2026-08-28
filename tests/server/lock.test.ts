@@ -271,9 +271,9 @@ describe('ServerLock', () => {
     const readerStorage = new FileStorage({ baseDir: tmpDir });
 
     // Reads should succeed
-    const fetchedUser = await readerStorage.getUser(user.id);
+    const fetchedUser = await readerStorage.getUser(user.userId);
     expect(fetchedUser).toBeDefined();
-    expect(fetchedUser?.username).toBe('alice_user');
+    expect(fetchedUser?.userName).toBe('alice_user');
 
     const fetchedTable = await readerStorage.getTable('demo_table');
     expect(fetchedTable).toBeDefined();

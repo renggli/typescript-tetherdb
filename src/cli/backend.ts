@@ -1,14 +1,13 @@
 import * as path from 'node:path';
+import { TetherServerError, TetherServerErrorCode } from '../server/errors.js';
 import {
+  BackendType,
   FileStorage,
   MemoryStorage,
   SqliteStorage,
   type Storage,
   type StorageOptions,
-  TetherServerError,
-  TetherServerErrorCode,
-} from '../server/index.js';
-import { BackendType } from '../shared/types.js';
+} from '../server/storage/index.js';
 
 export { BackendType };
 

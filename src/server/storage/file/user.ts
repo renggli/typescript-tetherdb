@@ -10,16 +10,16 @@ import type { FileStorage, FileUserData } from './storage.js';
  */
 export class UserFileStorage extends UserBaseStorage<FileStorage> {
   constructor(data: FileUserData, storage: FileStorage) {
-    super(data.id, data.username, data.createdAt, storage);
+    super(data.userId, data.userName, data.createdAt, storage);
   }
 
   async verifyPassword(password: string): Promise<boolean> {
-    const user = await this.storage.findUserDataById(this.id);
+    const user = await this.storage.findUserDataById(this.userId);
     return verifyUserPassword(password, user?.passwordHash);
   }
 
   async changePassword(newPassword: string): Promise<void> {
     const newHash = await hashUserPassword(newPassword);
-    await this.storage.updateUserData(this.id, { passwordHash: newHash });
+    await this.storage.updateUserData(this.userId, { passwordHash: newHash });
   }
 }

@@ -92,7 +92,8 @@
     "access": "public"
   },
   "workspaces": [
-    "examples/todo"
+    "examples/todo",
+    "examples/forum"
   ],
   "scripts": {
     "build": "tsup && tsc --emitDeclarationOnly --outDir dist && node scripts/build-types.js",
@@ -109,7 +110,8 @@
     "prepare": "npm run build",
     "prepublishOnly": "npm run typecheck && npm run lint && npm test && npm run build",
     "postpublish": "node scripts/tag-version.js",
-    "example:todo": "npm --workspace=@tetherdb/example-todo run dev"
+    "example:todo": "npm --workspace=@tetherdb/example-todo run dev",
+    "example:forum": "npm --workspace=@tetherdb/example-forum run dev"
   },
   "dependencies": {
     "ws": "^8.18.0"

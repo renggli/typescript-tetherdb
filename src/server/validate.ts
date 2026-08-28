@@ -8,10 +8,10 @@
 import { TetherServerError, TetherServerErrorCode } from './errors.js';
 
 /** Minimum allowed username character length. */
-export const MIN_USERNAME_LENGTH = 4;
+export const MIN_USER_NAME_LENGTH = 3;
 
 /** Maximum allowed username character length. */
-export const MAX_USERNAME_LENGTH = 128;
+export const MAX_USER_NAME_LENGTH = 128;
 
 /** Minimum allowed password character length. */
 export const MIN_PASSWORD_LENGTH = 4;
@@ -59,32 +59,48 @@ export function validateTimestamp(
  *
  * @param userId - The user ID to validate.
  * @returns The validated user ID.
- * @throws TetherServerError if the user ID is invalid or contains unsafe characters.
+ * @throws TetherServerError if user ID is empty, too long, or contains invalid characters.
  */
 export function validateUserId(userId: string): string {
   return validateFilesystemSafe(userId, 'user ID');
 }
 
 /**
- * Validates a table name ensuring it is safe for filesystem use.
+ * Validates an application or table identifier, ensuring safety against path traversal.
  *
- * @param tableName - The table name to validate.
+ * @param name - The table identifier.
  * @returns The validated table name.
- * @throws TetherServerError if the table name is invalid.
+ * @throws TetherServerError if the name is invalid or unsafe.
  */
-export function validateTableName(tableName: string): string {
-  return validateFilesystemSafe(tableName, 'table name');
+export function validateTableName(name: string): string {
+  return validateFilesystemSafe(name, 'table name');
 }
 
 /**
- * Validates a record ID ensuring it is a non-empty string within size limits.
+ * Validates a client device or session identifier.
  *
- * @param id - The record identifier to validate.
+ * @param clientId - The client UUID or identifier.
+ * @returns The validated client ID.
+ * @throws TetherServerError if the client ID contains invalid characters.
+ */
+export function validateClientId(clientId: string): string {
+  return validateFilesystemSafe(clientId, 'client ID');
+}
+
+/**
+ * Validates a record primary key identifier.
+ *
+ * @param id - The record primary key.
  * @returns The validated record ID.
- * @throws TetherServerError if the record ID is invalid or exceeds max length.
+ * @throws TetherServerError if the ID is empty, too long, or contains invalid characters.
  */
 export function validateRecordId(id: string): string {
-  if (typeof id !== 'string' || id.length === 0 || id.length > 512) {
+  if (
+    typeof id !== 'string' ||
+    id.length === 0 ||
+    id.length > 256 ||
+    id.includes('\0')
+  ) {
     throw new TetherServerError(
       TetherServerErrorCode.InvalidInput,
       'Invalid record ID',
@@ -96,30 +112,30 @@ export function validateRecordId(id: string): string {
 /**
  * Normalizes a username by trimming whitespace and converting to lowercase.
  *
- * @param username - The raw username string.
+ * @param userName - The raw username string.
  * @returns The normalized username (lowercase and trimmed).
  */
-export function normalizeUsername(username: string): string {
-  return typeof username === 'string' ? username.trim().toLowerCase() : '';
+export function normalizeUserName(userName: string): string {
+  return typeof userName === 'string' ? userName.trim().toLowerCase() : '';
 }
 
 /**
  * Validates and normalizes a username for account creation or authentication.
- * Usernames must be between 4 and 128 characters long.
+ * Usernames must be between 3 and 128 characters long.
  *
- * @param username - The username to validate.
+ * @param userName - The username to validate.
  * @returns The validated and normalized username (trimmed and lowercase).
  * @throws TetherServerError if the username is invalid or out of length bounds.
  */
-export function validateUsername(username: string): string {
-  const normalized = normalizeUsername(username);
+export function validateUserName(userName: string): string {
+  const normalized = normalizeUserName(userName);
   if (
-    normalized.length < MIN_USERNAME_LENGTH ||
-    normalized.length > MAX_USERNAME_LENGTH
+    normalized.length < MIN_USER_NAME_LENGTH ||
+    normalized.length > MAX_USER_NAME_LENGTH
   ) {
     throw new TetherServerError(
       TetherServerErrorCode.InvalidInput,
-      `Username must be between ${MIN_USERNAME_LENGTH} and ${MAX_USERNAME_LENGTH} characters`,
+      `Username must be between ${MIN_USER_NAME_LENGTH} and ${MAX_USER_NAME_LENGTH} characters`,
     );
   }
   return normalized;

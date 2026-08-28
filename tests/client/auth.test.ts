@@ -35,8 +35,7 @@ describe('Auth', () => {
 
     expect(auth.baseUrl).toBe('http://127.0.0.1:8080');
     expect(auth.status).toBe(AuthStatus.SignedOut);
-    expect(auth.username).toBeUndefined();
-    expect(auth.userId).toBeUndefined();
+    expect(auth.userName).toBeUndefined();
     expect(auth.token).toBeUndefined();
   });
 
@@ -71,8 +70,7 @@ describe('Auth', () => {
   describe('Session Restoration (restoreSession)', () => {
     it('should automatically restore remembered session from IndexedDB metadata', async () => {
       await storage.setMeta('auth', {
-        userId: 'u-123',
-        username: 'alice',
+        userName: 'alice',
         token: 'jwt-token-xyz',
       });
 
@@ -85,13 +83,12 @@ describe('Auth', () => {
       await auth.restoreSession();
 
       expect(auth.status).toBe(AuthStatus.SignedIn);
-      expect(auth.username).toBe('alice');
-      expect(auth.userId).toBe('u-123');
+      expect(auth.userName).toBe('alice');
       expect(auth.token).toBe('jwt-token-xyz');
     });
 
-    it('should remain SignedOut if stored session is missing token or username', async () => {
-      await storage.setMeta('auth', { userId: 'u-123' }); // incomplete
+    it('should remain SignedOut if stored session is missing token or userName', async () => {
+      await storage.setMeta('auth', { userName: 'alice' }); // incomplete
 
       const auth = new Auth({
         baseUrl: 'http://127.0.0.1:8080',
@@ -141,8 +138,7 @@ describe('Auth', () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({
-          userId: 'usr-1',
-          username: 'charlie',
+          userName: 'charlie',
           token: 'token-abc',
         }),
       });
@@ -157,15 +153,14 @@ describe('Auth', () => {
       auth.onStatusChange.register((s) => statuses.push(s));
 
       const success = await auth.register({
-        username: 'charlie',
+        userName: 'charlie',
         password: 'password123',
         remember: true,
       });
 
       expect(success).toBe(true);
       expect(auth.status).toBe(AuthStatus.SignedIn);
-      expect(auth.username).toBe('charlie');
-      expect(auth.userId).toBe('usr-1');
+      expect(auth.userName).toBe('charlie');
       expect(auth.token).toBe('token-abc');
 
       expect(statuses).toEqual([AuthStatus.SigningIn, AuthStatus.SignedIn]);
@@ -174,8 +169,7 @@ describe('Auth', () => {
       const stored = await storage.getMeta<StoredAuthSession>('auth');
       expect(stored).toEqual({
         token: 'token-abc',
-        userId: 'usr-1',
-        username: 'charlie',
+        userName: 'charlie',
       });
     });
 
@@ -185,8 +179,7 @@ describe('Auth', () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({
-          userId: 'usr-2',
-          username: 'david',
+          userName: 'david',
           token: 'token-def',
         }),
       });
@@ -198,7 +191,7 @@ describe('Auth', () => {
       });
 
       const success = await auth.register({
-        username: 'david',
+        userName: 'david',
         password: 'password123',
         remember: false,
       });
@@ -212,8 +205,7 @@ describe('Auth', () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({
-          userId: 'usr-guest',
-          username: 'guest_user',
+          userName: 'guest_user',
           token: 'token-guest',
         }),
       });
@@ -226,7 +218,7 @@ describe('Auth', () => {
 
       expect(auth.status).toBe(AuthStatus.SignedOut);
       await auth.register({
-        username: 'guest_user',
+        userName: 'guest_user',
         password: 'password123',
       });
 
@@ -239,15 +231,13 @@ describe('Auth', () => {
       mockFetch.mockResolvedValue({
         ok: true,
         json: async () => ({
-          userId: 'usr-new',
-          username: 'new_user',
+          userName: 'new_user',
           token: 'token-new',
         }),
       });
 
       await storage.setMeta('auth', {
-        userId: 'usr-old',
-        username: 'old_user',
+        userName: 'old_user',
         token: 'token-old',
       });
 
@@ -261,7 +251,7 @@ describe('Auth', () => {
       expect(auth.status).toBe(AuthStatus.SignedIn);
 
       await auth.register({
-        username: 'new_user',
+        userName: 'new_user',
         password: 'password123',
       });
 
@@ -274,8 +264,7 @@ describe('Auth', () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({
-          userId: 'usr-3',
-          username: 'eve',
+          userName: 'eve',
           token: 'token-ghi',
         }),
       });
@@ -287,7 +276,7 @@ describe('Auth', () => {
       });
 
       await auth.register({
-        username: 'eve',
+        userName: 'eve',
         password: 'password123',
         dataMode: DataMode.Clear,
       });
@@ -309,7 +298,7 @@ describe('Auth', () => {
 
       const clearSpy = vi.spyOn(storage, 'clearTables');
       const success = await auth.register({
-        username: 'duplicate',
+        userName: 'duplicate',
         password: 'password123',
         dataMode: DataMode.Clear,
       });
@@ -325,8 +314,7 @@ describe('Auth', () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({
-          userId: 'usr-login',
-          username: 'frank',
+          userName: 'frank',
           token: 'token-frank',
         }),
       });
@@ -338,16 +326,15 @@ describe('Auth', () => {
       });
 
       const success = await auth.login({
-        username: 'frank',
+        userName: 'frank',
         password: 'password123',
         remember: true,
       });
 
       expect(success).toBe(true);
       expect(auth.status).toBe(AuthStatus.SignedIn);
-      expect(auth.username).toBe('frank');
+      expect(auth.userName).toBe('frank');
       expect(auth.token).toBe('token-frank');
-      expect(auth.userId).toBe('usr-login');
 
       const stored = await storage.getMeta<StoredAuthSession>('auth');
       expect(stored?.token).toBe('token-frank');
@@ -355,8 +342,7 @@ describe('Auth', () => {
 
     it('should login using remembered session when username/password not provided', async () => {
       await storage.setMeta('auth', {
-        userId: 'usr-rem',
-        username: 'grace',
+        userName: 'grace',
         token: 'token-grace',
       });
 
@@ -369,7 +355,7 @@ describe('Auth', () => {
       const success = await auth.login();
       expect(success).toBe(true);
       expect(auth.status).toBe(AuthStatus.SignedIn);
-      expect(auth.username).toBe('grace');
+      expect(auth.userName).toBe('grace');
       expect(auth.token).toBe('token-grace');
       expect(mockFetch).not.toHaveBeenCalled();
     });
@@ -393,8 +379,7 @@ describe('Auth', () => {
       mockFetch.mockResolvedValue({
         ok: true,
         json: async () => ({
-          userId: 'u',
-          username: 'u',
+          userName: 'u',
           token: 't',
         }),
       });
@@ -405,7 +390,7 @@ describe('Auth', () => {
         fetchFn: mockFetch as unknown as typeof fetch,
       });
 
-      await auth.login({ username: 'u', password: 'p' });
+      await auth.login({ userName: 'u', password: 'p' });
       expect(clearSpy).toHaveBeenCalledWith(true);
       expect(setMetaSpy).toHaveBeenCalledWith('lastSyncSeq', 0);
     });
@@ -417,8 +402,7 @@ describe('Auth', () => {
       mockFetch.mockResolvedValue({
         ok: true,
         json: async () => ({
-          userId: 'u',
-          username: 'u',
+          userName: 'u',
           token: 't',
         }),
       });
@@ -431,7 +415,7 @@ describe('Auth', () => {
 
       // DataMode.Clear
       await auth.login({
-        username: 'u',
+        userName: 'u',
         password: 'p',
         dataMode: DataMode.Clear,
       });
@@ -441,7 +425,7 @@ describe('Auth', () => {
       clearSpy.mockClear();
       setMetaSpy.mockClear();
       await auth.login({
-        username: 'u',
+        userName: 'u',
         password: 'p',
         dataMode: DataMode.Merge,
       });
@@ -461,7 +445,7 @@ describe('Auth', () => {
         fetchFn: mockFetch as unknown as typeof fetch,
       });
 
-      const success = await auth.login({ username: 'u', password: 'bad' });
+      const success = await auth.login({ userName: 'u', password: 'bad' });
       expect(success).toBe(false);
       expect(auth.status).toBe(AuthStatus.Error);
     });
@@ -471,8 +455,7 @@ describe('Auth', () => {
     it('should reset user credentials and transition to SignedOut', async () => {
       await storage.setMeta('auth', {
         token: 't1',
-        userId: 'u1',
-        username: 'alice',
+        userName: 'alice',
       });
 
       const auth = new Auth({
@@ -490,8 +473,7 @@ describe('Auth', () => {
       const success = await auth.logout();
       expect(success).toBe(true);
       expect(auth.status).toBe(AuthStatus.SignedOut);
-      expect(auth.username).toBeUndefined();
-      expect(auth.userId).toBeUndefined();
+      expect(auth.userName).toBeUndefined();
       expect(auth.token).toBeUndefined();
       expect(await storage.getMeta('auth')).toBeUndefined();
       expect(statuses).toEqual([AuthStatus.SignedOut]);
@@ -530,8 +512,7 @@ describe('Auth', () => {
     it('should handle token refresh in memory and update stored auth metadata', async () => {
       await storage.setMeta('auth', {
         token: 'old-token',
-        userId: 'u-1',
-        username: 'alice',
+        userName: 'alice',
       });
 
       const auth = new Auth({
@@ -547,7 +528,7 @@ describe('Auth', () => {
 
       const updated = await storage.getMeta<StoredAuthSession>('auth');
       expect(updated?.token).toBe('new-refreshed-token');
-      expect(updated?.username).toBe('alice');
+      expect(updated?.userName).toBe('alice');
     });
 
     it('should handle token refresh in memory even if no session was stored in metadata', async () => {
@@ -565,8 +546,7 @@ describe('Auth', () => {
     it('should handle auth error by clearing credentials, metadata, and setting SignedOut', async () => {
       await storage.setMeta('auth', {
         token: 'expired-token',
-        userId: 'u-1',
-        username: 'alice',
+        userName: 'alice',
       });
 
       const auth = new Auth({
@@ -580,7 +560,7 @@ describe('Auth', () => {
       await auth.handleAuthError('Token expired');
 
       expect(auth.status).toBe(AuthStatus.SignedOut);
-      expect(auth.username).toBeUndefined();
+      expect(auth.userName).toBeUndefined();
       expect(auth.token).toBeUndefined();
       expect(await storage.getMeta('auth')).toBeUndefined();
     });
@@ -588,8 +568,7 @@ describe('Auth', () => {
     it('should login using stored metadata session when no credentials are provided', async () => {
       await storage.setMeta('auth', {
         token: 'stored-valid-token',
-        userId: 'u-saved',
-        username: 'saved_user',
+        userName: 'saved_user',
       });
 
       const auth = new Auth({
@@ -602,8 +581,7 @@ describe('Auth', () => {
       expect(result).toBe(true);
       expect(auth.status).toBe(AuthStatus.SignedIn);
       expect(auth.token).toBe('stored-valid-token');
-      expect(auth.username).toBe('saved_user');
-      expect(auth.userId).toBe('u-saved');
+      expect(auth.userName).toBe('saved_user');
     });
 
     it('should return false when login() is called without credentials or stored session', async () => {
@@ -620,8 +598,7 @@ describe('Auth', () => {
 
     it('should return false when stored metadata has no token', async () => {
       await storage.setMeta('auth', {
-        userId: 'u-no-token',
-        username: 'no_token_user',
+        userName: 'no_token_user',
       });
 
       const auth = new Auth({

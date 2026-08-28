@@ -45,17 +45,25 @@ export interface AdminTarget {
 
   /** Retrieves all registered user accounts. */
   getUsers(): Promise<
-    Array<{ id: string; username: string; createdAt: number }>
+    Array<{
+      userId: string;
+      userName: string;
+      createdAt: number;
+    }>
   >;
 
   /** Registers a new user account with credentials. */
   createUser(
-    username: string,
+    userName: string,
     password: string,
-  ): Promise<{ id: string; username: string; createdAt: number }>;
+  ): Promise<{
+    userId: string;
+    userName: string;
+    createdAt: number;
+  }>;
 
   /** Deletes a user account and associated partitions. */
-  deleteUser(id: string): Promise<{ deleted: boolean }>;
+  deleteUser(userId: string): Promise<{ deleted: boolean }>;
 
   /** Retrieves records from a table partition. */
   getRecords(tableName: string, userId?: string): Promise<SnapshotRecord[]>;
@@ -195,20 +203,31 @@ export class AdminClient implements AdminTarget {
   }
 
   async getUsers(): Promise<
-    Array<{ id: string; username: string; createdAt: number }>
+    Array<{
+      userId: string;
+      userName: string;
+      createdAt: number;
+    }>
   > {
     return this.request('GET', '/admin/users');
   }
 
   async createUser(
-    username: string,
+    userName: string,
     password: string,
-  ): Promise<{ id: string; username: string; createdAt: number }> {
-    return this.request('POST', '/admin/users', { username, password });
+  ): Promise<{
+    userId: string;
+    userName: string;
+    createdAt: number;
+  }> {
+    return this.request('POST', '/admin/users', {
+      userName,
+      password,
+    });
   }
 
-  async deleteUser(id: string): Promise<{ deleted: boolean }> {
-    return this.request('DELETE', `/admin/users/${encodeURIComponent(id)}`);
+  async deleteUser(userId: string): Promise<{ deleted: boolean }> {
+    return this.request('DELETE', `/admin/users/${encodeURIComponent(userId)}`);
   }
 
   async getRecords(
@@ -286,10 +305,14 @@ export class AdminClient implements AdminTarget {
 }
 
 /**
- * Local administration target operating directly against an offline Storage backend.
+ * Direct in-memory administration target executing operations directly against a Storage backend.
  */
 export class LocalAdminTarget implements AdminTarget {
-  constructor(readonly storage: Storage) {}
+  private readonly storage: Storage;
+
+  constructor(storage: Storage) {
+    this.storage = storage;
+  }
 
   async getStatus(): Promise<StorageStatus> {
     return this.storage.getStatus();
@@ -328,8 +351,8 @@ export class LocalAdminTarget implements AdminTarget {
         `Table "${name}" not found`,
       );
     }
-    const updatedSettings = await table.updateSettings(settings);
-    return { name: table.name, settings: updatedSettings };
+    const updated = await table.updateSettings(settings);
+    return { name: table.name, settings: updated };
   }
 
   async deleteTable(name: string): Promise<{ deleted: boolean }> {
@@ -345,34 +368,42 @@ export class LocalAdminTarget implements AdminTarget {
   }
 
   async getUsers(): Promise<
-    Array<{ id: string; username: string; createdAt: number }>
+    Array<{
+      userId: string;
+      userName: string;
+      createdAt: number;
+    }>
   > {
     const users = await this.storage.getUsers();
     return users.map((u) => ({
-      id: u.id,
-      username: u.username,
+      userId: u.userId,
+      userName: u.userName,
       createdAt: u.createdAt,
     }));
   }
 
   async createUser(
-    username: string,
+    userName: string,
     password: string,
-  ): Promise<{ id: string; username: string; createdAt: number }> {
-    const user = await this.storage.createUser(username, password);
+  ): Promise<{
+    userId: string;
+    userName: string;
+    createdAt: number;
+  }> {
+    const user = await this.storage.createUser(userName, password);
     return {
-      id: user.id,
-      username: user.username,
+      userId: user.userId,
+      userName: user.userName,
       createdAt: user.createdAt,
     };
   }
 
-  async deleteUser(id: string): Promise<{ deleted: boolean }> {
-    const user = await this.storage.getUser(id);
+  async deleteUser(userId: string): Promise<{ deleted: boolean }> {
+    const user = await this.storage.getUser(userId);
     if (!user) {
       throw new TetherServerError(
         TetherServerErrorCode.NotFound,
-        `User "${id}" not found`,
+        `User "${userId}" not found`,
       );
     }
     await user.delete();
@@ -400,7 +431,7 @@ export class LocalAdminTarget implements AdminTarget {
       timestamp: r.timestamp,
       clientId: r.clientId,
       deleted: r.deleted,
-      ownerId: r.ownerId,
+      userName: r.userName,
     }));
   }
 

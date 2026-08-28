@@ -60,8 +60,8 @@ let currentFilter: FilterMode = FilterMode.All;
 let authMode: AuthMode = AuthMode.Login;
 
 // DOM References
-const currentUsernameEl = document.getElementById(
-  'currentUsername',
+const currentUserNameEl = document.getElementById(
+  'currentUserName',
 ) as HTMLSpanElement;
 const userBadgeBtn = document.getElementById(
   'userBadgeBtn',
@@ -88,15 +88,15 @@ const closeAuthModalBtn = document.getElementById(
 const sessionSection = document.getElementById(
   'sessionSection',
 ) as HTMLDivElement;
-const modalUsername = document.getElementById(
-  'modalUsername',
+const modalUserName = document.getElementById(
+  'modalUserName',
 ) as HTMLSpanElement;
 const logoutBtn = document.getElementById('logoutBtn') as HTMLButtonElement;
 const tabLogin = document.getElementById('tabLogin') as HTMLButtonElement;
 const tabRegister = document.getElementById('tabRegister') as HTMLButtonElement;
 const authForm = document.getElementById('authForm') as HTMLFormElement;
-const authUsername = document.getElementById(
-  'authUsername',
+const authUserName = document.getElementById(
+  'authUserName',
 ) as HTMLInputElement;
 const authPassword = document.getElementById(
   'authPassword',
@@ -138,9 +138,9 @@ function escapeHtml(text: string): string {
  * Updates the user badge text.
  */
 function updateUserUI(): void {
-  currentUsernameEl.textContent =
+  currentUserNameEl.textContent =
     db.authStatus === AuthStatus.SignedIn
-      ? (db.username ?? 'Authenticated User')
+      ? (db.userName ?? 'Authenticated User')
       : 'Offline Guest';
 }
 
@@ -292,12 +292,12 @@ clearCompletedBtn.addEventListener('click', async () => {
 // Auth Modal
 userBadgeBtn.addEventListener('click', () => {
   authError.classList.remove('visible');
-  authUsername.value = '';
+  authUserName.value = '';
   authPassword.value = '';
 
   if (db.authStatus === AuthStatus.SignedIn) {
     sessionSection.style.display = 'block';
-    modalUsername.textContent = db.username ?? 'User';
+    modalUserName.textContent = db.userName ?? 'User';
   } else {
     sessionSection.style.display = 'none';
   }
@@ -334,20 +334,20 @@ authForm.addEventListener('submit', async (e: SubmitEvent) => {
   e.preventDefault();
   authError.classList.remove('visible');
 
-  const username = authUsername.value.trim();
+  const userName = authUserName.value.trim();
   const password = authPassword.value;
 
   try {
     let success = false;
     if (authMode === AuthMode.Register) {
       success = await db.register({
-        username,
+        userName,
         password,
         remember: true,
       });
     } else {
       success = await db.login({
-        username,
+        userName,
         password,
         remember: true,
       });
@@ -408,7 +408,7 @@ async function init(): Promise<void> {
     if (!restored) {
       await db
         .login({
-          username: 'demo',
+          userName: 'demo',
           password: 'password123',
           remember: true,
         })

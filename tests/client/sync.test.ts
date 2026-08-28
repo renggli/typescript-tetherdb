@@ -16,6 +16,7 @@ import {
   type ServerMessage,
   ServerMessageType,
 } from '../../src/shared/types.js';
+import { waitForCondition } from '../helpers.js';
 
 class MockWebSocket {
   static instances: MockWebSocket[] = [];
@@ -339,7 +340,7 @@ describe('Sync', () => {
         ],
       });
 
-      await new Promise((r) => setTimeout(r, 2));
+      await waitForCondition(async () => (await table.get('u1')) !== undefined);
 
       expect(await table.get('u1')).toEqual({ name: 'Alice' });
       expect(tableEvents).toHaveLength(1);

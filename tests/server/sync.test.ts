@@ -93,7 +93,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
     await storage.createTable('notes');
 
     const user = await storage.createUser('alice', 'password123');
-    testUserId = user.id;
+    testUserId = user.userId;
     validToken = await user.createToken();
   });
 
@@ -139,7 +139,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       expect(messages).toHaveLength(2);
       expect(messages[0].type).toBe(ServerMessageType.AuthSuccess);
       if (messages[0].type === ServerMessageType.AuthSuccess) {
-        expect(messages[0].userId).toBe('anonymous');
+        expect(messages[0].userName).toBeUndefined();
       }
     });
 
@@ -182,7 +182,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       // 1. AuthSuccess
       expect(messages[0].type).toBe(ServerMessageType.AuthSuccess);
       if (messages[0].type === ServerMessageType.AuthSuccess) {
-        expect(messages[0].userId).toBe(testUserId);
+        expect(messages[0].userName).toBe('alice');
         expect(messages[0].currentSeq).toBe(0);
         expect(messages[0].token).toBeDefined();
       }

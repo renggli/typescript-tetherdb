@@ -1,7 +1,13 @@
+import * as crypto from 'node:crypto';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   createSessionToken,
+  getOrCreateKeyfileSecret,
   hashPassword,
+  verifyDummyPasswordHash,
   verifyPasswordHash,
   verifySessionToken,
 } from '../../src/server/crypto.js';
@@ -34,7 +40,7 @@ describe('Crypto', () => {
     const payload = verifySessionToken(token, secret);
     expect(payload).toEqual({
       userId: 'user_1',
-      username: 'alice',
+      userName: 'alice',
       expiresAt: expect.any(Number),
     });
   });
@@ -55,25 +61,18 @@ describe('Crypto', () => {
   it('should handle usernames and userIds with colons and special characters safely', () => {
     const secret = 'super-secret-key-123';
     const userId = 'usr:org:12345';
-    const username = 'alice:admin:team';
-    const token = createSessionToken(userId, username, secret, 3600);
+    const userName = 'alice:admin:team';
+    const token = createSessionToken(userId, userName, secret, 3600);
 
     const payload = verifySessionToken(token, secret);
     expect(payload).toEqual({
       userId: 'usr:org:12345',
-      username: 'alice:admin:team',
+      userName: 'alice:admin:team',
       expiresAt: expect.any(Number),
     });
   });
 
   it('should generate and persist keyfile secrets', async () => {
-    const fs = await import('node:fs/promises');
-    const path = await import('node:path');
-    const os = await import('node:os');
-    const { getOrCreateKeyfileSecret } = await import(
-      '../../src/server/crypto.js'
-    );
-
     const tmpDir = path.join(
       os.tmpdir(),
       `tether_crypto_test_${Math.random().toString(36).substring(2, 9)}`,
@@ -97,16 +96,12 @@ describe('Crypto', () => {
   });
 
   it('should safely verify dummy password hashes in constant time', async () => {
-    const { verifyDummyPasswordHash } = await import(
-      '../../src/server/crypto.js'
-    );
     const result = await verifyDummyPasswordHash('anyPassword123');
     expect(result).toBe(false);
   });
 
   it('should reject tokens with valid signature but invalid JSON payload structure', () => {
     const secret = 'super-secret-key-123';
-    const crypto = require('node:crypto');
 
     const signPayload = (payloadStr: string) => {
       const b64 = Buffer.from(payloadStr, 'utf-8').toString('base64url');
@@ -127,7 +122,7 @@ describe('Crypto', () => {
     expect(
       verifySessionToken(
         signPayload(
-          JSON.stringify({ username: 'alice', expiresAt: Date.now() + 10000 }),
+          JSON.stringify({ userName: 'alice', expiresAt: Date.now() + 10000 }),
         ),
         secret,
       ),
@@ -139,7 +134,7 @@ describe('Crypto', () => {
         signPayload(
           JSON.stringify({
             userId: 'u1',
-            username: 'alice',
+            userName: 'alice',
             expiresAt: 'not-a-number',
           }),
         ),

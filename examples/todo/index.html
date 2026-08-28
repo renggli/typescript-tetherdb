@@ -16,7 +16,7 @@
         </div>
         <button type="button" id="userBadgeBtn" class="user-badge" title="Click to switch account">
           <span>👤</span>
-          <span id="currentUsername">Offline Guest</span>
+          <span id="currentUserName">Offline Guest</span>
         </button>
       </div>
 
@@ -86,7 +86,7 @@
 
     <div id="sessionSection" style="display: none;">
       <div class="modal-user-info">
-        <span>Logged in as <strong id="modalUsername">demo</strong></span>
+        <span>Logged in as <strong id="modalUserName">demo</strong></span>
         <button type="button" id="logoutBtn" class="btn btn-danger">Sign Out</button>
       </div>
       <hr class="modal-divider">
@@ -101,8 +101,8 @@
 
     <form id="authForm" class="modal-form">
       <div class="form-group">
-        <label for="authUsername">Username</label>
-        <input type="text" id="authUsername" required minlength="2" autocomplete="username">
+        <label for="authUserName">Username</label>
+        <input type="text" id="authUserName" required minlength="2" autocomplete="username">
       </div>
 
       <div class="form-group">

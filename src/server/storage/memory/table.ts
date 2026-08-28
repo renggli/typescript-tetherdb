@@ -32,7 +32,7 @@ export class TableMemoryStorage extends TableBaseStorage<MemoryStorage> {
     if (!canRead(this, user)) {
       return undefined;
     }
-    const tableMap = this.storage.getTableRecordsMap(this.name, user?.id);
+    const tableMap = this.storage.getTableRecordsMap(this.name, user?.userId);
     const record = tableMap?.get(safeId);
 
     if (!record || record.deleted) {
@@ -46,7 +46,7 @@ export class TableMemoryStorage extends TableBaseStorage<MemoryStorage> {
     if (!canRead(this, user)) {
       return [];
     }
-    const tableMap = this.storage.getTableRecordsMap(this.name, user?.id);
+    const tableMap = this.storage.getTableRecordsMap(this.name, user?.userId);
     return tableMap ? filterActiveRecords(this.name, tableMap.values()) : [];
   }
 }

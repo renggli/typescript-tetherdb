@@ -98,7 +98,7 @@ function printRecords(
   for (const r of records) {
     const dataStr =
       typeof r.data === 'object' ? JSON.stringify(r.data) : String(r.data);
-    const ownerStr = r.ownerId ? ` [owner: ${r.ownerId}]` : '';
-    console.log(`  • [${r.id}] v${r.version}${ownerStr}: ${dataStr}`);
+    const userStr = r.userName ? ` [user: ${r.userName}]` : '';
+    console.log(`  • [${r.id}] v${r.version}${userStr}: ${dataStr}`);
   }
 }

@@ -10,16 +10,16 @@ import type { SqliteStorage, SqliteUserData } from './storage.js';
  */
 export class UserSqliteStorage extends UserBaseStorage<SqliteStorage> {
   constructor(data: SqliteUserData, storage: SqliteStorage) {
-    super(data.id, data.username, data.createdAt, storage);
+    super(data.userId, data.userName, data.createdAt, storage);
   }
 
   async verifyPassword(password: string): Promise<boolean> {
-    const user = this.storage.findUserDataById(this.id);
+    const user = this.storage.findUserDataById(this.userId);
     return verifyUserPassword(password, user?.passwordHash);
   }
 
   async changePassword(newPassword: string): Promise<void> {
     const newHash = await hashUserPassword(newPassword);
-    this.storage.updateUserData(this.id, newHash);
+    this.storage.updateUserData(this.userId, newHash);
   }
 }

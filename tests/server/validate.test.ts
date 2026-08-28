@@ -7,17 +7,17 @@ import {
   calculateByteSize,
   getUserBucket,
   MAX_PASSWORD_LENGTH,
-  MAX_USERNAME_LENGTH,
+  MAX_USER_NAME_LENGTH,
   MIN_PASSWORD_LENGTH,
-  MIN_USERNAME_LENGTH,
-  normalizeUsername,
+  MIN_USER_NAME_LENGTH,
+  normalizeUserName,
   validateIdentifier,
   validatePassword,
   validateRecordId,
   validateTableName,
   validateTimestamp,
   validateUserId,
-  validateUsername,
+  validateUserName,
 } from '../../src/server/validate.js';
 
 describe('Validation', () => {
@@ -85,13 +85,13 @@ describe('Validation', () => {
       expect(validateRecordId('a:b:c')).toBe('a:b:c');
       expect(validateRecordId('__proto__')).toBe('__proto__');
       expect(validateRecordId('prototype')).toBe('prototype');
-      expect(validateRecordId('a'.repeat(512))).toBe('a'.repeat(512));
+      expect(validateRecordId('a'.repeat(256))).toBe('a'.repeat(256));
     });
 
     it('should reject empty or overly long record IDs or non-string inputs', () => {
       expect(() => validateRecordId('')).toThrow(TetherServerError);
       expect(() => validateRecordId('')).toThrow('Invalid record ID');
-      expect(() => validateRecordId('x'.repeat(513))).toThrow(
+      expect(() => validateRecordId('x'.repeat(257))).toThrow(
         TetherServerError,
       );
       // @ts-expect-error Testing non-string handling
@@ -101,53 +101,54 @@ describe('Validation', () => {
     });
   });
 
-  describe('normalizeUsername', () => {
+  describe('normalizeUserName', () => {
     it('should trim whitespace and convert to lowercase', () => {
-      expect(normalizeUsername('  Alice  ')).toBe('alice');
-      expect(normalizeUsername('Bob_Builder-99.X')).toBe('bob_builder-99.x');
+      expect(normalizeUserName('  Alice  ')).toBe('alice');
+      expect(normalizeUserName('Bob_Builder-99.X')).toBe('bob_builder-99.x');
     });
 
     it('should safely handle non-string or empty inputs', () => {
-      expect(normalizeUsername('')).toBe('');
+      expect(normalizeUserName('')).toBe('');
       // @ts-expect-error Testing runtime non-string handling
-      expect(normalizeUsername(null)).toBe('');
+      expect(normalizeUserName(null)).toBe('');
       // @ts-expect-error Testing runtime non-string handling
-      expect(normalizeUsername(undefined)).toBe('');
+      expect(normalizeUserName(undefined)).toBe('');
     });
   });
 
-  describe('validateUsername', () => {
+  describe('validateUserName', () => {
     it('should accept valid usernames (including emails, symbols, keywords) and normalize to lowercase', () => {
-      expect(validateUsername('  Alice  ')).toBe('alice');
-      expect(validateUsername('user@example.com')).toBe('user@example.com');
-      expect(validateUsername('John.Doe-99_x')).toBe('john.doe-99_x');
-      expect(validateUsername('user with spaces')).toBe('user with spaces');
-      expect(validateUsername('__proto__')).toBe('__proto__');
-      expect(validateUsername('PROTOTYPE')).toBe('prototype');
-      expect(validateUsername('Constructor')).toBe('constructor');
-      expect(validateUsername('a'.repeat(MIN_USERNAME_LENGTH))).toBe('aaaa');
-      expect(validateUsername('a'.repeat(MAX_USERNAME_LENGTH))).toBe(
+      expect(validateUserName('  Alice  ')).toBe('alice');
+      expect(validateUserName('user@example.com')).toBe('user@example.com');
+      expect(validateUserName('John.Doe-99_x')).toBe('john.doe-99_x');
+      expect(validateUserName('user with spaces')).toBe('user with spaces');
+      expect(validateUserName('__proto__')).toBe('__proto__');
+      expect(validateUserName('PROTOTYPE')).toBe('prototype');
+      expect(validateUserName('Constructor')).toBe('constructor');
+      expect(validateUserName('a'.repeat(MIN_USER_NAME_LENGTH))).toBe('aaa');
+      expect(validateUserName('bob')).toBe('bob');
+      expect(validateUserName('a'.repeat(MAX_USER_NAME_LENGTH))).toBe(
         'a'.repeat(128),
       );
     });
 
     it('should reject usernames outside the min/max length boundaries', () => {
-      expect(() => validateUsername('a')).toThrow(TetherServerError);
-      expect(() => validateUsername('a')).toThrow('between 4 and 128');
-      expect(() => validateUsername('abc')).toThrow(TetherServerError);
-      expect(() => validateUsername('')).toThrow(TetherServerError);
+      expect(() => validateUserName('a')).toThrow(TetherServerError);
+      expect(() => validateUserName('a')).toThrow('between 3 and 128');
+      expect(() => validateUserName('ab')).toThrow(TetherServerError);
+      expect(() => validateUserName('')).toThrow(TetherServerError);
       expect(() =>
-        validateUsername('a'.repeat(MAX_USERNAME_LENGTH + 1)),
+        validateUserName('a'.repeat(MAX_USER_NAME_LENGTH + 1)),
       ).toThrow(TetherServerError);
     });
 
     it('should reject non-string username inputs', () => {
       // @ts-expect-error Testing runtime non-string validation
-      expect(() => validateUsername(null)).toThrow(TetherServerError);
+      expect(() => validateUserName(null)).toThrow(TetherServerError);
       // @ts-expect-error Testing runtime non-string validation
-      expect(() => validateUsername(undefined)).toThrow(TetherServerError);
+      expect(() => validateUserName(undefined)).toThrow(TetherServerError);
       // @ts-expect-error Testing runtime non-string validation
-      expect(() => validateUsername(12345)).toThrow(TetherServerError);
+      expect(() => validateUserName(12345)).toThrow(TetherServerError);
     });
   });
 

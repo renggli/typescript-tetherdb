@@ -4,7 +4,8 @@ import {
   TetherServerError,
   TetherServerErrorCode,
 } from '../../src/server/errors.js';
-import { TetherServer } from '../../src/server/server.js';
+import { startServer, TetherServer } from '../../src/server/server.js';
+import { Permission } from '../../src/shared/types.js';
 import { type StorageContext, storageDescriptors } from './storage/matrix.js';
 
 describe.each(storageDescriptors)(
@@ -41,6 +42,58 @@ describe.each(storageDescriptors)(
         expect(table).toBeDefined();
         expect(table?.settings.maxRecords).toBe(200);
       });
+
+      it('should declaratively populate rows into a table and resolve userName', async () => {
+        const alice = await server.declareUser('alice', 'pass123');
+        await server.declareTable('categories', {
+          permissions: { read: Permission.Everybody },
+          rows: [
+            { id: 'cat-1', data: { name: 'Tech' }, userName: 'alice' },
+            { id: 'cat-2', data: { name: 'General' } },
+          ],
+        });
+
+        const table = await server.storage.getTable('categories');
+        expect(table).toBeDefined();
+
+        const records = await table?.getAllRecords();
+        expect(records).toHaveLength(2);
+
+        const r1 = records?.find((r) => r.id === 'cat-1');
+        expect(r1?.data).toEqual({ name: 'Tech' });
+        // @ts-expect-error - internal storage check
+        expect(r1?.userId).toBe(alice.userId);
+        expect(r1?.clientId).toBeUndefined();
+
+        const r2 = records?.find((r) => r.id === 'cat-2');
+        expect(r2?.data).toEqual({ name: 'General' });
+        // @ts-expect-error - internal storage check
+        expect(r2?.userId).toBeUndefined();
+        expect(r2?.clientId).toBeUndefined();
+
+        // Idempotency: second declare with rows should not duplicate existing records, and unknown users should not set userId
+        const bob = await server.declareUser('bob', 'pass123');
+        await server.declareTable('categories', {
+          permissions: { read: Permission.Everybody },
+          rows: [
+            { id: 'cat-1', data: { name: 'Tech' }, userName: 'alice' },
+            { id: 'cat-3', data: { name: 'News' }, userName: 'bob' },
+            { id: 'cat-4', data: { name: 'Random' }, userName: 'nonexistent' },
+          ],
+        });
+
+        const updatedRecords = await table?.getAllRecords();
+        expect(updatedRecords).toHaveLength(4);
+        const r3 = updatedRecords?.find((r) => r.id === 'cat-3');
+        // @ts-expect-error - internal storage check
+        expect(r3?.userId).toBe(bob.userId);
+        expect(r3?.clientId).toBeUndefined();
+
+        const r4 = updatedRecords?.find((r) => r.id === 'cat-4');
+        // @ts-expect-error - internal storage check
+        expect(r4?.userId).toBeUndefined();
+        expect(r4?.clientId).toBeUndefined();
+      });
     });
 
     describe('declareUser', () => {
@@ -48,31 +101,31 @@ describe.each(storageDescriptors)(
         const user = await server.declareUser('alice', 'initial_pass_123');
 
         expect(user).toBeDefined();
-        expect(user.id).toBeDefined();
-        expect(user.username).toBe('alice');
+        expect(user.userId).toBeDefined();
+        expect(user.userName).toBe('alice');
 
         expect(await user.verifyPassword('initial_pass_123')).toBe(true);
         expect(await user.verifyPassword('wrong_password')).toBe(false);
 
-        const retrieved = await server.storage.getUserByUsername('alice');
-        expect(retrieved?.id).toBe(user.id);
+        const retrieved = await server.storage.getUserByUserName('alice');
+        expect(retrieved?.userId).toBe(user.userId);
       });
 
       it('should update the password of an existing user and keep the same user id', async () => {
         const initialUser = await server.declareUser('bobby', 'password_v1');
-        expect(initialUser.username).toBe('bobby');
+        expect(initialUser.userName).toBe('bobby');
         expect(await initialUser.verifyPassword('password_v1')).toBe(true);
 
         const updatedUser = await server.declareUser('bobby', 'password_v2');
-        expect(updatedUser.id).toBe(initialUser.id);
-        expect(updatedUser.username).toBe('bobby');
+        expect(updatedUser.userId).toBe(initialUser.userId);
+        expect(updatedUser.userName).toBe('bobby');
 
         // Verify old password fails and new password works
         expect(await updatedUser.verifyPassword('password_v1')).toBe(false);
         expect(await updatedUser.verifyPassword('password_v2')).toBe(true);
 
         // Verify through storage lookup
-        const retrieved = await server.storage.getUserByUsername('bobby');
+        const retrieved = await server.storage.getUserByUserName('bobby');
         expect(retrieved).toBeDefined();
         expect(await retrieved?.verifyPassword('password_v1')).toBe(false);
         expect(await retrieved?.verifyPassword('password_v2')).toBe(true);
@@ -89,7 +142,7 @@ describe.each(storageDescriptors)(
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            username: 'evelyn',
+            userName: 'evelyn',
             password: 'evelyn_secret_pwd',
           }),
         });
@@ -97,10 +150,10 @@ describe.each(storageDescriptors)(
         expect(res.status).toBe(200);
         const data = (await res.json()) as {
           userId: string;
-          username: string;
+          userName: string;
           token: string;
         };
-        expect(data.username).toBe('evelyn');
+        expect(data.userName).toBe('evelyn');
         expect(data.token).toBeDefined();
 
         // Change password via declareUser
@@ -111,7 +164,7 @@ describe.each(storageDescriptors)(
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            username: 'evelyn',
+            userName: 'evelyn',
             password: 'evelyn_secret_pwd',
           }),
         });
@@ -122,14 +175,14 @@ describe.each(storageDescriptors)(
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            username: 'evelyn',
+            userName: 'evelyn',
             password: 'evelyn_new_pwd',
           }),
         });
         expect(successRes.status).toBe(200);
         const successData = (await successRes.json()) as {
           userId: string;
-          username: string;
+          userName: string;
           token: string;
         };
         expect(successData.userId).toBe(data.userId);
@@ -148,13 +201,13 @@ describe.each(storageDescriptors)(
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            username: 'default_path_user',
+            userName: 'default_path_user',
             password: 'password123',
           }),
         });
         expect(res.status).toBe(201);
-        const data = (await res.json()) as { username: string };
-        expect(data.username).toBe('default_path_user');
+        const data = (await res.json()) as { userName: string };
+        expect(data.userName).toBe('default_path_user');
       });
 
       it('should prefix all REST endpoints and default WebSocket path when basePath is configured', async () => {
@@ -178,7 +231,7 @@ describe.each(storageDescriptors)(
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                username: 'pathuser',
+                userName: 'pathuser',
                 password: 'pathpassword123',
               }),
             },
@@ -192,17 +245,17 @@ describe.each(storageDescriptors)(
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                username: 'pathuser',
+                userName: 'pathuser',
                 password: 'pathpassword123',
               }),
             },
           );
           expect(regRes.status).toBe(201);
           const regData = (await regRes.json()) as {
-            username: string;
+            userName: string;
             token: string;
           };
-          expect(regData.username).toBe('pathuser');
+          expect(regData.userName).toBe('pathuser');
 
           // Login user on custom base path
           const loginRes = await fetch(
@@ -211,7 +264,7 @@ describe.each(storageDescriptors)(
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                username: 'pathuser',
+                userName: 'pathuser',
                 password: 'pathpassword123',
               }),
             },
@@ -257,7 +310,6 @@ describe.each(storageDescriptors)(
         process.env.PORT = '0';
 
         try {
-          const { startServer } = await import('../../src/server/server.js');
           const running = await startServer({
             host: '127.0.0.1',
             storage: storageContext.storage,
@@ -320,7 +372,7 @@ describe.each(storageDescriptors)(
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            username: 'validuser',
+            userName: 'validuser',
             password: 'password123',
           }),
         });
@@ -339,7 +391,7 @@ describe.each(storageDescriptors)(
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              username: 'validuser',
+              userName: 'validuser',
               password: 'password123',
             }),
           },
@@ -359,7 +411,7 @@ describe.each(storageDescriptors)(
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              username: 'validuser',
+              userName: 'validuser',
               password: 'password123',
             }),
           },
@@ -379,7 +431,7 @@ describe.each(storageDescriptors)(
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              username: 'validuser',
+              userName: 'validuser',
               password: 'password123',
             }),
           },
@@ -399,7 +451,7 @@ describe.each(storageDescriptors)(
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              username: 'validuser',
+              userName: 'validuser',
               password: 'password123',
             }),
           },
@@ -416,7 +468,7 @@ describe.each(storageDescriptors)(
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              username: 'validuser',
+              userName: 'validuser',
               password: 'password123',
             }),
           },
@@ -515,7 +567,7 @@ describe.each(storageDescriptors)(
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              username: 'new_user',
+              userName: 'new_user',
               password: 'secure_password_123',
             }),
           });
@@ -542,7 +594,7 @@ describe.each(storageDescriptors)(
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              username: 'reg_user1',
+              userName: 'reg_user1',
               password: 'password1',
             }),
           });
@@ -553,7 +605,7 @@ describe.each(storageDescriptors)(
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              username: 'reg_user2',
+              userName: 'reg_user2',
               password: 'password2',
             }),
           });
@@ -564,7 +616,7 @@ describe.each(storageDescriptors)(
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              username: 'reg_user3',
+              userName: 'reg_user3',
               password: 'password3',
             }),
           });
@@ -593,7 +645,7 @@ describe.each(storageDescriptors)(
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              username: 'target_user',
+              userName: 'target_user',
               password: 'wrong_password_1',
             }),
           });
@@ -604,7 +656,7 @@ describe.each(storageDescriptors)(
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              username: 'target_user',
+              userName: 'target_user',
               password: 'wrong_password_2',
             }),
           });
@@ -615,7 +667,7 @@ describe.each(storageDescriptors)(
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              username: 'target_user',
+              userName: 'target_user',
               password: 'correct_password',
             }),
           });
@@ -649,7 +701,7 @@ describe.each(storageDescriptors)(
                 'X-Forwarded-For': '198.51.100.1',
               },
               body: JSON.stringify({
-                username: 'target_user',
+                userName: 'target_user',
                 password: 'wrong_password',
               }),
             });
@@ -666,7 +718,7 @@ describe.each(storageDescriptors)(
                 'X-Forwarded-For': '198.51.100.1',
               },
               body: JSON.stringify({
-                username: 'target_user',
+                userName: 'target_user',
                 password: 'correct_password',
               }),
             },
@@ -681,7 +733,7 @@ describe.each(storageDescriptors)(
               'X-Forwarded-For': '203.0.113.50',
             },
             body: JSON.stringify({
-              username: 'target_user',
+              userName: 'target_user',
               password: 'correct_password',
             }),
           });
@@ -708,7 +760,7 @@ describe.each(storageDescriptors)(
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              username: 'alice_user',
+              userName: 'alice_user',
               password: 'wrong_password',
             }),
           });
@@ -719,7 +771,7 @@ describe.each(storageDescriptors)(
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              username: 'alice_user',
+              userName: 'alice_user',
               password: 'correct_password',
             }),
           });
@@ -730,7 +782,7 @@ describe.each(storageDescriptors)(
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              username: 'alice_user',
+              userName: 'alice_user',
               password: 'wrong_password_again',
             }),
           });
@@ -759,7 +811,7 @@ describe.each(storageDescriptors)(
               'X-Forwarded-For': '198.51.100.1',
             },
             body: JSON.stringify({
-              username: 'bob_user',
+              userName: 'bob_user',
               password: 'wrong_password',
             }),
           });
@@ -773,7 +825,7 @@ describe.each(storageDescriptors)(
               'X-Forwarded-For': '198.51.100.2',
             },
             body: JSON.stringify({
-              username: 'bob_user',
+              userName: 'bob_user',
               password: 'wrong_password',
             }),
           });
@@ -787,7 +839,7 @@ describe.each(storageDescriptors)(
               'X-Forwarded-For': '198.51.100.3',
             },
             body: JSON.stringify({
-              username: 'bob_user',
+              userName: 'bob_user',
               password: 'wrong_password',
             }),
           });
@@ -819,7 +871,7 @@ describe.each(storageDescriptors)(
                 'X-Forwarded-For': '203.0.113.195',
               },
               body: JSON.stringify({
-                username: 'charlie_user',
+                userName: 'charlie_user',
                 password: 'wrong_password',
               }),
             });
@@ -834,7 +886,7 @@ describe.each(storageDescriptors)(
               'X-Forwarded-For': '203.0.113.195',
             },
             body: JSON.stringify({
-              username: 'charlie_user',
+              userName: 'charlie_user',
               password: 'wrong_password',
             }),
           });
@@ -848,7 +900,7 @@ describe.each(storageDescriptors)(
               'X-Forwarded-For': '203.0.113.196',
             },
             body: JSON.stringify({
-              username: 'charlie_user',
+              userName: 'charlie_user',
               password: 'wrong_password',
             }),
           });
@@ -876,7 +928,7 @@ describe.each(storageDescriptors)(
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              username: 'target_user',
+              userName: 'target_user',
               password: 'wrong_password',
             }),
           });
@@ -887,7 +939,7 @@ describe.each(storageDescriptors)(
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              username: 'target_user',
+              userName: 'target_user',
               password: 'wrong_password',
             }),
           });
@@ -898,7 +950,7 @@ describe.each(storageDescriptors)(
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              username: 'target_user',
+              userName: 'target_user',
               password: 'wrong_password',
             }),
           });
@@ -1065,7 +1117,7 @@ describe.each(storageDescriptors)(
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              username: 'testuser',
+              userName: 'testuser',
               password: 'password123',
             }),
           });
@@ -1156,17 +1208,17 @@ describe.each(storageDescriptors)(
             method: 'POST',
             headers: authHeader,
             body: JSON.stringify({
-              username: 'admin_created_user',
+              userName: 'admin_created_user',
               password: 'password123',
             }),
           },
         );
         expect(createUserRes.status).toBe(201);
         const userData = (await createUserRes.json()) as {
-          id: string;
-          username: string;
+          userId: string;
+          userName: string;
         };
-        expect(userData.username).toBe('admin_created_user');
+        expect(userData.userName).toBe('admin_created_user');
 
         // 4. Put record via POST /admin/records
         const putRecordRes = await fetch(
@@ -1178,7 +1230,7 @@ describe.each(storageDescriptors)(
               table: 'customers',
               id: 'c1',
               data: { name: 'Acme Corp' },
-              userId: userData.id,
+              userId: userData.userId,
             }),
           },
         );
@@ -1186,7 +1238,7 @@ describe.each(storageDescriptors)(
 
         // 5. Query records via GET /admin/records
         const getRecordsRes = await fetch(
-          `http://127.0.0.1:${port}/admin/records?table=customers&userId=${userData.id}`,
+          `http://127.0.0.1:${port}/admin/records?table=customers&userId=${userData.userId}`,
           {
             headers: authHeader,
           },
@@ -1258,7 +1310,7 @@ describe('TetherServer Standalone Lifecycle & Error Mapping', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          username: 'non_existent_user',
+          userName: 'non_existent_user',
           password: 'some_password',
         }),
       });
@@ -1298,7 +1350,7 @@ describe('TetherServer Standalone Lifecycle & Error Mapping', () => {
       const resReg = await fetch(`http://127.0.0.1:${port}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'only_username' }),
+        body: JSON.stringify({ userName: 'only_username' }),
       });
       expect(resReg.status).toBe(400);
 
@@ -1325,7 +1377,7 @@ describe('TetherServer Standalone Lifecycle & Error Mapping', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          username: 'huge_user',
+          userName: 'huge_user',
           password: hugeString,
         }),
       });
@@ -1338,7 +1390,6 @@ describe('TetherServer Standalone Lifecycle & Error Mapping', () => {
   });
 
   it('should support startServer with PORT environment variable fallback', async () => {
-    const { startServer } = await import('../../src/server/server.js');
     const originalPort = process.env.PORT;
     process.env.PORT = '0';
 

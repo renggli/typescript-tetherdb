@@ -53,24 +53,27 @@ describe('AdminTarget (LocalAdminTarget & AdminClient)', () => {
 
     // 2. User CRUD
     const user = await localTarget.createUser('alice', 'password123');
-    expect(user.username).toBe('alice');
+    expect(user.userName).toBe('alice');
     const users = await localTarget.getUsers();
-    expect(users.map((u) => u.username)).toContain('alice');
+    expect(users.map((u) => u.userName)).toContain('alice');
 
     // 3. Record CRUD
     await localTarget.putRecord(
       'tasks',
       'rec-1',
       { title: 'First Task' },
-      user.id,
+      user.userId,
     );
-    const records = await localTarget.getRecords('tasks', user.id);
+    const records = await localTarget.getRecords('tasks', user.userId);
     expect(records).toHaveLength(1);
     expect(records[0].id).toBe('rec-1');
     expect(records[0].data).toEqual({ title: 'First Task' });
 
-    await localTarget.deleteRecord('tasks', 'rec-1', user.id);
-    const recordsAfterDelete = await localTarget.getRecords('tasks', user.id);
+    await localTarget.deleteRecord('tasks', 'rec-1', user.userId);
+    const recordsAfterDelete = await localTarget.getRecords(
+      'tasks',
+      user.userId,
+    );
     expect(recordsAfterDelete).toHaveLength(0);
 
     // 4. Maintenance & Status
@@ -88,7 +91,7 @@ describe('AdminTarget (LocalAdminTarget & AdminClient)', () => {
     expect(pruneRes.action).toBe('prune');
 
     // Cleanup
-    await localTarget.deleteUser(user.id);
+    await localTarget.deleteUser(user.userId);
     await localTarget.deleteTable('tasks');
     expect(await localTarget.getTable('tasks')).toBeUndefined();
   });
@@ -116,26 +119,26 @@ describe('AdminTarget (LocalAdminTarget & AdminClient)', () => {
 
     // 2. User CRUD
     const user = await remoteTarget.createUser('bobby', 'secretpass');
-    expect(user.username).toBe('bobby');
+    expect(user.userName).toBe('bobby');
     const users = await remoteTarget.getUsers();
-    expect(users.map((u) => u.username)).toContain('bobby');
+    expect(users.map((u) => u.userName)).toContain('bobby');
 
     // 3. Record CRUD
     await remoteTarget.putRecord(
       'remotetasks',
       'rec-remote',
       { title: 'Remote Task' },
-      user.id,
+      user.userId,
     );
-    const records = await remoteTarget.getRecords('remotetasks', user.id);
+    const records = await remoteTarget.getRecords('remotetasks', user.userId);
     expect(records).toHaveLength(1);
     expect(records[0].id).toBe('rec-remote');
     expect(records[0].data).toEqual({ title: 'Remote Task' });
 
-    await remoteTarget.deleteRecord('remotetasks', 'rec-remote', user.id);
+    await remoteTarget.deleteRecord('remotetasks', 'rec-remote', user.userId);
     const recordsAfterDelete = await remoteTarget.getRecords(
       'remotetasks',
-      user.id,
+      user.userId,
     );
     expect(recordsAfterDelete).toHaveLength(0);
 
@@ -154,7 +157,7 @@ describe('AdminTarget (LocalAdminTarget & AdminClient)', () => {
     expect(pruneRes.action).toBe('prune');
 
     // Cleanup
-    await remoteTarget.deleteUser(user.id);
+    await remoteTarget.deleteUser(user.userId);
     await remoteTarget.deleteTable('remotetasks');
     expect(await remoteTarget.getTable('remotetasks')).toBeUndefined();
   });

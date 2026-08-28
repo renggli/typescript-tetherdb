@@ -50,7 +50,7 @@ describe('TetherClient', () => {
       clientsToClose.push(client);
 
       expect(client.authStatus).toBe(AuthStatus.SignedOut);
-      expect(client.username).toBeUndefined();
+      expect(client.userName).toBeUndefined();
       expect(client.syncStatus).toBe(SyncStatus.Disconnected);
     });
 
@@ -261,7 +261,7 @@ describe('TetherClient', () => {
         ok: true,
         json: async () => ({
           userId: 'u1',
-          username: 'alice',
+          userName: 'alice',
           token: 'token-123',
         }),
       });
@@ -282,13 +282,13 @@ describe('TetherClient', () => {
       client.onAuthStatusChange.register((s) => authEvents.push(s));
 
       const success = await client.register({
-        username: 'alice',
+        userName: 'alice',
         password: 'password123',
       });
 
       expect(success).toBe(true);
       expect(client.authStatus).toBe(AuthStatus.SignedIn);
-      expect(client.username).toBe('alice');
+      expect(client.userName).toBe('alice');
       expect(authEvents).toContain(AuthStatus.SignedIn);
       expect(connectSpy).toHaveBeenCalledWith('token-123');
 
@@ -352,14 +352,14 @@ describe('TetherClient', () => {
       // @ts-expect-error - inspecting internal auth
       const logoutSpy = vi.spyOn(client.auth, 'logout').mockResolvedValue(true);
 
-      await client.register({ username: 'u', password: 'p' });
+      await client.register({ userName: 'u', password: 'p' });
       expect(registerSpy).toHaveBeenCalledWith({
-        username: 'u',
+        userName: 'u',
         password: 'p',
       });
 
-      await client.login({ username: 'u', password: 'p' });
-      expect(loginSpy).toHaveBeenCalledWith({ username: 'u', password: 'p' });
+      await client.login({ userName: 'u', password: 'p' });
+      expect(loginSpy).toHaveBeenCalledWith({ userName: 'u', password: 'p' });
 
       await client.logout();
       expect(logoutSpy).toHaveBeenCalledWith({});
@@ -438,6 +438,22 @@ describe('TetherClient', () => {
 
       const user = await email.get('alice@example.com');
       expect(user).toEqual({ email: 'alice@example.com', name: 'Alice' });
+    });
+
+    it('should attribute active userName to local records and mutations', async () => {
+      const dbName = `user-author-test-${Math.random().toString(36).substring(2, 8)}`;
+      const client = new TetherClient({ name: dbName });
+      clientsToClose.push(client);
+
+      // @ts-expect-error - set current user for test
+      client.storage.setCurrentUser('alice');
+
+      const posts = client.table<{ title: string }>('posts');
+      await posts.put('p1', { title: 'First Post' });
+
+      const record = await posts.getWithMetadata('p1');
+      expect(record?.data).toEqual({ title: 'First Post' });
+      expect(record?.userName).toBe('alice');
     });
   });
 });

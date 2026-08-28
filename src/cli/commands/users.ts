@@ -34,7 +34,7 @@ export async function handleUsersCommand(
       );
     }
     const user = await target.createUser(arg1, arg2);
-    console.log(`Created user: [${user.id}] ${user.username}`);
+    console.log(`Created user: [${user.userId}] ${user.userName}`);
     return;
   }
 
@@ -57,7 +57,11 @@ export async function handleUsersCommand(
 }
 
 function printUsers(
-  users: Array<{ id: string; username: string; createdAt: number }>,
+  users: Array<{
+    userId: string;
+    userName: string;
+    createdAt: number;
+  }>,
 ): void {
   if (!users.length) {
     console.log('No registered users found.');
@@ -66,7 +70,7 @@ function printUsers(
   console.log(`Registered users (${users.length}):`);
   for (const u of users) {
     console.log(
-      `  • [${u.id}] ${u.username} (created: ${new Date(u.createdAt).toISOString()})`,
+      `  • [${u.userId}] ${u.userName} (created: ${new Date(u.createdAt).toISOString()})`,
     );
   }
 }

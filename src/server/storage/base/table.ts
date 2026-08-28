@@ -5,10 +5,11 @@ import {
   type SnapshotRecord,
   type StoredRecord,
   type TablePermissions,
+  type TableRow,
   type TableSettings,
 } from '../../../shared/types.js';
 import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
-import type { TableStorage } from '../table.js';
+import type { ApplyChangesOptions, TableStorage } from '../table.js';
 import type { UserStorage } from '../user.js';
 import type { BaseStorage } from './storage.js';
 
@@ -56,12 +57,55 @@ export abstract class TableBaseStorage<
   async applyChanges(
     user: UserStorage | undefined,
     changes: ChangeRecord[],
+    options?: ApplyChangesOptions,
   ): Promise<{ applied: ChangeRecord[]; newSeq: number }> {
     const targeted = changes.map((c) => ({
       ...c,
       table: this.name,
     }));
-    return this.storage.applyChanges(user, targeted);
+    return this.storage.applyChanges(user, targeted, options);
+  }
+
+  /**
+   * Inserts initial rows into this table if they do not already exist.
+   * Resolves userName on each row to the corresponding user ID.
+   *
+   * @param rows - Array of table rows to insert.
+   * @returns Number of new rows inserted.
+   */
+  async insertRows(rows: TableRow[]): Promise<number> {
+    if (rows.length === 0) return 0;
+    const existing = await this.getAllRecords();
+    const existingIds = new Set(existing.map((r) => r.id));
+    const toInsert = rows.filter((r) => !existingIds.has(r.id));
+    if (toInsert.length === 0) return 0;
+
+    const now = Date.now();
+    for (const item of toInsert) {
+      let authorUser: UserStorage | undefined;
+      let userName: string | undefined;
+      if (item.userName) {
+        const user = await this.storage.getUserByUserName(item.userName);
+        if (user) {
+          authorUser = user;
+          userName = user.userName;
+        }
+      }
+      const change: ChangeRecord = {
+        table: this.name,
+        id: item.id,
+        op: OperationType.Put,
+        data: item.data,
+        timestamp: now,
+      };
+      if (userName !== undefined) {
+        change.userName = userName;
+      }
+      await this.applyChanges(authorUser, [change], {
+        skipPermissionCheck: true,
+      });
+    }
+    return toInsert.length;
   }
 
   async delete(): Promise<boolean> {
@@ -108,6 +152,52 @@ export function filterActiveRecords(
   return items;
 }
 
+// -- Helpers ----------------------------------------------------------------
+
+/**
+ * Validates that an array of change records conforms to payload schemas and table constraints.
+ */
+export function validateChanges(
+  table: TableStorage,
+  changes: ChangeRecord[],
+): void {
+  for (const change of changes) {
+    if (
+      change.table &&
+      change.table.toLowerCase() !== table.name.toLowerCase()
+    ) {
+      throw new TetherServerError(
+        TetherServerErrorCode.InvalidInput,
+        `Change table "${change.table}" does not match target table "${table.name}"`,
+      );
+    }
+    // validateRecordPayload(table, change.data);
+  }
+}
+
+/**
+ * Filters and maps a list of change records to outbox changelog items.
+ */
+export function filterChangesForOutbox(
+  tableName: string,
+  changes: ChangeRecord[],
+  startSeq: number,
+): Array<ChangeRecord & { seq: number }> {
+  const items: Array<ChangeRecord & { seq: number }> = [];
+  let seq = startSeq;
+  for (const change of changes) {
+    seq++;
+    if (change.op === OperationType.Put) {
+      items.push({
+        ...change,
+        seq,
+        table: tableName,
+      });
+    }
+  }
+  return items;
+}
+
 /**
  * Applies a change to an existing (or undefined) record and assigns the sequence number.
  */
@@ -117,24 +207,27 @@ export function applyChangeToRecord(
   seq: number,
   user?: UserStorage,
 ): {
-  updatedRecord: StoredRecord;
-  appliedChange: ChangeRecord & { seq: number };
+  updatedRecord: StoredRecord & { userId?: string };
+  appliedChange: ChangeRecord & { seq: number; userId?: string };
 } {
   const isDeleted = change.op === OperationType.Delete;
   const nextVersion = (existing?.version ?? 0) + 1;
-  const ownerId = existing?.ownerId ?? user?.id;
+  const userId =
+    (existing as { userId?: string } | undefined)?.userId ?? user?.userId;
+  const userName = existing?.userName ?? user?.userName ?? change.userName;
 
-  const updatedRecord: StoredRecord = {
+  const updatedRecord: StoredRecord & { userId?: string } = {
     id: change.id,
     version: nextVersion,
     timestamp: change.timestamp,
     clientId: change.clientId,
     deleted: isDeleted,
     data: isDeleted ? null : (change.data ?? null),
-    ownerId,
+    userId,
+    userName,
   };
 
-  const appliedChange: ChangeRecord & { seq: number } = {
+  const appliedChange: ChangeRecord & { seq: number; userId?: string } = {
     seq,
     table: change.table,
     id: change.id,
@@ -143,7 +236,8 @@ export function applyChangeToRecord(
     timestamp: change.timestamp,
     clientId: change.clientId,
     data: isDeleted ? undefined : change.data,
-    ownerId,
+    userId,
+    userName,
   };
 
   return { updatedRecord, appliedChange };
@@ -155,7 +249,7 @@ export function applyChangeToRecord(
 export function isPermissionAllowed(
   permission: Permission,
   user?: UserStorage,
-  recordOwnerId?: string,
+  recordUserId?: string,
 ): boolean {
   switch (permission) {
     case Permission.Everybody:
@@ -165,7 +259,7 @@ export function isPermissionAllowed(
     case Permission.Owner:
       return (
         user !== undefined &&
-        (recordOwnerId === undefined || recordOwnerId === user.id)
+        (recordUserId === undefined || recordUserId === user.userId)
       );
     case Permission.Nobody:
       return false;
@@ -188,9 +282,10 @@ export function assertCanMutate(
 
   if (change.op === OperationType.Delete) {
     const perm = perms.delete;
-    const ownerId =
-      existing?.ownerId ?? (perm === Permission.Owner ? '' : undefined);
-    if (!isPermissionAllowed(perm, user, ownerId)) {
+    const recordUserId =
+      (existing as { userId?: string } | undefined)?.userId ??
+      (perm === Permission.Owner ? '' : undefined);
+    if (!isPermissionAllowed(perm, user, recordUserId)) {
       throw new TetherServerError(
         TetherServerErrorCode.Forbidden,
         `User does not have delete access to record "${change.id}" in table "${table.name}"`,
@@ -212,9 +307,10 @@ export function assertCanMutate(
   } else {
     // Updating an existing record
     const perm = perms.update;
-    const ownerId =
-      existing.ownerId ?? (perm === Permission.Owner ? '' : undefined);
-    if (!isPermissionAllowed(perm, user, ownerId)) {
+    const recordUserId =
+      (existing as { userId?: string } | undefined)?.userId ??
+      (perm === Permission.Owner ? '' : undefined);
+    if (!isPermissionAllowed(perm, user, recordUserId)) {
       throw new TetherServerError(
         TetherServerErrorCode.Forbidden,
         `User does not have update access to record "${change.id}" in table "${table.name}"`,
@@ -241,7 +337,8 @@ export function canReadRecord(
 ): boolean {
   if (!record || record.deleted) return false;
   const readPerm = table.settings.permissions?.read ?? Permission.Owner;
-  const ownerId =
-    record.ownerId ?? (readPerm === Permission.Owner ? '' : undefined);
-  return isPermissionAllowed(readPerm, user, ownerId);
+  const userId =
+    (record as { userId?: string }).userId ??
+    (readPerm === Permission.Owner ? '' : undefined);
+  return isPermissionAllowed(readPerm, user, userId);
 }

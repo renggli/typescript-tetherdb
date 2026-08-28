@@ -94,8 +94,10 @@ export class TetherClient {
     this.auth.onStatusChange.register((status) => {
       this.onAuthStatusChange.publish(status);
       if (status === AuthStatus.SignedIn && this.auth.token) {
+        this.storage.setCurrentUser(this.auth.userName);
         this.sync.connect(this.auth.token);
       } else if (status === AuthStatus.SignedOut) {
+        this.storage.setCurrentUser(undefined);
         this.sync.connect(undefined);
       }
     });
@@ -107,6 +109,23 @@ export class TetherClient {
     this.sync.onError.register((err) => {
       this.onError.publish(err);
     });
+  }
+
+  // -- Lifecycle ------------------------------------------------------------
+
+  /**
+   * Restores any active authenticated session and initiates sync connection.
+   */
+  async init(): Promise<void> {
+    await this.auth.restoreSession();
+  }
+
+  /**
+   * Disconnects active WebSocket connections, cancels retry timers, and closes IndexedDB handles.
+   */
+  async close(): Promise<void> {
+    this.sync.destroy();
+    await this.storage.close();
   }
 
   // -- Database / Storage ------------------------------------------------------
@@ -130,14 +149,6 @@ export class TetherClient {
     await this.storage.clearAllData();
   }
 
-  /**
-   * Closes active synchronization connections and closes the IndexedDB database handle.
-   */
-  async close(): Promise<void> {
-    this.sync.destroy();
-    await this.storage.close();
-  }
-
   // -- Authentication ------------------------------------------------------
 
   /**
@@ -148,10 +159,10 @@ export class TetherClient {
   }
 
   /**
-   * The authenticated user's username, or `undefined` if signed out.
+   * The authenticated user's name, or `undefined` if signed out.
    */
-  get username(): string | undefined {
-    return this.auth.username;
+  get userName(): string | undefined {
+    return this.auth.userName;
   }
 
   /**

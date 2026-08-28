@@ -112,21 +112,21 @@ export async function verifyDummyPasswordHash(
  * Generates a signed, URL-safe session token.
  *
  * @param userId - User account identifier.
- * @param username - Normalized username.
+ * @param userName - Normalized username.
  * @param secret - Signing secret.
  * @param expiresInSeconds - Token expiration duration.
  * @returns Signed token string.
  */
 export function createSessionToken(
   userId: string,
-  username: string,
+  userName: string,
   secret: string,
   expiresInSeconds = DEFAULT_TOKEN_EXPIRES_IN,
 ): string {
   const expiresAt = Math.floor(Date.now() / 1000) + expiresInSeconds;
   const payload = JSON.stringify({
     userId,
-    username,
+    userName,
     expiresAt,
   });
   const payloadB64 = Buffer.from(payload, 'utf-8').toString('base64url');
@@ -147,7 +147,11 @@ export function createSessionToken(
 export function verifySessionToken(
   token: string,
   secret: string,
-): { userId: string; username: string; expiresAt: number } | null {
+): {
+  userId: string;
+  userName: string;
+  expiresAt: number;
+} | null {
   if (!token || typeof token !== 'string') return null;
   const parts = token.split('.');
   if (parts.length !== 2) return null;
@@ -176,8 +180,8 @@ export function verifySessionToken(
       parsed === null ||
       typeof parsed.userId !== 'string' ||
       !parsed.userId ||
-      typeof parsed.username !== 'string' ||
-      !parsed.username ||
+      typeof parsed.userName !== 'string' ||
+      !parsed.userName ||
       typeof parsed.expiresAt !== 'number' ||
       !Number.isFinite(parsed.expiresAt) ||
       parsed.expiresAt < Math.floor(Date.now() / 1000)
@@ -186,7 +190,7 @@ export function verifySessionToken(
     }
     return {
       userId: parsed.userId,
-      username: parsed.username,
+      userName: parsed.userName,
       expiresAt: parsed.expiresAt,
     };
   } catch {

@@ -3,11 +3,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolveAdminTarget } from '../../src/cli/admin.js';
-import {
-  BackendType,
-  SqliteStorage,
-  TetherServer,
-} from '../../src/server/index.js';
+import { TetherServer } from '../../src/server/server.js';
+import { BackendType, SqliteStorage } from '../../src/server/storage/index.js';
 
 describe('resolveAdminTarget', () => {
   let tmpDir: string;

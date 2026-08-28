@@ -4,10 +4,10 @@
  * @module tetherdb/server
  */
 export {
-  BackendType,
   Permission,
   PROTOCOL_VERSION,
   type TablePermissions,
+  type TableRow,
   type TableSettings,
 } from '../shared/types.js';
 export {

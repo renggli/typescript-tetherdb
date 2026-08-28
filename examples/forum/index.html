@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TetherForum — Real-Time Collaborative Discussion Board</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <!-- Top Navigation Header -->
+  <header class="navbar">
+    <div class="navbar-inner">
+      <div class="brand">
+        <div class="brand-icon">⚡</div>
+        <div class="brand-text">
+          <h1>TetherForum</h1>
+        </div>
+      </div>
+
+      <div class="navbar-right">
+        <div id="statusPill" class="status-pill status-disconnected">
+          <span class="status-indicator"></span>
+          <span id="statusText">Connecting...</span>
+        </div>
+
+        <div class="auth-nav-area">
+          <button type="button" id="authButton" class="auth-btn">
+            <span id="authButtonAvatar" class="auth-btn-avatar"><svg class="auth-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><title>User</title><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
+            <span id="authButtonText" class="auth-btn-text">Sign In</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- App Layout: Sidebar + Main Content -->
+  <div class="app-layout">
+    <!-- Left Navigation Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-section">
+        <h2 class="sidebar-title">Feeds</h2>
+        <ul class="community-list" id="feedList">
+          <li>
+            <button type="button" class="community-item active" data-community="all">
+              <span class="community-icon">🌐</span>
+              <span class="community-name">All Discussions</span>
+            </button>
+          </li>
+        </ul>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-section-header">
+          <h2 class="sidebar-title">Communities</h2>
+        </div>
+        <ul class="community-list" id="communityList">
+          <!-- Dynamically populated from server tables -->
+        </ul>
+      </div>
+    </aside>
+
+    <!-- Main Content Section -->
+    <main class="main-content">
+      <!-- Feed View Container -->
+      <div id="feedView" class="feed-view">
+        <!-- Community Banner / Header -->
+        <div class="community-banner" id="communityBanner">
+          <div class="banner-icon" id="bannerIcon">🌐</div>
+          <div class="banner-details">
+            <h2 id="bannerTitle">All Discussions</h2>
+            <p id="bannerDesc">All discussions from across the TetherForum network</p>
+          </div>
+        </div>
+
+        <!-- Action Bar: Create Post Prompt & Sorters -->
+        <div class="action-bar">
+          <button type="button" id="openCreatePostBtn" class="create-post-prompt">
+            <span class="prompt-icon">✍️</span>
+            <span>Create a new post...</span>
+          </button>
+
+          <div class="sort-bar">
+            <button type="button" class="sort-btn active" data-sort="hot">🔥 Hot</button>
+            <button type="button" class="sort-btn" data-sort="new">✨ New</button>
+            <button type="button" class="sort-btn" data-sort="top">🏆 Top</button>
+          </div>
+        </div>
+
+        <!-- Posts List -->
+        <div class="post-feed" id="postFeed">
+          <!-- Rendered dynamically -->
+        </div>
+
+        <!-- Empty State -->
+        <div id="emptyFeedState" class="empty-state" style="display: none;">
+          <p class="empty-title">No posts in this community yet.</p>
+          <p class="empty-subtitle">Be the first to spark the conversation!</p>
+          <button type="button" id="emptyCreatePostBtn" class="btn btn-primary">Create Post</button>
+        </div>
+      </div>
+
+      <!-- Thread / In-Body Post Detail View -->
+      <div id="threadView" class="thread-view" style="display: none;">
+        <div class="thread-nav">
+          <button type="button" id="backToFeedBtn" class="btn btn-secondary back-btn">
+            ← Back to Discussions
+          </button>
+        </div>
+
+        <article class="thread-post-card">
+          <div class="thread-header-meta" id="threadHeaderMeta">
+            <!-- Community badge, author, timestamp, actions -->
+          </div>
+
+          <div class="post-detail-main">
+            <div class="vote-column" id="threadVoteColumn">
+              <!-- Upvote/Score/Downvote for Post -->
+            </div>
+            <div class="post-detail-content-wrap">
+              <h2 class="post-detail-title" id="threadPostTitle">Post Title</h2>
+              <div class="post-detail-text" id="threadPostContent">Post Content</div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Reply Composer -->
+        <div class="comment-composer-wrap">
+          <div class="comment-composer-header">
+            <span>Add a comment</span>
+          </div>
+          <form id="newCommentForm" class="comment-form">
+            <textarea id="newCommentInput" name="comment" rows="3" placeholder="What are your thoughts?" required></textarea>
+            <div class="comment-form-actions">
+              <button type="submit" class="btn btn-primary">Reply</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Replies Section -->
+        <div class="comments-section">
+          <h3 class="comments-header-title">
+            <span>Replies</span>
+            <span id="threadCommentCountBadge" class="comment-count-badge">0</span>
+          </h3>
+          <div id="commentsList" class="comments-list">
+            <!-- Dynamic replies rendered recursively here -->
+          </div>
+          <div id="emptyCommentsState" class="empty-state-small">
+            No replies yet. Be the first to join the conversation!
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Create Post Modal Dialog -->
+  <dialog id="createPostDialog" class="modal-dialog">
+    <div class="modal-header">
+      <h2>Create Post</h2>
+      <button type="button" id="closeCreatePostModalBtn" class="modal-close">✕</button>
+    </div>
+    <form id="createPostForm" class="modal-form">
+      <div class="form-group">
+        <label for="postCommunitySelect">Community</label>
+        <select id="postCommunitySelect" name="community" required>
+          <!-- Populated from communities table -->
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="postTitleInput">Title</label>
+        <input type="text" id="postTitleInput" name="title" placeholder="What's on your mind?" required minlength="3" maxlength="200" autocomplete="off">
+      </div>
+
+      <div class="form-group">
+        <label for="postContentInput">Body Content</label>
+        <textarea id="postContentInput" name="content" rows="5" placeholder="Share details, thoughts, or questions..." required></textarea>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" id="cancelCreatePostBtn" class="btn btn-secondary">Cancel</button>
+        <button type="submit" class="btn btn-primary">Publish Post</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Edit Post Modal Dialog -->
+  <dialog id="editPostDialog" class="modal-dialog">
+    <div class="modal-header">
+      <h2>Edit Post</h2>
+      <button type="button" id="closeEditPostModalBtn" class="modal-close">✕</button>
+    </div>
+    <form id="editPostForm" class="modal-form">
+      <input type="hidden" id="editPostIdInput" name="postId">
+
+      <div class="form-group">
+        <label for="editPostTitleInput">Title</label>
+        <input type="text" id="editPostTitleInput" name="title" required minlength="3" maxlength="200" autocomplete="off">
+      </div>
+
+      <div class="form-group">
+        <label for="editPostContentInput">Body Content</label>
+        <textarea id="editPostContentInput" name="content" rows="5" required></textarea>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" id="cancelEditPostBtn" class="btn btn-secondary">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Changes</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Sign In / Register / Account Modal Dialog -->
+  <dialog id="authModalDialog" class="modal-dialog auth-dialog">
+    <div class="modal-header">
+      <h2 id="authModalTitle">Sign In</h2>
+      <button type="button" id="closeAuthModalBtn" class="modal-close">✕</button>
+    </div>
+
+    <div id="authSignedInSection" class="auth-signed-in-section" style="display: none;">
+      <div class="auth-user-card">
+        <span class="auth-card-avatar"><svg class="auth-icon" width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><title>Signed in user</title><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg></span>
+        <div class="auth-card-details">
+          <span class="auth-card-name" id="modalUserNameText">alice</span>
+          <span class="auth-card-status">Signed in</span>
+        </div>
+        <button type="button" id="modalSignOutBtn" class="btn btn-secondary auth-signout-btn">Sign Out</button>
+      </div>
+      <div class="auth-divider"><span>Switch Account</span></div>
+    </div>
+
+    <div id="authTabs" class="auth-tabs">
+      <button type="button" id="authTabSignIn" class="auth-tab active">Sign In</button>
+      <button type="button" id="authTabRegister" class="auth-tab">Register</button>
+    </div>
+    <form id="authForm" class="modal-form">
+      <div class="form-group">
+        <label for="authUserNameInput">Username</label>
+        <input type="text" id="authUserNameInput" name="username" placeholder="Username" required autocomplete="username">
+      </div>
+
+      <div class="form-group">
+        <label for="authPasswordInput">Password</label>
+        <input type="password" id="authPasswordInput" name="password" placeholder="Password" required autocomplete="current-password">
+      </div>
+
+      <div id="authErrorMessage" class="auth-error-msg" style="display: none;"></div>
+
+      <div class="quick-accounts">
+        <span class="quick-accounts-label">Quick Sign-in:</span>
+        <div class="quick-account-chips">
+          <button type="button" class="chip-btn" data-user="alice">alice</button>
+          <button type="button" class="chip-btn" data-user="bob">bob</button>
+          <button type="button" class="chip-btn" data-user="charlie">charlie</button>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" id="cancelAuthModalBtn" class="btn btn-secondary">Cancel</button>
+        <button type="submit" id="submitAuthBtn" class="btn btn-primary">Sign In</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="./src/client.ts"></script>
+</body>
+</html>

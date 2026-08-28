@@ -5,11 +5,12 @@ import type { DatabaseSync } from 'node:sqlite';
 import {
   TetherServerError,
   TetherServerErrorCode,
-} from '../../server/index.js';
+} from '../../server/errors.js';
 import { readServerLock } from '../../server/lock.js';
 import { DEFAULT_TABLE_PERMISSIONS } from '../../server/storage/base/index.js';
+import { BackendType } from '../../server/storage/index.js';
 import { getUserBucket } from '../../server/validate.js';
-import { BackendType, type StoredRecord } from '../../shared/types.js';
+import type { StoredRecord } from '../../shared/types.js';
 
 /**
  * Result metrics returned after running a storage migration.

@@ -1,10 +1,12 @@
 /**
- * Shared type definitions for permissions, record models, and wire protocols.
+ * Shared type definitions for records, permissions, tables, and wire transport protocols.
  *
  * @module tetherdb/shared/types
  */
 
-export * from './backend.js';
+export * from './client-messages.js';
 export * from './permissions.js';
 export * from './protocol.js';
-export * from './record.js';
+export * from './records.js';
+export * from './server-messages.js';
+export * from './tables.js';

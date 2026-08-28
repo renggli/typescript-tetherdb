@@ -34,8 +34,8 @@ export enum AuthStatus {
  * Options for registering a new user account.
  */
 export interface RegisterOptions {
-  /** Unique username (required). */
-  username: string;
+  /** Unique username. */
+  userName: string;
   /** Account password (required). */
   password: string;
   /** Persist session in IndexedDB for automatic login across sessions (default: false). */
@@ -49,7 +49,7 @@ export interface RegisterOptions {
  */
 export interface LoginOptions {
   /** Unique username (optional if already remembered). */
-  username?: string;
+  userName?: string;
   /** Account password (optional if already remembered). */
   password?: string;
   /** Persist session for automatic login across sessions (default: false). */
@@ -70,10 +70,8 @@ export interface LogoutOptions {
  * Result returned upon successful user registration or login.
  */
 export interface AuthResult {
-  /** Unique user identifier (UUID). */
-  userId: string;
   /** User's unique username. */
-  username: string;
+  userName: string;
   /** Signed session authentication token for sync and API calls. */
   token: string;
 }
@@ -82,8 +80,7 @@ export interface AuthResult {
  * Internal persisted session representation in IndexedDB metadata.
  */
 export interface StoredAuthSession {
-  userId: string;
-  username: string;
+  userName: string;
   token: string;
 }
 
@@ -109,8 +106,7 @@ export class Auth {
   private storage: Storage;
   private fetchFn: typeof fetch;
   private currentAuthStatus: AuthStatus = AuthStatus.SignedOut;
-  private currentUsername?: string;
-  private currentUserId?: string;
+  private currentUserName?: string;
   private currentToken?: string;
   private autoRestorePromise: Promise<void>;
 
@@ -144,17 +140,10 @@ export class Auth {
   }
 
   /**
-   * The authenticated user's username, or `undefined` if signed out.
+   * The authenticated user's name, or `undefined` if signed out.
    */
-  get username(): string | undefined {
-    return this.currentUsername;
-  }
-
-  /**
-   * The authenticated user's ID, or `undefined` if signed out.
-   */
-  get userId(): string | undefined {
-    return this.currentUserId;
+  get userName(): string | undefined {
+    return this.currentUserName;
   }
 
   /**
@@ -170,9 +159,8 @@ export class Auth {
   async restoreSession(): Promise<void> {
     try {
       const session = await this.storage.getMeta<StoredAuthSession>('auth');
-      if (session?.token && session.username) {
-        this.currentUserId = session.userId;
-        this.currentUsername = session.username;
+      if (session?.token && session.userName) {
+        this.currentUserName = session.userName;
         this.currentToken = session.token;
         this.setStatus(AuthStatus.SignedIn);
       }
@@ -185,7 +173,7 @@ export class Auth {
    * Registers a new user account, applies local data mode, and notifies listeners.
    */
   async register(options: RegisterOptions): Promise<boolean> {
-    if (!options?.username || !options?.password) {
+    if (!options?.userName || !options?.password) {
       throw new TetherClientError(
         TetherClientErrorCode.MissingCredentials,
         'Registration requires username and password',
@@ -204,13 +192,15 @@ export class Auth {
 
       const data = await this.sendAuthRequest(
         '/auth/register',
-        { username: options.username, password: options.password },
+        {
+          userName: options.userName,
+          password: options.password,
+        },
         TetherClientErrorCode.RegistrationFailed,
         'Registration failed',
       );
 
-      this.currentUserId = data.userId;
-      this.currentUsername = data.username;
+      this.currentUserName = data.userName;
       this.currentToken = data.token;
 
       await this.applyDataMode(dataMode);
@@ -234,28 +224,28 @@ export class Auth {
 
     try {
       let token = this.currentToken;
-      let username = this.currentUsername;
-      let userId = this.currentUserId;
+      let userName = this.currentUserName;
 
-      if (options.username && options.password) {
+      if (options.userName && options.password) {
         const data = await this.sendAuthRequest(
           '/auth/login',
-          { username: options.username, password: options.password },
+          {
+            userName: options.userName,
+            password: options.password,
+          },
           TetherClientErrorCode.AuthenticationFailed,
           'Authentication failed',
         );
 
         token = data.token;
-        username = data.username;
-        userId = data.userId;
+        userName = data.userName;
 
         await this.updateStoredAuth(options.remember ?? false, data);
       } else if (!token) {
         const stored = await this.storage.getMeta<StoredAuthSession>('auth');
         if (stored?.token) {
           token = stored.token;
-          username = stored.username;
-          userId = stored.userId;
+          userName = stored.userName;
         }
       }
 
@@ -267,8 +257,7 @@ export class Auth {
       }
 
       this.currentToken = token;
-      this.currentUsername = username;
-      this.currentUserId = userId;
+      this.currentUserName = userName;
 
       await this.applyDataMode(options.dataMode ?? DataMode.Remote);
 
@@ -284,12 +273,11 @@ export class Auth {
    * Logs out of the current session, removes stored credentials, and applies data mode.
    */
   async logout(options: LogoutOptions = {}): Promise<boolean> {
-    this.currentUserId = undefined;
-    this.currentUsername = undefined;
+    this.currentUserName = undefined;
     this.currentToken = undefined;
 
-    await this.storage.deleteMeta('auth');
     await this.applyDataMode(options.dataMode ?? DataMode.Clear);
+    await this.storage.deleteMeta('auth');
 
     this.setStatus(AuthStatus.SignedOut);
     return true;
@@ -317,8 +305,7 @@ export class Auth {
    * @param _message - Optional error message from the server.
    */
   async handleAuthError(_message?: string): Promise<void> {
-    this.currentUserId = undefined;
-    this.currentUsername = undefined;
+    this.currentUserName = undefined;
     this.currentToken = undefined;
     await this.storage.deleteMeta('auth');
     this.setStatus(AuthStatus.SignedOut);
@@ -328,7 +315,10 @@ export class Auth {
 
   private async sendAuthRequest(
     path: string,
-    credentials: { username?: string; password?: string },
+    credentials: {
+      userName?: string;
+      password?: string;
+    },
     errorCode: TetherClientErrorCode,
     defaultErrorMessage: string,
   ): Promise<AuthResult> {
@@ -342,7 +332,10 @@ export class Auth {
     if (!res.ok) {
       throw new TetherClientError(errorCode, data.error ?? defaultErrorMessage);
     }
-    return data;
+    return {
+      userName: data.userName,
+      token: data.token,
+    };
   }
 
   private async applyDataMode(dataMode: DataMode): Promise<void> {
@@ -359,8 +352,7 @@ export class Auth {
     if (remember) {
       await this.storage.setMeta('auth', {
         token: auth.token,
-        userId: auth.userId,
-        username: auth.username,
+        userName: auth.userName,
       });
     } else {
       await this.storage.deleteMeta('auth');

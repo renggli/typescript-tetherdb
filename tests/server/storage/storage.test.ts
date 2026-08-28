@@ -37,8 +37,8 @@ function runStorageTestSuite(createStorage: () => Storage) {
 
   it('should create and authenticate users directly through UserStorage', async () => {
     const user = await storage.createUser('alice', 'password123');
-    expect(user.id).toBeDefined();
-    expect(user.username).toBe('alice');
+    expect(user.userId).toBeDefined();
+    expect(user.userName).toBe('alice');
 
     expect(await user.verifyPassword('password123')).toBe(true);
     expect(await user.verifyPassword('  password123  ')).toBe(true);
@@ -49,14 +49,14 @@ function runStorageTestSuite(createStorage: () => Storage) {
     expect(await user.verifyToken(token)).toBe(true);
 
     const retrievedUser = await storage.getUserByToken(token);
-    expect(retrievedUser?.id).toBe(user.id);
-    expect(retrievedUser?.username).toBe('alice');
+    expect(retrievedUser?.userId).toBe(user.userId);
+    expect(retrievedUser?.userName).toBe('alice');
 
-    const byUsername = await storage.getUserByUsername('  ALICE  ');
-    expect(byUsername?.id).toBe(user.id);
+    const byUsername = await storage.getUserByUserName('  ALICE  ');
+    expect(byUsername?.userId).toBe(user.userId);
 
     const allUsers = await storage.getUsers();
-    expect(allUsers.some((u) => u.id === user.id)).toBe(true);
+    expect(allUsers.some((u) => u.userId === user.userId)).toBe(true);
   });
 
   it('should apply changes and assign sequential numbers', async () => {
@@ -274,8 +274,8 @@ function runStorageTestSuite(createStorage: () => Storage) {
     const deleted = await user.delete();
     expect(deleted).toBe(true);
 
-    expect(await storage.getUser(user.id)).toBeUndefined();
-    expect(await storage.getUserByUsername('user_to_delete')).toBeUndefined();
+    expect(await storage.getUser(user.userId)).toBeUndefined();
+    expect(await storage.getUserByUserName('user_to_delete')).toBeUndefined();
     expect(await todosTable?.getRecord(user, 'td1')).toBeUndefined();
     expect(await notesTable?.getRecord(user, 'nt1')).toBeUndefined();
   });

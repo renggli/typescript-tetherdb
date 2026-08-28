@@ -1,7 +1,6 @@
 import * as crypto from 'node:crypto';
 import { shouldOverwrite } from '../../../shared/clock.js';
 import {
-  BackendType,
   type ChangeRecord,
   OperationType,
   type StoredRecord,
@@ -10,12 +9,12 @@ import {
 import { hashPassword } from '../../crypto.js';
 import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
 import {
-  normalizeUsername,
+  normalizeUserName,
   validatePassword,
   validateRecordId,
   validateTableName,
   validateUserId,
-  validateUsername,
+  validateUserName,
 } from '../../validate.js';
 import {
   applyChangeToRecord,
@@ -27,7 +26,8 @@ import {
   validateBatchChanges,
 } from '../base/index.js';
 import type { MaintenanceResult, StorageOptions } from '../storage.js';
-import type { TableStorage } from '../table.js';
+import { BackendType } from '../storage.js';
+import type { ApplyChangesOptions, TableStorage } from '../table.js';
 import type { UserStorage } from '../user.js';
 import { TableMemoryStorage } from './table.js';
 import { type MemoryUserData, UserMemoryStorage } from './user.js';
@@ -51,7 +51,7 @@ export class MemoryStorage extends BaseStorage {
   private globalSeq = 0;
   private tables: Map<string, TableMemoryStorage> = new Map();
   private users: Map<string, MemoryUserData> = new Map();
-  private usersByUsername: Map<string, string> = new Map();
+  private usersByUserName: Map<string, string> = new Map();
   private userStates: Map<string, StatePartition> = new Map();
   private sharedState: StatePartition = {
     currentSeq: 0,
@@ -91,10 +91,10 @@ export class MemoryStorage extends BaseStorage {
     return Array.from(this.tables.values());
   }
 
-  async createUser(username: string, password: string): Promise<UserStorage> {
-    const safeUsername = validateUsername(username);
+  async createUser(userName: string, password: string): Promise<UserStorage> {
+    const safeUserName = validateUserName(userName);
     const validPassword = validatePassword(password);
-    if (this.usersByUsername.has(safeUsername)) {
+    if (this.usersByUserName.has(safeUserName)) {
       throw new TetherServerError(
         TetherServerErrorCode.AlreadyExists,
         'Username is already registered',
@@ -104,19 +104,19 @@ export class MemoryStorage extends BaseStorage {
     const userId = crypto.randomUUID();
     const passwordHash = await hashPassword(validPassword);
     const userData: MemoryUserData = {
-      id: userId,
-      username: safeUsername,
+      userId,
+      userName: safeUserName,
       passwordHash,
       createdAt: Date.now(),
     };
 
     this.users.set(userId, userData);
-    this.usersByUsername.set(safeUsername, userId);
+    this.usersByUserName.set(safeUserName, userId);
     return new UserMemoryStorage(userData, this);
   }
 
-  async getUser(id: string): Promise<UserStorage | undefined> {
-    const safeUserId = validateUserId(id);
+  async getUser(userId: string): Promise<UserStorage | undefined> {
+    const safeUserId = validateUserId(userId);
     const data = this.users.get(safeUserId);
     if (data) {
       return new UserMemoryStorage(data, this);
@@ -124,10 +124,10 @@ export class MemoryStorage extends BaseStorage {
     return undefined;
   }
 
-  async getUserByUsername(username: string): Promise<UserStorage | undefined> {
-    const safeUsername = normalizeUsername(username);
-    if (!safeUsername) return undefined;
-    const userId = this.usersByUsername.get(safeUsername);
+  async getUserByUserName(userName: string): Promise<UserStorage | undefined> {
+    const safeUserName = normalizeUserName(userName);
+    if (!safeUserName) return undefined;
+    const userId = this.usersByUserName.get(safeUserName);
     if (!userId) return undefined;
     const data = this.users.get(userId);
     if (data) {
@@ -145,12 +145,17 @@ export class MemoryStorage extends BaseStorage {
   async applyChanges(
     user: UserStorage | undefined,
     changes: ChangeRecord[],
+    options?: ApplyChangesOptions,
   ): Promise<{ applied: ChangeRecord[]; newSeq: number }> {
-    const defaultMaxRecords = this.options.maxRecords ?? 10_000;
-    const defaultMaxRecordSize = this.options.maxRecordSizeBytes ?? 512 * 1024;
+    if (changes.length === 0) {
+      return { applied: [], newSeq: this.globalSeq };
+    }
+
+    const defaultMaxRecords = this.options.maxRecords ?? 10000;
+    const defaultMaxRecordSize = this.options.maxRecordSizeBytes ?? 1024 * 1024;
     const defaultMaxHistory = this.options.maxHistoryEntries ?? 1000;
 
-    // Phase 1: Pre-validate all changes in the batch
+    // Phase 1: Validate payload and permissions across all operations
     await validateBatchChanges(this, changes, defaultMaxRecordSize);
 
     // Phase 2: Stage mutations
@@ -158,7 +163,7 @@ export class MemoryStorage extends BaseStorage {
     const stagedSharedTables = new Map<string, Map<string, StoredRecord>>();
     const stagedApplied: (ChangeRecord & { seq: number })[] = [];
 
-    const userState = user ? this.getUserState(user.id) : null;
+    const userState = user ? this.getUserState(user.userId) : null;
 
     for (const change of changes) {
       const tableName = validateTableName(change.table);
@@ -171,7 +176,7 @@ export class MemoryStorage extends BaseStorage {
       let targetMap: Map<string, StoredRecord>;
 
       if (isPrivate) {
-        if (!userState) {
+        if (!userState && !options?.skipPermissionCheck) {
           throw new TetherServerError(
             TetherServerErrorCode.Forbidden,
             `Authentication required for private table "${tableName}"`,
@@ -179,7 +184,9 @@ export class MemoryStorage extends BaseStorage {
         }
         let stagedMap = stagedUserTables.get(tableName);
         if (!stagedMap) {
-          const existingMap = userState.tables.get(tableName);
+          const existingMap = userState
+            ? userState.tables.get(tableName)
+            : undefined;
           stagedMap = new Map(existingMap);
           stagedUserTables.set(tableName, stagedMap);
         }
@@ -195,7 +202,9 @@ export class MemoryStorage extends BaseStorage {
       }
 
       const existing = targetMap.get(recordId);
-      assertCanMutate(table, user, change, existing);
+      if (!options?.skipPermissionCheck) {
+        assertCanMutate(table, user, change, existing);
+      }
 
       if (
         change.op === OperationType.Put &&
@@ -283,7 +292,7 @@ export class MemoryStorage extends BaseStorage {
     requiresSnapshot?: boolean;
   }> {
     const currentSeq = this.globalSeq;
-    const userState = user ? this.getUserState(user.id) : null;
+    const userState = user ? this.getUserState(user.userId) : null;
     const userMinSeq = userState?.minSeq ?? 0;
     const sharedMinSeq = this.sharedState.minSeq;
 
@@ -371,7 +380,7 @@ export class MemoryStorage extends BaseStorage {
     this.sharedState.tables.clear();
     this.sharedState.changelog.length = 0;
     this.users.clear();
-    this.usersByUsername.clear();
+    this.usersByUserName.clear();
   }
 
   getUserState(userId: string): StatePartition {
@@ -424,7 +433,7 @@ export class MemoryStorage extends BaseStorage {
     this.userStates.delete(safeUserId);
     const data = this.users.get(safeUserId);
     if (data) {
-      this.usersByUsername.delete(data.username);
+      this.usersByUserName.delete(data.userName);
       this.users.delete(safeUserId);
       return true;
     }

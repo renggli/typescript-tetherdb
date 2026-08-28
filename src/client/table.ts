@@ -376,6 +376,7 @@ export class Table<T = unknown> {
   ): { mutation: LocalMutationItem<T>; event: TableChangeEvent<T> } {
     const version = (existing?.version ?? 0) + 1;
     const timestamp = Math.max(now, (existing?.timestamp ?? 0) + 1);
+    const userName = existing?.userName ?? this.storage.currentUserName;
     const change: ChangeRecord<T> = {
       table: this.tableName,
       id,
@@ -384,6 +385,7 @@ export class Table<T = unknown> {
       timestamp,
       clientId: this.clientId,
       version,
+      userName,
     };
     return {
       mutation: { id, op, data, change },

@@ -218,7 +218,7 @@ export class Sync {
     if (user) {
       let userCount = 0;
       for (const c of this.clients) {
-        if (c.user?.id === user.id) userCount++;
+        if (c.user?.userId === user.userId) userCount++;
       }
       if (userCount >= this.maxConcurrentConnectionsPerUser) {
         this.send(webSocket, {
@@ -257,7 +257,7 @@ export class Sync {
     this.send(webSocket, {
       type: ServerMessageType.AuthSuccess,
       protocolVersion: PROTOCOL_VERSION,
-      userId: user?.id ?? 'anonymous',
+      userName: user?.userName,
       currentSeq,
       token: refreshedToken,
     });
@@ -340,7 +340,7 @@ export class Sync {
   private getClientContext(webSocket: WebSocket): string {
     const client = this.webSocketToClient.get(webSocket);
     return client
-      ? ` (user: "${client.user?.id ?? 'guest'}", client: "${client.clientId}")`
+      ? ` (user: "${client.user?.userId ?? 'guest'}", client: "${client.clientId}")`
       : '';
   }
 
@@ -395,11 +395,36 @@ export class Sync {
       return;
     }
 
+    const userCache = new Map<string, string>();
+    const populatedChanges: ChangeRecord[] = [];
+    for (const change of changes) {
+      let userName = change.userName;
+      const internalUserId = (change as { userId?: string }).userId;
+      if (internalUserId && !userName) {
+        userName = await this.resolveUserName(
+          internalUserId,
+          client.user,
+          userCache,
+        );
+      }
+      populatedChanges.push({
+        table: change.table,
+        id: change.id,
+        op: change.op,
+        data: change.data,
+        version: change.version,
+        seq: change.seq,
+        timestamp: change.timestamp,
+        clientId: change.clientId,
+        userName,
+      });
+    }
+
     this.send(client.webSocket, {
       type: ServerMessageType.SyncDiff,
       fromSeq: seq,
       toSeq: currentSeq,
-      changes,
+      changes: populatedChanges,
     });
   }
 
@@ -407,17 +432,55 @@ export class Sync {
     user?: UserStorage,
     tableFilters?: string[],
   ): Promise<SnapshotRecord[]> {
-    const tables = await this.storage.getTables();
     const snapshot: SnapshotRecord[] = [];
+    const tables = await this.storage.getTables();
+    const userCache = new Map<string, string>();
 
     for (const table of tables) {
-      if (tableFilters && !tableFilters.includes(table.name)) continue;
       if (!canRead(table, user)) continue;
-      const records = await table.getAllRecords(user);
-      snapshot.push(...records);
-    }
+      if (tableFilters && !tableFilters.includes(table.name)) continue;
 
+      const records = await table.getAllRecords(user);
+      for (const rec of records) {
+        let userName = rec.userName;
+        const internalUserId = (rec as { userId?: string }).userId;
+        if (internalUserId && !userName) {
+          userName = await this.resolveUserName(
+            internalUserId,
+            user,
+            userCache,
+          );
+        }
+        snapshot.push({
+          table: rec.table,
+          id: rec.id,
+          data: rec.data,
+          version: rec.version,
+          timestamp: rec.timestamp,
+          deleted: rec.deleted,
+          clientId: rec.clientId,
+          userName,
+        });
+      }
+    }
     return snapshot;
+  }
+
+  private async resolveUserName(
+    userId?: string,
+    user?: UserStorage,
+    userCache?: Map<string, string>,
+  ): Promise<string | undefined> {
+    if (!userId) return undefined;
+    if (user && userId === user.userId) return user.userName;
+    if (userCache?.has(userId)) return userCache.get(userId);
+
+    const foundUser = await this.storage.getUser(userId);
+    if (foundUser) {
+      userCache?.set(userId, foundUser.userName);
+      return foundUser.userName;
+    }
+    return undefined;
   }
 
   private async broadcastChanges(
@@ -444,7 +507,11 @@ export class Sync {
         if (table && canRead(table, client.user)) {
           const isPrivate = isPrivateTable(table);
           if (isPrivate) {
-            if (client.user && senderUser && client.user.id === senderUser.id) {
+            if (
+              client.user &&
+              senderUser &&
+              client.user.userId === senderUser.userId
+            ) {
               clientChanges.push(change);
             }
           } else {
@@ -454,10 +521,35 @@ export class Sync {
       }
 
       if (clientChanges.length > 0) {
+        const userCache = new Map<string, string>();
+        const populatedChanges: ChangeRecord[] = [];
+        for (const change of clientChanges) {
+          let userName = change.userName ?? senderUser?.userName;
+          const internalUserId = (change as { userId?: string }).userId;
+          if (internalUserId && !userName) {
+            userName = await this.resolveUserName(
+              internalUserId,
+              client.user ?? senderUser,
+              userCache,
+            );
+          }
+          populatedChanges.push({
+            table: change.table,
+            id: change.id,
+            op: change.op,
+            data: change.data,
+            version: change.version,
+            seq: change.seq,
+            timestamp: change.timestamp,
+            clientId: change.clientId,
+            userName,
+          });
+        }
+
         this.send(client.webSocket, {
           type: ServerMessageType.BroadcastChanges,
           fromClientId: senderClientId,
-          changes: clientChanges,
+          changes: populatedChanges,
           seq,
         });
       }

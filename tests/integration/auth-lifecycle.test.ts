@@ -55,7 +55,7 @@ describe.each(storageDescriptors)(
       clientsToClose.push(client);
 
       expect(client.authStatus).toBe(AuthStatus.SignedOut);
-      expect(client.username).toBeUndefined();
+      expect(client.userName).toBeUndefined();
       expect([SyncStatus.Connecting, SyncStatus.Connected]).toContain(
         client.syncStatus,
       );
@@ -76,13 +76,13 @@ describe.each(storageDescriptors)(
       client.onAuthStatusChange.register((status) => authStatuses.push(status));
 
       const success = await client.register({
-        username: 'alice',
+        userName: 'alice',
         password: 'password123',
       });
 
       expect(success).toBe(true);
       expect(client.authStatus).toBe(AuthStatus.SignedIn);
-      expect(client.username).toBe('alice');
+      expect(client.userName).toBe('alice');
       expect(authStatuses).toContain(AuthStatus.SigningIn);
       expect(authStatuses).toContain(AuthStatus.SignedIn);
 
@@ -105,7 +105,7 @@ describe.each(storageDescriptors)(
       await todos.put('t1', { title: 'Local offline todo' });
 
       const success = await client.register({
-        username: 'bobby',
+        userName: 'bobby',
         password: 'password123',
         dataMode: DataMode.Local,
       });
@@ -114,7 +114,7 @@ describe.each(storageDescriptors)(
       // Local item still exists
       expect(await todos.get('t1')).toEqual({ title: 'Local offline todo' });
 
-      const user = await server.server.storage.getUserByUsername('bobby');
+      const user = await server.server.storage.getUserByUserName('bobby');
       expect(user).toBeDefined();
       if (!user) return;
 
@@ -145,7 +145,7 @@ describe.each(storageDescriptors)(
       expect((await todos.getAll()).length).toBe(1);
 
       const success = await client.register({
-        username: 'charlie',
+        userName: 'charlie',
         password: 'password123',
         dataMode: DataMode.Clear,
       });
@@ -168,7 +168,7 @@ describe.each(storageDescriptors)(
 
       // First register user
       await client.register({
-        username: 'duplicate_user',
+        userName: 'duplicate_user',
         password: 'password123',
       });
 
@@ -187,7 +187,7 @@ describe.each(storageDescriptors)(
       await todos2.put('local-preserved', { title: 'Do Not Delete' });
 
       const success = await client2.register({
-        username: 'duplicate_user',
+        userName: 'duplicate_user',
         password: 'password123',
         dataMode: DataMode.Clear,
       });
@@ -213,12 +213,12 @@ describe.each(storageDescriptors)(
       clientsToClose.push(clientA);
 
       await clientA.register({
-        username: 'diana',
+        userName: 'diana',
         password: 'password123',
       });
       const todosA = clientA.table<{ title: string }>('todos');
       await todosA.put('r1', { title: 'Remote Item 1' });
-      const userDiana = await server.server.storage.getUserByUsername('diana');
+      const userDiana = await server.server.storage.getUserByUserName('diana');
       const table = await server.server.storage.getTable('todos');
       if (userDiana) {
         await waitForCondition(async () => {
@@ -242,7 +242,7 @@ describe.each(storageDescriptors)(
 
       // 3. Client B logs in with DataMode.Merge
       const success = await clientB.login({
-        username: 'diana',
+        userName: 'diana',
         password: 'password123',
         dataMode: DataMode.Merge,
       });
@@ -273,13 +273,13 @@ describe.each(storageDescriptors)(
       clientsToClose.push(clientA);
 
       await clientA.register({
-        username: 'evelyn',
+        userName: 'evelyn',
         password: 'password123',
       });
       const todosA = clientA.table<{ title: string }>('todos');
       await todosA.put('r1', { title: 'Remote Item' });
       const userEvelyn =
-        await server.server.storage.getUserByUsername('evelyn');
+        await server.server.storage.getUserByUserName('evelyn');
       const table = await server.server.storage.getTable('todos');
       if (userEvelyn) {
         await waitForCondition(async () => {
@@ -302,7 +302,7 @@ describe.each(storageDescriptors)(
       await todosB.put('l1', { title: 'Local To Discard' });
 
       const success = await clientB.login({
-        username: 'evelyn',
+        userName: 'evelyn',
         password: 'password123',
         dataMode: DataMode.Remote,
       });
@@ -334,7 +334,7 @@ describe.each(storageDescriptors)(
       clientsToClose.push(client1);
 
       await client1.register({
-        username: 'frank',
+        userName: 'frank',
         password: 'password123',
         remember: true,
       });
@@ -363,7 +363,7 @@ describe.each(storageDescriptors)(
       );
 
       expect(client2.authStatus).toBe(AuthStatus.SignedIn);
-      expect(client2.username).toBe('frank');
+      expect(client2.userName).toBe('frank');
       expect(client2.syncStatus).toBe(SyncStatus.Connected);
 
       const todos2 = client2.table<{ title: string }>('todos');
@@ -381,7 +381,7 @@ describe.each(storageDescriptors)(
       clientsToClose.push(client);
 
       await client.register({
-        username: 'grace',
+        userName: 'grace',
         password: 'password123',
         remember: true,
       });
@@ -389,15 +389,14 @@ describe.each(storageDescriptors)(
 
       const todos = client.table<{ title: string }>('todos');
       await todos.put('g1', { title: 'Grace todo' });
-      await waitForCondition(
-        async () =>
-          (
-            await (
-              client as unknown as {
-                storage: { getPendingOutbox: () => Promise<unknown[]> };
-              }
-            ).storage.getPendingOutbox()
-          ).length === 0,
+      await waitForCondition(async () =>
+        (
+          client as unknown as {
+            storage: { getPendingOutbox: () => Promise<unknown[]> };
+          }
+        ).storage
+          .getPendingOutbox()
+          .then((p) => p.length === 0),
       );
 
       // 1. Logout with DataMode.Local preserves data
@@ -408,7 +407,7 @@ describe.each(storageDescriptors)(
 
       // 2. Log back in
       await client.login({
-        username: 'grace',
+        userName: 'grace',
         password: 'password123',
       });
       expect(client.authStatus).toBe(AuthStatus.SignedIn);
@@ -437,15 +436,15 @@ describe.each(storageDescriptors)(
       await todos.put('u1-item', { title: 'User 1 Todo' });
 
       await client.register({
-        username: 'user_first',
+        userName: 'user_first',
         password: 'password123',
       });
       expect(client.authStatus).toBe(AuthStatus.SignedIn);
-      expect(client.username).toBe('user_first');
+      expect(client.userName).toBe('user_first');
 
       await waitForCondition(async () => {
         const user1 =
-          await server.server.storage.getUserByUsername('user_first');
+          await server.server.storage.getUserByUserName('user_first');
         if (!user1) return false;
         const table = await server.server.storage.getTable('todos');
         const records = (await table?.getAllRecords(user1)) ?? [];
@@ -455,11 +454,11 @@ describe.each(storageDescriptors)(
 
       // Register User 2 while already SignedIn (defaults to clearing previous user data)
       await client.register({
-        username: 'user_second',
+        userName: 'user_second',
         password: 'password123',
       });
       expect(client.authStatus).toBe(AuthStatus.SignedIn);
-      expect(client.username).toBe('user_second');
+      expect(client.userName).toBe('user_second');
 
       await waitForCondition(() => client.syncStatus === SyncStatus.Connected);
 
@@ -479,7 +478,7 @@ describe.each(storageDescriptors)(
       clientsToClose.push(client);
 
       await client.register({
-        username: 'sliding_user',
+        userName: 'sliding_user',
         password: 'password123',
         remember: true,
       });
@@ -509,7 +508,7 @@ describe.each(storageDescriptors)(
       // Simulate restoring an expired / invalid token
       await rawStorage.setMeta('auth', {
         userId: 'stale_user_id',
-        username: 'stale_user',
+        userName: 'stale_user',
         token: 'invalid_or_expired_token_signature',
       });
       await rawStorage.close();
@@ -528,7 +527,7 @@ describe.each(storageDescriptors)(
       );
 
       expect(client.authStatus).toBe(AuthStatus.SignedOut);
-      expect(client.username).toBeUndefined();
+      expect(client.userName).toBeUndefined();
 
       const storedAuth = await checkStorage.getMeta('auth');
       expect(storedAuth).toBeUndefined();
@@ -548,7 +547,7 @@ describe.each(storageDescriptors)(
       clientsToClose.push(client);
 
       await client.register({
-        username: 'user_a',
+        userName: 'user_a',
         password: 'password123',
         remember: true,
       });
@@ -579,12 +578,12 @@ describe.each(storageDescriptors)(
 
       // 3. Switch account by logging in as User B (uses default DataMode.Remote)
       const successB = await client.login({
-        username: 'user_b',
+        userName: 'user_b',
         password: 'password123',
         remember: true,
       });
       expect(successB).toBe(true);
-      expect(client.username).toBe('user_b');
+      expect(client.userName).toBe('user_b');
 
       // Wait for snapshot sync
       await waitForCondition(async () => {
@@ -598,12 +597,12 @@ describe.each(storageDescriptors)(
 
       // 4. Switch back to User A
       const successA = await client.login({
-        username: 'user_a',
+        userName: 'user_a',
         password: 'password123',
         remember: true,
       });
       expect(successA).toBe(true);
-      expect(client.username).toBe('user_a');
+      expect(client.userName).toBe('user_a');
 
       await waitForCondition(async () => {
         const list = await todos.getAll();

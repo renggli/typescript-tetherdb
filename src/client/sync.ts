@@ -466,16 +466,20 @@ export class Sync {
 
   private async sendAuth() {
     this.pendingBatches.clear();
-    const lastSyncSeq =
-      (await this.storage.getMeta<number>('lastSyncSeq')) ?? 0;
-    this.send({
-      type: ClientMessageType.Auth,
-      protocolVersion: PROTOCOL_VERSION,
-      token: this.token,
-      clientId: this.clientId,
-      tables: this.options.tables,
-      lastSyncSeq,
-    });
+    try {
+      const lastSyncSeq =
+        (await this.storage.getMeta<number>('lastSyncSeq')) ?? 0;
+      this.send({
+        type: ClientMessageType.Auth,
+        protocolVersion: PROTOCOL_VERSION,
+        token: this.token,
+        clientId: this.clientId,
+        tables: this.options.tables,
+        lastSyncSeq,
+      });
+    } catch {
+      // Ignored if storage closed during reconnect
+    }
   }
 
   private async handleServerMessage(msg: ServerMessage) {

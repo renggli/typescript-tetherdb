@@ -18,7 +18,7 @@ export default defineConfig({
   plugins: [
     tetherPlugin({
       tables: ['todos'],
-      users: [{ username: 'demo', password: 'password123' }],
+      users: [{ userName: 'demo', password: 'password123' }],
     }),
   ],
   server: {

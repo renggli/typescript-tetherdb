@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseCliArgs } from '../../src/cli/args.js';
 import {
-  BackendType,
   TetherServerError,
   TetherServerErrorCode,
-} from '../../src/server/index.js';
+} from '../../src/server/errors.js';
+import { BackendType } from '../../src/server/storage/index.js';
 
 describe('parseCliArgs', () => {
   const originalEnv = process.env;

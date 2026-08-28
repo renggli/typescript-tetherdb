@@ -22,12 +22,12 @@ describe('FileStorage', () => {
 
   it('should persist user credentials and allow verification after reload', async () => {
     const user = await context.backend.createUser('bobby', 'secret123');
-    expect(user.username).toBe('bobby');
+    expect(user.userName).toBe('bobby');
 
     // Create a second storage pointing to the same directory
     const storage2 = new FileStorage({ baseDir: context.dir });
     try {
-      const loadedUser = await storage2.getUserByUsername('bobby');
+      const loadedUser = await storage2.getUserByUserName('bobby');
       expect(loadedUser).toBeDefined();
       expect(await loadedUser?.verifyPassword('secret123')).toBe(true);
       expect(await loadedUser?.verifyPassword('wrong')).toBe(false);
@@ -53,8 +53,8 @@ describe('FileStorage', () => {
     expect(await table.getRecord(user, '1')).toBeDefined();
     await user.delete();
 
-    expect(await context.backend.getUser(user.id)).toBeUndefined();
-    expect(await context.backend.getUserByUsername('charlie')).toBeUndefined();
+    expect(await context.backend.getUser(user.userId)).toBeUndefined();
+    expect(await context.backend.getUserByUserName('charlie')).toBeUndefined();
   });
 
   it('should persist tables, metadata, and changelog in bucketed directories', async () => {
@@ -72,8 +72,8 @@ describe('FileStorage', () => {
 
     await context.backend.applyChanges(user, [change]);
 
-    const bucket = user.id.slice(0, 2);
-    const userDir = path.join(context.dir, 'users', bucket, user.id);
+    const bucket = user.userId.slice(0, 2);
+    const userDir = path.join(context.dir, 'users', bucket, user.userId);
     const tableFile = path.join(userDir, 'settings', 'records.json');
     const metaFile = path.join(userDir, 'meta.json');
     const syncFile = path.join(userDir, 'sync.jsonl');
@@ -184,7 +184,7 @@ describe('FileStorage', () => {
     const storage2 = new FileStorage({ baseDir: context.dir });
 
     try {
-      const user2 = await storage2.getUser(user.id);
+      const user2 = await storage2.getUser(user.userId);
       expect(user2).toBeDefined();
       const table2 = await storage2.getTable('shared_data');
       expect(table2).toBeDefined();

@@ -43,7 +43,7 @@ export class TableFileStorage extends TableBaseStorage<FileStorage> {
     const isPrivate = isPrivateTable(this);
     const effectiveUserId = isPrivate
       ? user
-        ? validateUserId(user.id)
+        ? validateUserId(user.userId)
         : undefined
       : '__shared__';
     if (!effectiveUserId) return undefined;
@@ -64,7 +64,7 @@ export class TableFileStorage extends TableBaseStorage<FileStorage> {
     const isPrivate = isPrivateTable(this);
     const effectiveUserId = isPrivate
       ? user
-        ? validateUserId(user.id)
+        ? validateUserId(user.userId)
         : undefined
       : '__shared__';
     if (!effectiveUserId) return [];

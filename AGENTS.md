@@ -27,6 +27,7 @@ This document outlines the core architecture, developer rules, TypeScript conven
 - **No Loose Object Records (`Record<string, any>`)**: Prefer explicit typed interfaces, `Map` / `ReadonlyMap`, and `Set` / `ReadonlySet` over generic object records (`Record<string, string>` or `Record<string, any>`).
 - **Backward Compatibility Boundaries**: Preserve backward compatibility for public APIs and persistent storage layers against the last public release (tagged with git). For internal code, transient data structures, and test suites, refactor directly without retaining legacy aliases or wrapper cruft.
 - **Immediate Cleanup**: Clean up after yourself immediately. Delete unused methods, properties, variables, types, and imports during refactoring.
+- **No Inline Imports**: All imports must be declared as static top-level `import` statements at the very top of the file. Never use inline `import('...')` type queries or inline dynamic imports within code, type annotations, or function signatures.
 - **Indentation**: Always use 2 spaces for indentation across all code and configuration files.
 - **Quality Loop**: Before submitting or after making any code change, execute the validation loop:
   1. `npm run format` — Auto-format code files.

@@ -5,7 +5,6 @@ import * as path from 'node:path';
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
 import { shouldOverwrite } from '../../../shared/clock.js';
 import {
-  BackendType,
   type ChangeRecord,
   OperationType,
   type StoredRecord,
@@ -14,12 +13,12 @@ import {
 import { getOrCreateKeyfileSecret, hashPassword } from '../../crypto.js';
 import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
 import {
-  normalizeUsername,
+  normalizeUserName,
   validatePassword,
   validateRecordId,
   validateTableName,
   validateUserId,
-  validateUsername,
+  validateUserName,
 } from '../../validate.js';
 import {
   assertCanMutate,
@@ -30,14 +29,15 @@ import {
   validateBatchChanges,
 } from '../base/index.js';
 import type { MaintenanceResult, StorageOptions } from '../storage.js';
-import type { TableStorage } from '../table.js';
+import { BackendType } from '../storage.js';
+import type { ApplyChangesOptions, TableStorage } from '../table.js';
 import type { UserStorage } from '../user.js';
 import { TableSqliteStorage } from './table.js';
 import { UserSqliteStorage } from './user.js';
 
 export interface SqliteUserData {
-  id: string;
-  username: string;
+  userId: string;
+  userName: string;
   passwordHash: string | null;
   createdAt: number;
 }
@@ -45,7 +45,7 @@ export interface SqliteUserData {
 export interface UsersDbHandle {
   db: DatabaseSync;
   stmtFindById: StatementSync;
-  stmtFindByUsername: StatementSync;
+  stmtFindByUserName: StatementSync;
   stmtInsertUser: StatementSync;
   stmtUpdatePassword: StatementSync;
   stmtDeleteUser: StatementSync;
@@ -192,12 +192,12 @@ export class SqliteStorage extends BaseStorage {
     return tables;
   }
 
-  async createUser(username: string, password: string): Promise<UserStorage> {
-    const safeUsername = validateUsername(username);
+  async createUser(userName: string, password: string): Promise<UserStorage> {
+    const safeUserName = validateUserName(userName);
     const validPassword = validatePassword(password);
     const usersDb = this.getUsersDb();
 
-    const existing = usersDb.stmtFindByUsername.get(safeUsername);
+    const existing = usersDb.stmtFindByUserName.get(safeUserName);
     if (existing) {
       throw new TetherServerError(
         TetherServerErrorCode.AlreadyExists,
@@ -209,10 +209,10 @@ export class SqliteStorage extends BaseStorage {
     const passwordHash = await hashPassword(validPassword);
     const createdAt = Date.now();
 
-    usersDb.stmtInsertUser.run(userId, safeUsername, passwordHash, createdAt);
+    usersDb.stmtInsertUser.run(userId, safeUserName, passwordHash, createdAt);
     const userData: SqliteUserData = {
-      id: userId,
-      username: safeUsername,
+      userId,
+      userName: safeUserName,
       passwordHash,
       createdAt,
     };
@@ -220,8 +220,8 @@ export class SqliteStorage extends BaseStorage {
     return new UserSqliteStorage(userData, this);
   }
 
-  async getUser(id: string): Promise<UserStorage | undefined> {
-    const safeUserId = validateUserId(id);
+  async getUser(userId: string): Promise<UserStorage | undefined> {
+    const safeUserId = validateUserId(userId);
     const data = this.findUserDataById(safeUserId);
     if (data) {
       return new UserSqliteStorage(data, this);
@@ -229,22 +229,22 @@ export class SqliteStorage extends BaseStorage {
     return undefined;
   }
 
-  async getUserByUsername(username: string): Promise<UserStorage | undefined> {
-    const safeUsername = normalizeUsername(username);
-    if (!safeUsername) return undefined;
+  async getUserByUserName(userName: string): Promise<UserStorage | undefined> {
+    const safeUserName = normalizeUserName(userName);
+    if (!safeUserName) return undefined;
     const usersDb = this.getUsersDb();
-    const row = usersDb.stmtFindByUsername.get(safeUsername) as
+    const row = usersDb.stmtFindByUserName.get(safeUserName) as
       | {
           id: string;
-          username: string;
+          user_name: string;
           password_hash: string | null;
           created_at: number;
         }
       | undefined;
     if (!row) return undefined;
     const data: SqliteUserData = {
-      id: row.id,
-      username: row.username,
+      userId: row.id,
+      userName: row.user_name,
       passwordHash: row.password_hash,
       createdAt: row.created_at,
     };
@@ -255,17 +255,16 @@ export class SqliteStorage extends BaseStorage {
     const usersDb = this.getUsersDb();
     const rows = usersDb.stmtListUsers.all() as Array<{
       id: string;
-      username: string;
+      user_name: string;
       password_hash: string | null;
       created_at: number;
     }>;
-
     return rows.map(
       (r) =>
         new UserSqliteStorage(
           {
-            id: r.id,
-            username: r.username,
+            userId: r.id,
+            userName: r.user_name,
             passwordHash: r.password_hash,
             createdAt: r.created_at,
           },
@@ -277,6 +276,7 @@ export class SqliteStorage extends BaseStorage {
   async applyChanges(
     user: UserStorage | undefined,
     changes: ChangeRecord[],
+    options?: ApplyChangesOptions,
   ): Promise<{ applied: ChangeRecord[]; newSeq: number }> {
     const dbHandle = this.getTablesDb();
     const defaultMaxRecords = this.options.maxRecords ?? 10_000;
@@ -311,7 +311,7 @@ export class SqliteStorage extends BaseStorage {
         if (!table) continue;
         const isPrivate = isPrivateTable(table);
 
-        if (isPrivate && !user) {
+        if (isPrivate && !user && !options?.skipPermissionCheck) {
           throw new TetherServerError(
             TetherServerErrorCode.Forbidden,
             `Authentication required for private table "${tableName}"`,
@@ -319,7 +319,7 @@ export class SqliteStorage extends BaseStorage {
         }
 
         const effectiveUserId: string =
-          isPrivate && user ? user.id : '__shared__';
+          isPrivate && user ? user.userId : '__shared__';
 
         const maxRecords = table.settings.maxRecords ?? defaultMaxRecords;
 
@@ -334,23 +334,26 @@ export class SqliteStorage extends BaseStorage {
               client_id: string;
               deleted: number;
               data?: string | null;
-              owner_id?: string | null;
+              user_id?: string | null;
             }
           | undefined;
 
-        const existing: StoredRecord | undefined = existingRow
-          ? {
-              id: recordId,
-              version: existingRow.version,
-              timestamp: existingRow.timestamp,
-              clientId: existingRow.client_id,
-              deleted: Boolean(existingRow.deleted),
-              data: existingRow.data ? JSON.parse(existingRow.data) : null,
-              ownerId: existingRow.owner_id ?? undefined,
-            }
-          : undefined;
+        const existing: (StoredRecord & { userId?: string }) | undefined =
+          existingRow
+            ? {
+                id: recordId,
+                version: existingRow.version,
+                timestamp: existingRow.timestamp,
+                clientId: existingRow.client_id,
+                deleted: Boolean(existingRow.deleted),
+                data: existingRow.data ? JSON.parse(existingRow.data) : null,
+                userId: existingRow.user_id ?? undefined,
+              }
+            : undefined;
 
-        assertCanMutate(table, user, change, existing);
+        if (!options?.skipPermissionCheck) {
+          assertCanMutate(table, user, change, existing);
+        }
 
         if (
           change.op === OperationType.Put &&
@@ -377,16 +380,16 @@ export class SqliteStorage extends BaseStorage {
             change.op === OperationType.Delete
               ? null
               : JSON.stringify(change.data ?? null);
-          const ownerId = existing?.ownerId ?? user?.id ?? null;
+          const userId = existing?.userId ?? user?.userId ?? null;
 
           if (existingRow) {
             dbHandle.stmtUpdateRecord.run(
               nextVersion,
               change.timestamp,
-              change.clientId,
+              change.clientId ?? null,
               isDeleted,
               dataStr,
-              ownerId,
+              userId,
               tableName,
               effectiveUserId,
               recordId,
@@ -398,10 +401,10 @@ export class SqliteStorage extends BaseStorage {
               recordId,
               nextVersion,
               change.timestamp,
-              change.clientId,
+              change.clientId ?? null,
               isDeleted,
               dataStr,
-              ownerId,
+              userId,
             );
           }
 
@@ -412,10 +415,10 @@ export class SqliteStorage extends BaseStorage {
             change.op,
             nextVersion,
             change.timestamp,
-            change.clientId,
+            change.clientId ?? null,
             isDeleted,
             dataStr,
-            ownerId,
+            userId,
           ) as { lastInsertRowid: number | bigint };
 
           const assignedSeq = Number(res.lastInsertRowid);
@@ -496,7 +499,7 @@ export class SqliteStorage extends BaseStorage {
     ) as unknown as Array<{
       seq: number;
       table_name: string;
-      user_id: string;
+      partition: string;
       id: string;
       op: string;
       version: number;
@@ -504,7 +507,7 @@ export class SqliteStorage extends BaseStorage {
       client_id: string;
       deleted: number;
       data: string | null;
-      owner_id?: string | null;
+      user_id?: string | null;
     }>;
 
     const changes: ChangeRecord[] = [];
@@ -514,7 +517,7 @@ export class SqliteStorage extends BaseStorage {
       if (tableFilters && !tableFilters.includes(r.table_name)) continue;
 
       const isPrivate = isPrivateTable(table);
-      if (isPrivate && (!user || r.user_id !== user.id)) continue;
+      if (isPrivate && (!user || r.partition !== user.userId)) continue;
 
       changes.push({
         seq: r.seq,
@@ -523,9 +526,9 @@ export class SqliteStorage extends BaseStorage {
         op: r.op as OperationType,
         version: r.version,
         timestamp: r.timestamp,
-        clientId: r.client_id,
+        clientId: r.client_id ?? undefined,
         data: r.data ? JSON.parse(r.data) : undefined,
-        ownerId: r.owner_id ?? undefined,
+        ...({ userId: r.user_id ?? undefined } as { userId?: string }),
       });
     }
 
@@ -628,20 +631,20 @@ export class SqliteStorage extends BaseStorage {
     this.usersHandle = {
       db,
       stmtFindById: db.prepare(
-        'SELECT id, username, password_hash, created_at FROM users WHERE id = ?',
+        'SELECT id, user_name, password_hash, created_at FROM users WHERE id = ?',
       ),
-      stmtFindByUsername: db.prepare(
-        'SELECT id, username, password_hash, created_at FROM users WHERE username = ?',
+      stmtFindByUserName: db.prepare(
+        'SELECT id, user_name, password_hash, created_at FROM users WHERE user_name = ?',
       ),
       stmtInsertUser: db.prepare(
-        'INSERT INTO users (id, username, password_hash, created_at) VALUES (?, ?, ?, ?)',
+        'INSERT INTO users (id, user_name, password_hash, created_at) VALUES (?, ?, ?, ?)',
       ),
       stmtUpdatePassword: db.prepare(
         'UPDATE users SET password_hash = ? WHERE id = ?',
       ),
       stmtDeleteUser: db.prepare('DELETE FROM users WHERE id = ?'),
       stmtListUsers: db.prepare(
-        'SELECT id, username, password_hash, created_at FROM users ORDER BY created_at ASC',
+        'SELECT id, user_name, password_hash, created_at FROM users ORDER BY created_at ASC',
       ),
     };
 
@@ -670,31 +673,31 @@ export class SqliteStorage extends BaseStorage {
       ),
       stmtDeleteTable: db.prepare('DELETE FROM tables WHERE name = ?'),
       stmtGetRecord: db.prepare(
-        'SELECT id, version, timestamp, client_id, deleted, data, owner_id FROM records WHERE table_name = ? AND user_id = ? AND id = ?',
+        'SELECT id, version, timestamp, client_id, deleted, data, user_id FROM records WHERE table_name = ? AND partition = ? AND id = ?',
       ),
       stmtGetRecordForUpdate: db.prepare(
-        'SELECT version, timestamp, client_id, deleted, owner_id FROM records WHERE table_name = ? AND user_id = ? AND id = ?',
+        'SELECT version, timestamp, client_id, deleted, user_id FROM records WHERE table_name = ? AND partition = ? AND id = ?',
       ),
       stmtGetSnapshotByTable: db.prepare(
-        'SELECT table_name, user_id, id, version, timestamp, client_id, deleted, data, owner_id FROM records WHERE table_name = ? AND user_id = ? AND deleted = 0',
+        'SELECT table_name, partition, id, version, timestamp, client_id, deleted, data, user_id FROM records WHERE table_name = ? AND partition = ? AND deleted = 0',
       ),
       stmtInsertRecord: db.prepare(
-        'INSERT INTO records (table_name, user_id, id, version, timestamp, client_id, deleted, data, owner_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO records (table_name, partition, id, version, timestamp, client_id, deleted, data, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       ),
       stmtUpdateRecord: db.prepare(
-        'UPDATE records SET version = ?, timestamp = ?, client_id = ?, deleted = ?, data = ?, owner_id = ? WHERE table_name = ? AND user_id = ? AND id = ?',
+        'UPDATE records SET version = ?, timestamp = ?, client_id = ?, deleted = ?, data = ?, user_id = ? WHERE table_name = ? AND partition = ? AND id = ?',
       ),
       stmtCountTableRecords: db.prepare(
-        'SELECT COUNT(*) as count FROM records WHERE table_name = ? AND user_id = ? AND deleted = 0',
+        'SELECT COUNT(*) as count FROM records WHERE table_name = ? AND partition = ? AND deleted = 0',
       ),
       stmtDeleteTableRecords: db.prepare(
         'DELETE FROM records WHERE table_name = ?',
       ),
       stmtInsertChangelog: db.prepare(
-        'INSERT INTO changelog (table_name, user_id, id, op, version, timestamp, client_id, deleted, data, owner_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO changelog (table_name, partition, id, op, version, timestamp, client_id, deleted, data, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       ),
       stmtGetChangelogSince: db.prepare(
-        'SELECT seq, table_name, user_id, id, op, version, timestamp, client_id, deleted, data, owner_id FROM changelog WHERE seq > ? ORDER BY seq ASC',
+        'SELECT seq, table_name, partition, id, op, version, timestamp, client_id, deleted, data, user_id FROM changelog WHERE seq > ? ORDER BY seq ASC',
       ),
       stmtPruneChangelog: db.prepare('DELETE FROM changelog WHERE seq < ?'),
       stmtDeleteTableChangelog: db.prepare(
@@ -717,28 +720,34 @@ export class SqliteStorage extends BaseStorage {
     dbHandle.stmtUpdateTableSettings.run(JSON.stringify(settings), safeName);
   }
 
-  findUserDataById(id: string): SqliteUserData | undefined {
+  findUserDataById(userId: string): SqliteUserData | undefined {
     const usersDb = this.getUsersDb();
-    const row = usersDb.stmtFindById.get(id) as
+    const row = usersDb.stmtFindById.get(userId) as
       | {
           id: string;
-          username: string;
+          user_name: string;
           password_hash: string | null;
           created_at: number;
         }
       | undefined;
     if (!row) return undefined;
     return {
-      id: row.id,
-      username: row.username,
+      userId: row.id,
+      userName: row.user_name,
       passwordHash: row.password_hash,
       createdAt: row.created_at,
     };
   }
 
-  updateUserData(id: string, passwordHash: string): void {
+  updateUserData(userId: string, passwordHash: string): void {
     const usersDb = this.getUsersDb();
-    usersDb.stmtUpdatePassword.run(passwordHash, id);
+    usersDb.stmtUpdatePassword.run(passwordHash, userId);
+  }
+
+  deleteUserData(userId: string): boolean {
+    const usersDb = this.getUsersDb();
+    const info = usersDb.stmtDeleteUser.run(userId);
+    return info.changes > 0;
   }
 
   deleteTable(name: string): boolean {
@@ -755,8 +764,8 @@ export class SqliteStorage extends BaseStorage {
     return true;
   }
 
-  deleteUser(id: string): boolean {
-    const safeUserId = validateUserId(id);
+  deleteUser(userId: string): boolean {
+    const safeUserId = validateUserId(userId);
     const usersDb = this.getUsersDb();
     const res = usersDb.stmtDeleteUser.run(safeUserId) as {
       changes: number;
@@ -765,11 +774,11 @@ export class SqliteStorage extends BaseStorage {
 
     if (this.tablesHandle) {
       this.tablesHandle.db
-        .prepare('DELETE FROM records WHERE user_id = ?')
-        .run(safeUserId);
+        .prepare('DELETE FROM records WHERE partition = ? OR user_id = ?')
+        .run(safeUserId, safeUserId);
       this.tablesHandle.db
-        .prepare('DELETE FROM changelog WHERE user_id = ?')
-        .run(safeUserId);
+        .prepare('DELETE FROM changelog WHERE partition = ? OR user_id = ?')
+        .run(safeUserId, safeUserId);
     }
     return true;
   }
@@ -782,11 +791,18 @@ function initUsersSchema(db: DatabaseSync): void {
     PRAGMA user_version = 1;
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
-      username TEXT UNIQUE NOT NULL,
+      user_name TEXT UNIQUE NOT NULL,
       password_hash TEXT,
       created_at INTEGER NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS idx_users_username ON users (username);
+  `);
+  try {
+    db.exec('ALTER TABLE users RENAME COLUMN username TO user_name;');
+  } catch {
+    // Already migrated or column user_name exists
+  }
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_users_user_name ON users (user_name);
   `);
 }
 
@@ -801,36 +817,36 @@ function initTablesSchema(db: DatabaseSync): void {
 
     CREATE TABLE IF NOT EXISTS records (
       table_name TEXT NOT NULL,
-      user_id TEXT NOT NULL,
+      partition TEXT NOT NULL,
       id TEXT NOT NULL,
       version INTEGER NOT NULL,
       timestamp INTEGER NOT NULL,
-      client_id TEXT NOT NULL,
+      client_id TEXT,
       deleted INTEGER NOT NULL,
       data TEXT,
-      owner_id TEXT,
-      PRIMARY KEY (table_name, user_id, id)
+      user_id TEXT,
+      PRIMARY KEY (table_name, partition, id)
     );
 
     CREATE INDEX IF NOT EXISTS idx_records_lookup
-      ON records (table_name, user_id, deleted);
+      ON records (table_name, partition, deleted);
 
     CREATE TABLE IF NOT EXISTS changelog (
       seq INTEGER PRIMARY KEY AUTOINCREMENT,
       table_name TEXT NOT NULL,
-      user_id TEXT NOT NULL,
+      partition TEXT NOT NULL,
       id TEXT NOT NULL,
       op TEXT NOT NULL,
       version INTEGER NOT NULL,
       timestamp INTEGER NOT NULL,
-      client_id TEXT NOT NULL,
+      client_id TEXT,
       deleted INTEGER NOT NULL,
       data TEXT,
-      owner_id TEXT
+      user_id TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_changelog_seq
-      ON changelog (seq, table_name, user_id);
+      ON changelog (seq, table_name, partition);
 
     CREATE TABLE IF NOT EXISTS meta (
       rowid INTEGER PRIMARY KEY,
@@ -840,12 +856,22 @@ function initTablesSchema(db: DatabaseSync): void {
   `);
 
   try {
-    db.exec('ALTER TABLE records ADD COLUMN owner_id TEXT;');
+    db.exec('ALTER TABLE records RENAME COLUMN user_id TO partition;');
+  } catch {
+    // Already partitioned or fresh table
+  }
+  try {
+    db.exec('ALTER TABLE changelog RENAME COLUMN user_id TO partition;');
+  } catch {
+    // Already partitioned or fresh table
+  }
+  try {
+    db.exec('ALTER TABLE records ADD COLUMN user_id TEXT;');
   } catch {
     // Column already present
   }
   try {
-    db.exec('ALTER TABLE changelog ADD COLUMN owner_id TEXT;');
+    db.exec('ALTER TABLE changelog ADD COLUMN user_id TEXT;');
   } catch {
     // Column already present
   }

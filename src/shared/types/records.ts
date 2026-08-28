@@ -1,5 +1,11 @@
 /**
- * The type of mutation operation performed on a record.
+ * Core record schemas and mutation operation types.
+ *
+ * @module tetherdb/shared/types/records
+ */
+
+/**
+ * Mutation operation type performed on a record.
  */
 export enum OperationType {
   /** Insert or update a record payload. */
@@ -9,7 +15,7 @@ export enum OperationType {
 }
 
 /**
- * Represents a persisted record with local metadata.
+ * Represents a persisted record in local storage or database with metadata.
  *
  * @typeParam T - The data type of the stored record value.
  */
@@ -26,22 +32,12 @@ export interface StoredRecord<T = unknown> {
   deleted?: boolean;
   /** Identifier of client that performed the write. */
   clientId?: string;
-  /** Creator user identifier of the record. */
-  ownerId?: string;
+  /** Creator username of the record. */
+  userName?: string;
 }
 
 /**
- * Represents a single record entry in a full database snapshot.
- *
- * @typeParam T - The data type of the record payload.
- */
-export interface SnapshotRecord<T = unknown> extends StoredRecord<T> {
-  /** Target table name. */
-  table: string;
-}
-
-/**
- * Represents an individual mutation operation record to be synced.
+ * Represents an individual mutation operation record synced over the wire.
  *
  * @typeParam T - The data type of the record payload.
  */
@@ -61,7 +57,17 @@ export interface ChangeRecord<T = unknown> {
   /** Monotonic epoch timestamp when the change was initiated. */
   timestamp: number;
   /** Identifier of the client that originated the change. */
-  clientId: string;
-  /** Creator user identifier of the record. */
-  ownerId?: string;
+  clientId?: string;
+  /** Creator username of the record. */
+  userName?: string;
+}
+
+/**
+ * Represents a single record entry in a full database snapshot wire payload.
+ *
+ * @typeParam T - The data type of the record payload.
+ */
+export interface SnapshotRecord<T = unknown> extends StoredRecord<T> {
+  /** Target table name. */
+  table: string;
 }

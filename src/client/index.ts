@@ -8,6 +8,7 @@ export {
   OperationType,
   Permission,
   PROTOCOL_VERSION,
+  type StoredRecord,
   type TablePermissions,
   type TableSettings,
 } from '../shared/types.js';

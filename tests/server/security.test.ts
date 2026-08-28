@@ -4,11 +4,8 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { acquireServerLock } from '../../src/server/lock.js';
 import { TetherServer } from '../../src/server/server.js';
-import {
-  BackendType,
-  OperationType,
-  Permission,
-} from '../../src/shared/types.js';
+import { BackendType } from '../../src/server/storage/index.js';
+import { OperationType, Permission } from '../../src/shared/types.js';
 import { type StorageContext, storageDescriptors } from './storage/matrix.js';
 
 describe.each(storageDescriptors)(

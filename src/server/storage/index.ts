@@ -21,11 +21,12 @@ export {
   SqliteStorage,
   type SqliteStorageOptions,
 } from './sqlite/storage.js';
-export type {
-  MaintenanceResult,
-  Storage,
-  StorageOptions,
-  StorageStatus,
+export {
+  BackendType,
+  type MaintenanceResult,
+  type Storage,
+  type StorageOptions,
+  type StorageStatus,
 } from './storage.js';
 export type { TableStorage } from './table.js';
 export type { UserStorage } from './user.js';

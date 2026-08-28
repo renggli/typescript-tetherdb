@@ -48,7 +48,7 @@ describe('handleUsersCommand', () => {
     testLogger.clear();
     await handleUsersCommand(target, ['users', 'list']);
     expect(testLogger.hasMessage('Registered users (1):')).toBe(true);
-    expect(testLogger.hasMessage(`[${user.id}] alice`)).toBe(true);
+    expect(testLogger.hasMessage(`[${user.userId}] alice`)).toBe(true);
   });
 
   it('should add a new user account', async () => {
@@ -56,7 +56,7 @@ describe('handleUsersCommand', () => {
     expect(testLogger.hasMessage('Created user: [')).toBe(true);
     expect(testLogger.hasMessage('bobby')).toBe(true);
 
-    const user = await storage.getUserByUsername('bobby');
+    const user = await storage.getUserByUserName('bobby');
     expect(user).toBeDefined();
   });
 
@@ -64,9 +64,9 @@ describe('handleUsersCommand', () => {
     const user = await storage.createUser('charlie', 'password123');
 
     // Delete existing user
-    await handleUsersCommand(target, ['users', 'rm', user.id]);
-    expect(testLogger.hasMessage(`Deleted user: ${user.id}`)).toBe(true);
-    expect(await storage.getUser(user.id)).toBeUndefined();
+    await handleUsersCommand(target, ['users', 'rm', user.userId]);
+    expect(testLogger.hasMessage(`Deleted user: ${user.userId}`)).toBe(true);
+    expect(await storage.getUser(user.userId)).toBeUndefined();
 
     // Delete non-existent user
     await expect(

@@ -1,8 +1,4 @@
-import type {
-  BackendType,
-  ChangeRecord,
-  TableSettings,
-} from '../../../shared/types.js';
+import type { ChangeRecord, TableSettings } from '../../../shared/types.js';
 import { verifySessionToken } from '../../crypto.js';
 import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
 import {
@@ -12,12 +8,13 @@ import {
   validateTimestamp,
 } from '../../validate.js';
 import type {
+  BackendType,
   MaintenanceResult,
   Storage,
   StorageOptions,
   StorageStatus,
 } from '../storage.js';
-import type { TableStorage } from '../table.js';
+import type { ApplyChangesOptions, TableStorage } from '../table.js';
 import type { UserStorage } from '../user.js';
 
 /**
@@ -49,10 +46,10 @@ export abstract class BaseStorage implements Storage {
   abstract getTables(): Promise<TableStorage[]>;
   abstract deleteTable(name: string): boolean | Promise<boolean>;
 
-  abstract createUser(username: string, password: string): Promise<UserStorage>;
+  abstract createUser(userName: string, password: string): Promise<UserStorage>;
   abstract getUser(id: string): Promise<UserStorage | undefined>;
-  abstract getUserByUsername(
-    username: string,
+  abstract getUserByUserName(
+    userName: string,
   ): Promise<UserStorage | undefined>;
   abstract getUsers(): Promise<UserStorage[]>;
   abstract deleteUser(id: string): boolean | Promise<boolean>;
@@ -60,6 +57,7 @@ export abstract class BaseStorage implements Storage {
   abstract applyChanges(
     user: UserStorage | undefined,
     changes: ChangeRecord[],
+    options?: ApplyChangesOptions,
   ): Promise<{ applied: ChangeRecord[]; newSeq: number }>;
 
   abstract getChangesSince(

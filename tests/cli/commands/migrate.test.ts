@@ -6,14 +6,17 @@ import type { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { handleMigrateCommand } from '../../../src/cli/commands/migrate.js';
 import {
-  FileStorage,
-  SqliteStorage,
   TetherServerError,
   TetherServerErrorCode,
-} from '../../../src/server/index.js';
+} from '../../../src/server/errors.js';
 import { acquireServerLock } from '../../../src/server/lock.js';
+import {
+  BackendType,
+  FileStorage,
+  SqliteStorage,
+} from '../../../src/server/storage/index.js';
 import { getUserBucket } from '../../../src/server/validate.js';
-import { BackendType, OperationType } from '../../../src/shared/types.js';
+import { OperationType } from '../../../src/shared/types.js';
 
 describe('handleMigrateCommand', () => {
   let tmpDir: string;
@@ -157,8 +160,8 @@ describe('handleMigrateCommand', () => {
     expect(todosTable).toBeDefined();
 
     const mockUser = {
-      id: userId,
-      username: 'test',
+      userId,
+      userName: 'test',
       createdAt: 1000,
       verifyPassword: async () => true,
       changePassword: async () => {},
@@ -258,8 +261,8 @@ describe('handleMigrateCommand', () => {
     expect(todosTable).toBeDefined();
 
     const mockUser = {
-      id: userId,
-      username: 'fileuser',
+      userId,
+      userName: 'fileuser',
       createdAt: 1000,
       verifyPassword: async () => true,
       changePassword: async () => {},

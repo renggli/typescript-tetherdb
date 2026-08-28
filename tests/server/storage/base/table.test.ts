@@ -22,8 +22,8 @@ import {
 
 describe('TableBaseStorage helpers & permissions', () => {
   const mockUser: UserStorage = {
-    id: 'usr-123',
-    username: 'alice',
+    userId: 'usr-123',
+    userName: 'alice',
     createdAt: Date.now(),
     verifyPassword: async () => true,
     changePassword: async () => {},
@@ -31,8 +31,8 @@ describe('TableBaseStorage helpers & permissions', () => {
   };
 
   const otherUser: UserStorage = {
-    id: 'usr-456',
-    username: 'bob',
+    userId: 'usr-456',
+    userName: 'bob',
     createdAt: Date.now(),
     verifyPassword: async () => true,
     changePassword: async () => {},
@@ -138,7 +138,7 @@ describe('TableBaseStorage helpers & permissions', () => {
 
       const result1 = applyChangeToRecord(putChange, undefined, 1, mockUser);
       expect(result1.updatedRecord.version).toBe(1);
-      expect(result1.updatedRecord.ownerId).toBe('usr-123');
+      expect(result1.updatedRecord.userId).toBe('usr-123');
       expect(result1.appliedChange.seq).toBe(1);
       expect(result1.appliedChange.data).toEqual({ name: 'Item' });
 
@@ -173,7 +173,7 @@ describe('TableBaseStorage helpers & permissions', () => {
         version: 1,
         timestamp: 100,
         clientId: 'c1',
-        ownerId: mockUser.id,
+        userId: mockUser.userId,
       };
 
       const delChange: ChangeRecord = {
@@ -218,7 +218,7 @@ describe('TableBaseStorage helpers & permissions', () => {
         version: 1,
         timestamp: 100,
         clientId: 'c1',
-        ownerId: mockUser.id,
+        userId: mockUser.userId,
       };
 
       // Other user cannot update existing owner record
@@ -239,7 +239,7 @@ describe('TableBaseStorage helpers & permissions', () => {
         version: 1,
         timestamp: 100,
         clientId: 'c1',
-        ownerId: mockUser.id,
+        userId: mockUser.userId,
       };
 
       expect(canReadRecord(table, undefined, record)).toBe(false);

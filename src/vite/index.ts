@@ -4,10 +4,11 @@
  * @module tetherdb/vite
  */
 
+import type * as http from 'node:http';
 import type { Plugin, PreviewServer, ViteDevServer } from 'vite';
 import { TetherServer, type TetherServerOptions } from '../server/server.js';
 import { MemoryStorage } from '../server/storage/memory/index.js';
-import type { TableSettings } from '../shared/types.js';
+import type { TableRow, TableSettings } from '../shared/types.js';
 
 /**
  * Table declaration for automatic provisioning on startup.
@@ -17,6 +18,8 @@ export interface TetherPluginTableDeclaration {
   name: string;
   /** Optional table settings and permissions. */
   settings?: TableSettings;
+  /** Optional initial rows to populate declaratively into the table. */
+  rows?: TableRow[];
 }
 
 /**
@@ -24,7 +27,7 @@ export interface TetherPluginTableDeclaration {
  */
 export interface TetherPluginUserDeclaration {
   /** Account username. */
-  username: string;
+  userName: string;
   /** Account password. */
   password: string;
 }
@@ -58,26 +61,28 @@ export function tetherPlugin(options: TetherPluginOptions = {}): Plugin {
       ...options,
     });
 
+    if (options.users) {
+      for (const user of options.users) {
+        await tetherServer.declareUser(user.userName, user.password);
+      }
+    }
+
     if (options.tables) {
       for (const table of options.tables) {
         if (typeof table === 'string') {
           await tetherServer.declareTable(table);
         } else {
-          await tetherServer.declareTable(table.name, table.settings);
+          await tetherServer.declareTable(
+            table.name,
+            table.settings,
+            table.rows ?? table.settings?.rows,
+          );
         }
       }
     }
 
-    if (options.users) {
-      for (const user of options.users) {
-        await tetherServer.declareUser(user.username, user.password);
-      }
-    }
-
     if (server.httpServer) {
-      tetherServer.attach(
-        server.httpServer as unknown as import('node:http').Server,
-      );
+      tetherServer.attach(server.httpServer as unknown as http.Server);
       server.httpServer.on('close', () => {
         tetherServer?.close().catch(() => {
           // Ignore close errors during server shutdown

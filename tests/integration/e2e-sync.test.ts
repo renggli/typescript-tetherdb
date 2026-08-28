@@ -71,13 +71,13 @@ describe.each(storageDescriptors)(
 
     it('should sync local changes from Client A to server', async () => {
       const clientA = createClient('client-a');
-      await clientA.login({ username: 'testuser', password: 'password123' });
+      await clientA.login({ userName: 'testuser', password: 'password123' });
       await waitForCondition(() => clientA.syncStatus === SyncStatus.Connected);
 
       const todosA = clientA.table<{ title: string; done: boolean }>('todos');
       await todosA.put('t1', { title: 'Buy groceries', done: false });
 
-      const user = await server.storage.getUserByUsername('testuser');
+      const user = await server.storage.getUserByUserName('testuser');
       expect(user).toBeDefined();
       if (!user) return;
       const todosTable = await server.storage.getTable('todos');
@@ -98,12 +98,12 @@ describe.each(storageDescriptors)(
     });
 
     it('should perform initial snapshot sync on new client connection', async () => {
-      const user = await server.storage.getUserByUsername('testuser');
+      const user = await server.storage.getUserByUserName('testuser');
       const todosTable = await server.storage.getTable('todos');
 
       // Client A creates data
       const clientA = createClient('client-a');
-      await clientA.login({ username: 'testuser', password: 'password123' });
+      await clientA.login({ userName: 'testuser', password: 'password123' });
       await waitForCondition(() => clientA.syncStatus === SyncStatus.Connected);
 
       const todosA = clientA.table<{ title: string; done: boolean }>('todos');
@@ -120,7 +120,7 @@ describe.each(storageDescriptors)(
 
       // Client B connects from clean state
       const clientB = createClient('client-b');
-      await clientB.login({ username: 'testuser', password: 'password123' });
+      await clientB.login({ userName: 'testuser', password: 'password123' });
 
       const todosB = clientB.table<{ title: string; done: boolean }>('todos');
       await waitForCondition(async () => (await todosB.getAll()).length === 2);
@@ -139,8 +139,8 @@ describe.each(storageDescriptors)(
       const clientA = createClient('client-a');
       const clientB = createClient('client-b');
 
-      await clientA.login({ username: 'testuser', password: 'password123' });
-      await clientB.login({ username: 'testuser', password: 'password123' });
+      await clientA.login({ userName: 'testuser', password: 'password123' });
+      await clientB.login({ userName: 'testuser', password: 'password123' });
 
       await waitForCondition(
         () =>
@@ -177,11 +177,11 @@ describe.each(storageDescriptors)(
     });
 
     it('should catch up with diff sync after being offline', async () => {
-      const user = await server.storage.getUserByUsername('testuser');
+      const user = await server.storage.getUserByUserName('testuser');
       const itemsTable = await server.storage.getTable('items');
 
       const clientA = createClient('client-a');
-      await clientA.login({ username: 'testuser', password: 'password123' });
+      await clientA.login({ userName: 'testuser', password: 'password123' });
       await waitForCondition(() => clientA.syncStatus === SyncStatus.Connected);
 
       const itemsA = clientA.table<{ name: string }>('items');
@@ -202,7 +202,7 @@ describe.each(storageDescriptors)(
         port,
         webSocketClass: WebSocket,
       });
-      await clientB.login({ username: 'testuser', password: 'password123' });
+      await clientB.login({ userName: 'testuser', password: 'password123' });
 
       const itemsB1 = clientB.table<{ name: string }>('items');
       await waitForCondition(async () => (await itemsB1.getAll()).length === 1);
@@ -229,7 +229,7 @@ describe.each(storageDescriptors)(
         port,
         webSocketClass: WebSocket,
       });
-      await clientB.login({ username: 'testuser', password: 'password123' });
+      await clientB.login({ userName: 'testuser', password: 'password123' });
 
       const itemsB2 = clientB.table<{ name: string }>('items');
       await waitForCondition(async () => (await itemsB2.getAll()).length === 3);
@@ -253,11 +253,11 @@ describe.each(storageDescriptors)(
       const clientUser2 = createClient('client-u2');
 
       await clientUser1.login({
-        username: 'testuser',
+        userName: 'testuser',
         password: 'password123',
       });
       await clientUser2.login({
-        username: 'otheruser',
+        userName: 'otheruser',
         password: 'password123',
       });
 
@@ -270,7 +270,7 @@ describe.each(storageDescriptors)(
       const docs1 = clientUser1.table<{ secret: string }>('docs');
       await docs1.put('doc1', { secret: 'top secret 1' });
 
-      const user1 = await server.storage.getUserByUsername('testuser');
+      const user1 = await server.storage.getUserByUserName('testuser');
       const docsTable = await server.storage.getTable('docs');
       if (user1) {
         await waitForCondition(async () => {
@@ -289,7 +289,7 @@ describe.each(storageDescriptors)(
 
     it('should deliver snapshot and update local database in batch when diff is large', async () => {
       // Populate 60 changes in server storage for user
-      const user = await server.storage.getUserByUsername('testuser');
+      const user = await server.storage.getUserByUserName('testuser');
       expect(user).toBeDefined();
 
       const changes = [];
@@ -308,7 +308,7 @@ describe.each(storageDescriptors)(
 
       // New client connects with lastSyncSeq: 1 (so 59 changes diff > 50 threshold)
       const client = createClient('client-bulk');
-      await client.login({ username: 'testuser', password: 'password123' });
+      await client.login({ userName: 'testuser', password: 'password123' });
 
       const tasksTable = client.table<{ title: string }>('tasks');
       await waitForCondition(
@@ -325,8 +325,8 @@ describe.each(storageDescriptors)(
       const clientA = createClient('client-a-bulk');
       const clientB = createClient('client-b-bulk');
 
-      await clientA.login({ username: 'testuser', password: 'password123' });
-      await clientB.login({ username: 'testuser', password: 'password123' });
+      await clientA.login({ userName: 'testuser', password: 'password123' });
+      await clientB.login({ userName: 'testuser', password: 'password123' });
 
       await waitForCondition(
         () =>
@@ -363,7 +363,7 @@ describe.each(storageDescriptors)(
       const client = createClient('client-ping', {
         pingIntervalMs: 50, // Rapid ping for test
       });
-      await client.login({ username: 'testuser', password: 'password123' });
+      await client.login({ userName: 'testuser', password: 'password123' });
 
       await waitForCondition(() => client.syncStatus === SyncStatus.Connected);
       expect(client.syncStatus).toBe(SyncStatus.Connected);

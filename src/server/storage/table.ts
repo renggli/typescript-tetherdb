@@ -2,9 +2,18 @@ import type {
   ChangeRecord,
   SnapshotRecord,
   StoredRecord,
+  TableRow,
   TableSettings,
 } from '../../shared/types.js';
 import type { UserStorage } from './user.js';
+
+/**
+ * Options for applying mutation changes to storage.
+ */
+export interface ApplyChangesOptions {
+  /** If true, skips actor and ownership permission checks (for server-side operations such as populating rows). */
+  skipPermissionCheck?: boolean;
+}
 
 /**
  * Table-scoped storage interface for record CRUD, settings, and batch mutation processing.
@@ -48,12 +57,22 @@ export interface TableStorage {
    *
    * @param user - Target user handle.
    * @param changes - Array of change records.
+   * @param options - Optional application options.
    * @returns Applied changes and new sequence number.
    */
   applyChanges(
     user: UserStorage | undefined,
     changes: ChangeRecord[],
+    options?: ApplyChangesOptions,
   ): Promise<{ applied: ChangeRecord[]; newSeq: number }>;
+
+  /**
+   * Inserts initial rows into this table if they do not already exist.
+   *
+   * @param rows - Array of table rows to insert.
+   * @returns Number of new rows inserted.
+   */
+  insertRows?(rows: TableRow[]): Promise<number>;
 
   /**
    * Deletes this table and its data.

@@ -16,7 +16,7 @@ interface RawRecordRow {
   client_id: string;
   deleted: number;
   data: string | null;
-  owner_id?: string | null;
+  user_id?: string | null;
 }
 
 /**
@@ -51,7 +51,7 @@ export class TableSqliteStorage extends TableBaseStorage<SqliteStorage> {
   private resolveEffectiveUserId(user?: UserStorage): string | undefined {
     const isPrivate = isPrivateTable(this);
     if (isPrivate) {
-      return user ? validateUserId(user.id) : undefined;
+      return user ? validateUserId(user.userId) : undefined;
     }
     return '__shared__';
   }
@@ -80,10 +80,10 @@ export class TableSqliteStorage extends TableBaseStorage<SqliteStorage> {
       id: row.id,
       version: row.version,
       timestamp: row.timestamp,
-      clientId: row.client_id ?? '',
+      clientId: row.client_id ?? undefined,
       deleted: Boolean(row.deleted),
       data: this.parseData(row.data),
-      ownerId: row.owner_id ?? undefined,
+      ...({ userId: row.user_id ?? undefined } as { userId?: string }),
     };
   }
 
@@ -105,9 +105,9 @@ export class TableSqliteStorage extends TableBaseStorage<SqliteStorage> {
       id: row.id,
       version: row.version,
       timestamp: row.timestamp,
-      clientId: row.client_id ?? '',
+      clientId: row.client_id ?? undefined,
       data: this.parseData(row.data),
-      ownerId: row.owner_id ?? undefined,
+      ...({ userId: row.user_id ?? undefined } as { userId?: string }),
     }));
   }
 }

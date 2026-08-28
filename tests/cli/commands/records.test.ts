@@ -106,7 +106,7 @@ describe('handleRecordsCommand', () => {
       'tasks',
       'u-task-1',
       '{"userOnly":true}',
-      `--user=${user.id}`,
+      `--user=${user.userId}`,
     ]);
     expect(
       testLogger.hasMessage('Put record "u-task-1" in table "tasks"'),
@@ -117,7 +117,7 @@ describe('handleRecordsCommand', () => {
       'records',
       'list',
       'tasks',
-      `--user=${user.id}`,
+      `--user=${user.userId}`,
     ]);
     expect(testLogger.hasMessage('Records in "tasks" (1):')).toBe(true);
     expect(testLogger.hasMessage('userOnly')).toBe(true);
