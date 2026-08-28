@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TetherDB — Collaborative Editor</title>
+    <link rel="stylesheet" href="./style.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="app-header">
+        <div class="header-left">
+          <div class="brand">
+            <span class="brand-logo">⚡</span>
+            <h1 class="brand-title">TetherEdit</h1>
+          </div>
+          <div id="statusPill" class="status-pill status-connecting">
+            <span class="status-dot"></span>
+            <span id="statusText">Connecting...</span>
+          </div>
+        </div>
+
+        <div class="header-right">
+          <div id="collaboratorsList" class="collaborators-list">
+            <!-- Dynamically populated collaborator chips -->
+          </div>
+        </div>
+      </header>
+
+      <main class="editor-workspace">
+        <section class="editor-pane">
+          <div class="pane-header">
+            <span class="pane-title">Markdown</span>
+          </div>
+          <div class="editor-container" id="editorContainer">
+            <div class="editor-gutter" id="editorGutter">
+              <!-- Line numbers -->
+            </div>
+            <div class="editor-content-area" id="editorContentArea">
+              <div class="editor-overlays" id="editorOverlays">
+                <!-- Remote selections & cursors -->
+              </div>
+              <textarea
+                id="editorTextarea"
+                class="editor-textarea"
+                spellcheck="false"
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
+                wrap="off"
+              ></textarea>
+            </div>
+          </div>
+        </section>
+
+        <section class="preview-pane">
+          <div class="pane-header">
+            <span class="pane-title">Preview</span>
+          </div>
+          <div id="previewContent" class="preview-content markdown-body">
+            <!-- Rendered HTML preview -->
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./src/client.ts"></script>
+  </body>
+</html>
