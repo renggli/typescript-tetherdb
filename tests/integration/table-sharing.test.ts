@@ -269,23 +269,14 @@ describe.each(storageDescriptors)(
         });
 
         expect(runner.port).toBeGreaterThan(0);
-        const regRes = await fetch(
-          `http://${runner.host}:${runner.port}/auth/register`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userName: 'starter_user',
-              password: 'password123',
-            }),
-          },
+        const healthRes = await fetch(
+          `http://${runner.host}:${runner.port}/health`,
         );
-        expect(regRes.ok).toBe(true);
-        const body = (await regRes.json()) as {
-          userId: string;
-          userName: string;
+        expect(healthRes.ok).toBe(true);
+        const body = (await healthRes.json()) as {
+          status: string;
         };
-        expect(body.userName).toBe('starter_user');
+        expect(body.status).toBe('ok');
 
         await runner.close();
       } finally {

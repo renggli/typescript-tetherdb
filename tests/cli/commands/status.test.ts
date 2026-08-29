@@ -6,7 +6,7 @@ import { LocalAdminTarget } from '../../../src/cli/admin.js';
 import { createBackend } from '../../../src/cli/backend.js';
 import { handleStatusCommand } from '../../../src/cli/commands/status.js';
 import type { Storage } from '../../../src/server/index.js';
-import type { ServerLockInfo } from '../../../src/server/lock.js';
+import type { ServerLockInfo } from '../../../src/server/shared/lock.js';
 import { testLogger } from '../../logger.js';
 
 describe('handleStatusCommand', () => {

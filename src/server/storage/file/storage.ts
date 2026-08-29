@@ -8,9 +8,9 @@ import {
   type StoredRecord,
   type TableSettings,
 } from '../../../shared/types.js';
-import { getOrCreateKeyfileSecret, hashPassword } from '../../crypto.js';
 import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
-import { readServerLock } from '../../lock.js';
+import { getOrCreateKeyfileSecret, hashPassword } from '../../shared/crypto.js';
+import { readServerLock } from '../../shared/lock.js';
 import {
   getUserBucket,
   normalizeUserName,
@@ -18,7 +18,7 @@ import {
   validateTableName,
   validateUserId,
   validateUserName,
-} from '../../validate.js';
+} from '../../shared/validate.js';
 import {
   applyChangeToRecord,
   assertCanMutate,

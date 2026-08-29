@@ -13,15 +13,15 @@ import {
   ServerMessageType,
   type SnapshotRecord,
 } from '../shared/types.js';
-import { verifyDummyPasswordHash } from './crypto.js';
 import { TetherServerError, TetherServerErrorCode } from './errors.js';
-import type { RateLimiter } from './rate-limiter.js';
 import type { TetherLogger } from './server.js';
+import { verifyDummyPasswordHash } from './shared/crypto.js';
+import type { RateLimiter } from './shared/rate-limiter.js';
+import { calculateByteSize, validateIdentifier } from './shared/validate.js';
 import { canRead, isPrivateTable } from './storage/base/index.js';
 import type { Storage } from './storage/storage.js';
 import type { TableStorage } from './storage/table.js';
 import type { UserStorage } from './storage/user.js';
-import { calculateByteSize, validateIdentifier } from './validate.js';
 
 /**
  * Configuration options for the synchronization coordinator.
@@ -673,30 +673,10 @@ export class Sync {
       return;
     }
 
-    const userCache = new Map<string, string>();
-    const populatedChanges: ChangeRecord[] = [];
-    for (const change of changes) {
-      let userName = change.userName;
-      const internalUserId = (change as { userId?: string }).userId;
-      if (internalUserId && !userName) {
-        userName = await this.resolveUserName(
-          internalUserId,
-          client.user,
-          userCache,
-        );
-      }
-      populatedChanges.push({
-        table: change.table,
-        id: change.id,
-        op: change.op,
-        data: change.data,
-        version: change.version,
-        seq: change.seq,
-        timestamp: change.timestamp,
-        clientId: change.clientId,
-        userName,
-      });
-    }
+    const populatedChanges = await this.populateChangeUserNames(
+      changes,
+      client.user,
+    );
 
     this.send(client.webSocket, {
       type: ServerMessageType.SyncDiff,
@@ -742,6 +722,33 @@ export class Sync {
       }
     }
     return snapshot;
+  }
+
+  private async populateChangeUserNames(
+    changes: ChangeRecord[],
+    user?: UserStorage,
+    userCache = new Map<string, string>(),
+  ): Promise<ChangeRecord[]> {
+    const populated: ChangeRecord[] = [];
+    for (const change of changes) {
+      let userName = change.userName ?? user?.userName;
+      const internalUserId = (change as { userId?: string }).userId;
+      if (internalUserId && !userName) {
+        userName = await this.resolveUserName(internalUserId, user, userCache);
+      }
+      populated.push({
+        table: change.table,
+        id: change.id,
+        op: change.op,
+        data: change.data,
+        version: change.version,
+        seq: change.seq,
+        timestamp: change.timestamp,
+        clientId: change.clientId,
+        userName,
+      });
+    }
+    return populated;
   }
 
   private async resolveUserName(
@@ -799,30 +806,10 @@ export class Sync {
       }
 
       if (clientChanges.length > 0) {
-        const userCache = new Map<string, string>();
-        const populatedChanges: ChangeRecord[] = [];
-        for (const change of clientChanges) {
-          let userName = change.userName ?? senderUser?.userName;
-          const internalUserId = (change as { userId?: string }).userId;
-          if (internalUserId && !userName) {
-            userName = await this.resolveUserName(
-              internalUserId,
-              client.user ?? senderUser,
-              userCache,
-            );
-          }
-          populatedChanges.push({
-            table: change.table,
-            id: change.id,
-            op: change.op,
-            data: change.data,
-            version: change.version,
-            seq: change.seq,
-            timestamp: change.timestamp,
-            clientId: change.clientId,
-            userName,
-          });
-        }
+        const populatedChanges = await this.populateChangeUserNames(
+          clientChanges,
+          client.user ?? senderUser,
+        );
 
         this.send(client.webSocket, {
           type: ServerMessageType.BroadcastChanges,

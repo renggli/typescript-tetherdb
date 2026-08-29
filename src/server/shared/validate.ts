@@ -2,10 +2,10 @@
  * Security, input validation, and sanitization utilities for the TetherDB server.
  * Protects server-side storage and synchronization from injection and traversal attacks.
  *
- * @module tetherdb/server/validate
+ * @module tetherdb/server/shared/validate
  */
 
-import { TetherServerError, TetherServerErrorCode } from './errors.js';
+import { TetherServerError, TetherServerErrorCode } from '../errors.js';
 
 /** Minimum allowed username character length. */
 export const MIN_USER_NAME_LENGTH = 3;

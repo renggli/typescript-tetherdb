@@ -3,7 +3,7 @@ import type {
   StoredRecord,
   TableSettings,
 } from '../../../shared/types.js';
-import { validateRecordId, validateUserId } from '../../validate.js';
+import { validateRecordId, validateUserId } from '../../shared/validate.js';
 import {
   canRead,
   filterActiveRecords,

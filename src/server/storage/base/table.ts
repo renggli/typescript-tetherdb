@@ -40,7 +40,12 @@ export abstract class TableBaseStorage<
     this.mergeSettings(settings);
   }
 
-  /** Updates table settings dynamically. */
+  /**
+   * Updates table settings dynamically.
+   *
+   * @param settings - Partial table settings to merge.
+   * @returns Updated table settings.
+   */
   async updateSettings(
     settings: Partial<TableSettings>,
   ): Promise<TableSettings> {
@@ -54,6 +59,14 @@ export abstract class TableBaseStorage<
 
   abstract getAllRecords(user?: UserStorage): Promise<SnapshotRecord[]>;
 
+  /**
+   * Applies an array of mutation change operations targeting this table.
+   *
+   * @param user - Target user handle.
+   * @param changes - Array of change records.
+   * @param options - Application options.
+   * @returns Applied changes and new sequence number.
+   */
   async applyChanges(
     user: UserStorage | undefined,
     changes: ChangeRecord[],
@@ -108,9 +121,16 @@ export abstract class TableBaseStorage<
     return toInsert.length;
   }
 
+  /**
+   * Deletes this table and its data from storage.
+   *
+   * @returns `true` if deleted successfully.
+   */
   async delete(): Promise<boolean> {
     return this.storage.deleteTable(this.name);
   }
+
+  // -- Private Helpers --------------------------------------------------------
 
   private mergeSettings(settings: Partial<TableSettings>): TableSettings {
     this.settings = {
@@ -127,6 +147,9 @@ export abstract class TableBaseStorage<
 
 /**
  * Determines if a table operates in user-private partition mode.
+ *
+ * @param table - Target table storage handle.
+ * @returns `true` if table read permissions are restricted to owner.
  */
 export function isPrivateTable(table: TableStorage): boolean {
   const readPerm = table.settings.permissions?.read ?? Permission.Owner;
@@ -135,6 +158,10 @@ export function isPrivateTable(table: TableStorage): boolean {
 
 /**
  * Filters non-deleted records and attaches table name for snapshot responses.
+ *
+ * @param tableName - Name of the table.
+ * @param records - Iterable of stored records.
+ * @returns Array of snapshot records.
  */
 export function filterActiveRecords(
   tableName: string,
@@ -152,54 +179,14 @@ export function filterActiveRecords(
   return items;
 }
 
-// -- Helpers ----------------------------------------------------------------
-
-/**
- * Validates that an array of change records conforms to payload schemas and table constraints.
- */
-export function validateChanges(
-  table: TableStorage,
-  changes: ChangeRecord[],
-): void {
-  for (const change of changes) {
-    if (
-      change.table &&
-      change.table.toLowerCase() !== table.name.toLowerCase()
-    ) {
-      throw new TetherServerError(
-        TetherServerErrorCode.InvalidInput,
-        `Change table "${change.table}" does not match target table "${table.name}"`,
-      );
-    }
-    // validateRecordPayload(table, change.data);
-  }
-}
-
-/**
- * Filters and maps a list of change records to outbox changelog items.
- */
-export function filterChangesForOutbox(
-  tableName: string,
-  changes: ChangeRecord[],
-  startSeq: number,
-): Array<ChangeRecord & { seq: number }> {
-  const items: Array<ChangeRecord & { seq: number }> = [];
-  let seq = startSeq;
-  for (const change of changes) {
-    seq++;
-    if (change.op === OperationType.Put) {
-      items.push({
-        ...change,
-        seq,
-        table: tableName,
-      });
-    }
-  }
-  return items;
-}
-
 /**
  * Applies a change to an existing (or undefined) record and assigns the sequence number.
+ *
+ * @param change - Mutation change record to apply.
+ * @param existing - Currently stored record or undefined.
+ * @param seq - Assigned sequence number.
+ * @param user - Target user handle.
+ * @returns Updated record and applied change descriptor.
  */
 export function applyChangeToRecord(
   change: ChangeRecord,
@@ -245,6 +232,11 @@ export function applyChangeToRecord(
 
 /**
  * Checks if an actor permission rule allows the given user and record owner.
+ *
+ * @param permission - Permission level to check.
+ * @param user - Authenticated user handle.
+ * @param recordUserId - Owner user ID of the record.
+ * @returns `true` if allowed.
  */
 export function isPermissionAllowed(
   permission: Permission,
@@ -268,6 +260,12 @@ export function isPermissionAllowed(
 
 /**
  * Verifies that a user has permission to mutate a record in a table.
+ *
+ * @param table - Target table handle.
+ * @param user - Authenticated user handle.
+ * @param change - Mutation change record.
+ * @param existing - Existing record if present.
+ * @throws TetherServerError if access is forbidden.
  */
 export function assertCanMutate(
   table: TableStorage,
@@ -321,6 +319,10 @@ export function assertCanMutate(
 
 /**
  * Checks if a user has read permission on a table.
+ *
+ * @param table - Target table handle.
+ * @param user - Authenticated user handle.
+ * @returns `true` if readable.
  */
 export function canRead(table: TableStorage, user?: UserStorage): boolean {
   const readPerm = table.settings.permissions?.read ?? Permission.Owner;
@@ -329,6 +331,11 @@ export function canRead(table: TableStorage, user?: UserStorage): boolean {
 
 /**
  * Checks if a specific record in a table can be read by the given user.
+ *
+ * @param table - Target table handle.
+ * @param user - Authenticated user handle.
+ * @param record - Stored record to check.
+ * @returns `true` if readable.
  */
 export function canReadRecord(
   table: TableStorage,

@@ -2,32 +2,28 @@ import * as crypto from 'node:crypto';
 import * as http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { normalizeBasePath } from '../shared/path.js';
+import type { TableRow, TableSettings } from '../shared/types.js';
 import {
-  type ChangeRecord,
-  OperationType,
-  type TableRow,
-  type TableSettings,
-} from '../shared/types.js';
-import { verifyDummyPasswordHash } from './crypto.js';
-import { TetherServerError, TetherServerErrorCode } from './errors.js';
-import { acquireServerLock, type ServerLockHandle } from './lock.js';
-import { RateLimiter } from './rate-limiter.js';
-import type {
-  MaintenanceResult,
-  Storage,
-  TableStorage,
-  UserStorage,
-} from './storage/index.js';
+  type CorsOptions,
+  getHttpStatusForError,
+  handleAdminRequest,
+  handleCorsPreflight,
+  handleHealth,
+  handleMetrics,
+  handleReady,
+  sendJson,
+} from './http/index.js';
+import { acquireServerLock, type ServerLockHandle } from './shared/lock.js';
+import { RateLimiter } from './shared/rate-limiter.js';
+import { validateTableName } from './shared/validate.js';
+import type { Storage, TableStorage, UserStorage } from './storage/index.js';
 import { MemoryStorage } from './storage/memory/index.js';
 import { Sync } from './sync.js';
-import {
-  normalizePassword,
-  normalizeUserName,
-  validateTableName,
-} from './validate.js';
+
+export type { CorsOptions };
 
 /**
- * Rate limiting and resource control options for authentication endpoints and sync streams.
+ * Rate limiting and resource control options for WebSocket connections and authentication streams.
  */
 export interface RateLimitOptions {
   /** Sliding window duration in milliseconds (defaults to 60,000ms / 1 minute). */
@@ -53,26 +49,6 @@ export interface RateLimitOptions {
 }
 
 /**
- * Options for configuring Cross-Origin Resource Sharing (CORS) on HTTP endpoints.
- */
-export interface CorsOptions {
-  /**
-   * Allowed origin(s). Can be `'*'` for unrestricted access, a specific origin string (e.g. `'https://example.com'`),
-   * an array of allowed origin strings, `true` to reflect the request's `Origin` header, or `false` to disable CORS headers.
-   * Defaults to `'*'`.
-   */
-  origin?: string | string[] | boolean;
-  /** Whether to set `Access-Control-Allow-Credentials: true` (defaults to false). */
-  credentials?: boolean;
-  /** Allowed request headers for preflight OPTIONS checks (defaults to `['Content-Type', 'Authorization']`). */
-  allowedHeaders?: string[];
-  /** Exposed response headers (Access-Control-Expose-Headers). */
-  exposedHeaders?: string[];
-  /** Maximum age in seconds to cache preflight responses (Access-Control-Max-Age). */
-  maxAge?: number;
-}
-
-/**
  * Pluggable logger interface for TetherServer logging.
  */
 export interface TetherLogger {
@@ -94,11 +70,11 @@ export interface TetherServerOptions {
   storage?: Storage;
   /** Base path for HTTP REST endpoints (defaults to ''). */
   basePath?: string;
-  /** Path for sync endpoint requests (defaults to basePath or '/'). */
+  /** Path for sync endpoint requests (defaults to basePath or '/tether'). */
   webSocketPath?: string;
-  /** Whether user self-registration is allowed via `/auth/register` (defaults to true). */
+  /** Whether user self-registration is allowed via WebSocket (defaults to true). */
   allowRegistration?: boolean;
-  /** Rate limiting options for auth and sync endpoints, or `false` to disable rate limiting (defaults to true). */
+  /** Rate limiting options for WebSocket handshakes and auth, or `false` to disable rate limiting (defaults to true). */
   rateLimiting?: boolean | RateLimitOptions;
   /** Whether to trust the `X-Forwarded-For` header for resolving client IP addresses (defaults to false). */
   trustProxy?: boolean;
@@ -120,7 +96,7 @@ export interface StartServerOptions extends TetherServerOptions {
   host?: string;
   /** Filepath to write the server process lockfile to (defaults to `server.lock` in backend base directory). */
   lockFile?: string;
-  /** Filepath to persist or read the server secret key (defaults to `.key` in backend base directory). */
+  /** Filepath to persist or read the server secret key (defaults to `.secret` in backend base directory). */
   keyFile?: string;
 }
 
@@ -129,15 +105,15 @@ export interface StartServerOptions extends TetherServerOptions {
  */
 export interface RunningServer {
   /** The underlying TetherServer application instance. */
-  server: TetherServer;
+  readonly server: TetherServer;
   /** The active Node.js HTTP server instance. */
-  httpServer: http.Server;
+  readonly httpServer: http.Server;
   /** Bound host address. */
-  host: string;
+  readonly host: string;
   /** Bound port number. */
-  port: number;
+  readonly port: number;
   /** Root URL for the running server (e.g. 'http://127.0.0.1:8080'). */
-  url: string;
+  readonly url: string;
   /** Closes server listeners cleanly. */
   close(): Promise<void>;
 }
@@ -176,8 +152,8 @@ export async function startServer(
 }
 
 /**
- * Unified HTTP and WebSocket server handling authentication endpoints,
- * real-time synchronization streams, and administration routes (`/admin/*`).
+ * Unified HTTP and WebSocket server handling administration routes (`/admin/*`),
+ * health/metrics probes, and real-time synchronization streams.
  */
 export class TetherServer {
   /** Underlying storage engine for users and tables. */
@@ -188,17 +164,16 @@ export class TetherServer {
   readonly basePath: string;
   /** Path for WebSocket upgrade requests. */
   readonly webSocketPath: string;
+  /** Whether X-Forwarded-For is trusted for resolving client IPs. */
   readonly trustProxy: boolean;
-  private readonly allowRegistration: boolean;
+
   private readonly corsConfig: CorsOptions | null;
   private readonly logger: TetherLogger | null;
-  private readonly ipLoginLimiter: RateLimiter | null;
-  private readonly userLoginLimiter: RateLimiter | null;
-  private readonly ipRegisterLimiter: RateLimiter | null;
+  private readonly adminSecret: string;
+
   private _httpServer: http.Server | null = null;
   private _webSocketServer: WebSocketServer | null = null;
   private lockHandle: ServerLockHandle | null = null;
-  private adminSecret: string;
 
   /**
    * Initializes a new TetherServer instance.
@@ -211,7 +186,7 @@ export class TetherServer {
     this.webSocketPath =
       options.webSocketPath ??
       (this.basePath === '' ? '/tether' : `${this.basePath}/tether`);
-    this.allowRegistration = options.allowRegistration ?? true;
+    const allowRegistration = options.allowRegistration ?? true;
     this.trustProxy = options.trustProxy ?? false;
     this.adminSecret =
       options.adminSecret ?? crypto.randomBytes(32).toString('hex');
@@ -225,13 +200,10 @@ export class TetherServer {
 
     const rateLimitConfig = options.rateLimiting ?? true;
     if (rateLimitConfig === false) {
-      this.ipLoginLimiter = null;
-      this.userLoginLimiter = null;
-      this.ipRegisterLimiter = null;
       this.sync = new Sync(this.storage, {
         maxConcurrentConnectionsPerUser: 1_000,
         authTimeoutMs: 0,
-        allowRegistration: this.allowRegistration,
+        allowRegistration,
         rateLimiter: null,
         ipLoginLimiter: null,
         userLoginLimiter: null,
@@ -246,21 +218,21 @@ export class TetherServer {
       const initialBackoffMs = opts.initialBackoffMs ?? 1_000;
       const maxBackoffMs = opts.maxBackoffMs ?? 900_000;
 
-      this.ipLoginLimiter = new RateLimiter({
+      const ipLoginLimiter = new RateLimiter({
         windowMs,
         maxRequests: opts.ipLoginMaxRequests ?? 100,
         maxFailures,
         initialBackoffMs,
         maxBackoffMs,
       });
-      this.userLoginLimiter = new RateLimiter({
+      const userLoginLimiter = new RateLimiter({
         windowMs,
         maxRequests: opts.userLoginMaxRequests ?? 20,
         maxFailures,
         initialBackoffMs,
         maxBackoffMs,
       });
-      this.ipRegisterLimiter = new RateLimiter({
+      const ipRegisterLimiter = new RateLimiter({
         windowMs,
         maxRequests: opts.ipRegisterMaxRequests ?? 100,
       });
@@ -277,11 +249,11 @@ export class TetherServer {
         maxConcurrentConnectionsPerUser:
           opts.maxConcurrentConnectionsPerUser ?? 20,
         authTimeoutMs: opts.authTimeoutMs ?? 10_000,
-        allowRegistration: this.allowRegistration,
+        allowRegistration,
         rateLimiter: syncLimiter,
-        ipLoginLimiter: this.ipLoginLimiter,
-        userLoginLimiter: this.userLoginLimiter,
-        ipRegisterLimiter: this.ipRegisterLimiter,
+        ipLoginLimiter,
+        userLoginLimiter,
+        ipRegisterLimiter,
         logger: this.logger,
       });
     }
@@ -302,136 +274,10 @@ export class TetherServer {
   }
 
   /**
-   * Declares a table with optional settings and initial rows.
-   * Creates the table if not already present, updates its settings, and inserts initial rows.
-   *
-   * @param name - Name of the table.
-   * @param settings - Optional table settings.
-   * @param rows - Optional array of table rows to insert if not already present.
-   * @returns TableStorage handle for the declared table.
-   */
-  async declareTable(
-    name: string,
-    settings?: TableSettings,
-    rows?: TableRow[],
-  ): Promise<TableStorage> {
-    const safeName = validateTableName(name);
-    let table = await this.storage.getTable(safeName);
-    if (!table) {
-      table = await this.storage.createTable(safeName, settings);
-    } else if (settings) {
-      await table.updateSettings(settings);
-    }
-    const initialRows = rows ?? settings?.rows;
-    if (initialRows && initialRows.length > 0 && table.insertRows) {
-      await table.insertRows(initialRows);
-    }
-    return table;
-  }
-
-  /**
-   * Declares a user account with the specified username and password.
-   * Creates the user if not already registered, or updates the existing user's password.
-   *
-   * @param userName - Username for the account.
-   * @param password - Plaintext password for the account.
-   * @returns UserStorage handle for the declared user.
-   */
-  async declareUser(userName: string, password: string): Promise<UserStorage> {
-    const user = await this.storage.getUserByUserName(userName);
-    if (user) {
-      await user.changePassword(password);
-      return user;
-    }
-    return this.storage.createUser(userName, password);
-  }
-
-  /**
-   * Attaches WebSocket synchronization handling and lockfile management to an existing HTTP server.
-   *
-   * @param server - The HTTP server instance to attach to.
-   */
-  attach(server: http.Server): void {
-    if (!this._webSocketServer) {
-      this._webSocketServer = new WebSocketServer({
-        noServer: true,
-        perMessageDeflate: {
-          zlibDeflateOptions: {
-            level: 6,
-            memLevel: 8,
-          },
-          threshold: 1024,
-          clientNoContextTakeover: true,
-          serverNoContextTakeover: true,
-        },
-      });
-      this._webSocketServer.on('connection', (ws, req) => {
-        const ip = req ? this.getClientIp(req) : '127.0.0.1';
-        this.sync.handleConnection(ws, ip);
-      });
-    }
-    server.on('upgrade', (req, socket, head) => {
-      const protocol = req.headers['sec-websocket-protocol'];
-      if (
-        typeof protocol === 'string' &&
-        (protocol === 'vite-hmr' || protocol.includes('vite-hmr'))
-      ) {
-        return;
-      }
-      const url = new URL(
-        req.url ?? '',
-        `http://${req.headers.host ?? 'localhost'}`,
-      );
-      const pathname = url.pathname.replace(/\/$/, '') || '/';
-      const targetPath = this.webSocketPath.replace(/\/$/, '') || '/';
-      if (pathname === targetPath) {
-        this._webSocketServer?.handleUpgrade(req, socket, head, (ws) => {
-          this._webSocketServer?.emit('connection', ws, req);
-        });
-      }
-    });
-
-    const setupLock = () => {
-      const addr =
-        typeof server.address === 'function' ? server.address() : null;
-      const port = typeof addr === 'object' && addr ? addr.port : 8080;
-      const host =
-        typeof addr === 'object' && addr && 'address' in addr
-          ? (addr.address as string)
-          : '127.0.0.1';
-      this.acquireLockIfPersistent(port, host);
-    };
-
-    if (server.listening) {
-      setupLock();
-    } else if (typeof server.once === 'function') {
-      server.once('listening', setupLock);
-    } else if (typeof server.on === 'function') {
-      server.on('listening', setupLock);
-    }
-
-    if (typeof server.once === 'function') {
-      server.once('close', () => {
-        if (this.lockHandle) {
-          this.lockHandle.release();
-          this.lockHandle = null;
-        }
-      });
-    } else if (typeof server.on === 'function') {
-      server.on('close', () => {
-        if (this.lockHandle) {
-          this.lockHandle.release();
-          this.lockHandle = null;
-        }
-      });
-    }
-  }
-
-  /**
    * Starts the HTTP and WebSocket server listening on the specified port and host.
    *
-   * @param port - Port number to bind. Defaults to 8080.
-   * @param host - Host interface to bind. Defaults to '0.0.0.0'.
+   * @param port - Port number to bind (defaults to 8080).
+   * @param host - Host interface to bind (defaults to '0.0.0.0').
    * @returns The active Node.js HTTP server instance.
    */
   async listen(port = 8080, host = '0.0.0.0'): Promise<http.Server> {
@@ -441,7 +287,7 @@ export class TetherServer {
       this._httpServer = http.createServer(async (req, res) => {
         const handled = await this.handleHttpRequest(req, res);
         if (!handled) {
-          this.sendJson(res, 404, { error: 'Not found' });
+          sendJson(res, 404, { error: 'Not found' }, this.corsConfig, req);
         }
       });
       this.attach(this._httpServer);
@@ -504,6 +350,85 @@ export class TetherServer {
   }
 
   /**
+   * Attaches WebSocket synchronization handling and lockfile management to an existing HTTP server.
+   *
+   * @param server - The HTTP server instance to attach to.
+   */
+  attach(server: http.Server): void {
+    if (!this._webSocketServer) {
+      this._webSocketServer = new WebSocketServer({
+        noServer: true,
+        perMessageDeflate: {
+          zlibDeflateOptions: {
+            level: 6,
+            memLevel: 8,
+          },
+          threshold: 1024,
+          clientNoContextTakeover: true,
+          serverNoContextTakeover: true,
+        },
+      });
+      this._webSocketServer.on('connection', (ws, req) => {
+        const ip = req ? this.getClientIp(req) : '127.0.0.1';
+        this.sync.handleConnection(ws, ip);
+      });
+    }
+
+    server.on('upgrade', (req, socket, head) => {
+      const protocol = req.headers['sec-websocket-protocol'];
+      if (
+        typeof protocol === 'string' &&
+        (protocol === 'vite-hmr' || protocol.includes('vite-hmr'))
+      ) {
+        return;
+      }
+      const url = new URL(
+        req.url ?? '',
+        `http://${req.headers.host ?? 'localhost'}`,
+      );
+      const pathname = url.pathname.replace(/\/$/, '') || '/';
+      const targetPath = this.webSocketPath.replace(/\/$/, '') || '/';
+      if (pathname === targetPath) {
+        this._webSocketServer?.handleUpgrade(req, socket, head, (ws) => {
+          this._webSocketServer?.emit('connection', ws, req);
+        });
+      }
+    });
+
+    const setupLock = () => {
+      const addr =
+        typeof server.address === 'function' ? server.address() : null;
+      const port = typeof addr === 'object' && addr ? addr.port : 8080;
+      const host =
+        typeof addr === 'object' && addr && 'address' in addr
+          ? (addr.address as string)
+          : '127.0.0.1';
+      this.acquireLockIfPersistent(port, host);
+    };
+
+    if (server.listening) {
+      setupLock();
+    } else if (typeof server.once === 'function') {
+      server.once('listening', setupLock);
+    } else if (typeof server.on === 'function') {
+      server.on('listening', setupLock);
+    }
+
+    const releaseLock = () => {
+      if (this.lockHandle) {
+        this.lockHandle.release();
+        this.lockHandle = null;
+      }
+    };
+
+    if (typeof server.once === 'function') {
+      server.once('close', releaseLock);
+    } else if (typeof server.on === 'function') {
+      server.on('close', releaseLock);
+    }
+  }
+
+  /**
    * Creates a Connect- and Express-compatible HTTP middleware handler.
    *
    * @returns Middleware function `(req, res, next) => void`.
@@ -526,21 +451,7 @@ export class TetherServer {
   }
 
   /**
-   * Handles incoming HTTP requests for authentication, discovery, and administration endpoints.
-   *
-   * @param req - Incoming HTTP request.
-   * @param res - Server HTTP response.
-   * @returns `true` if the request was handled by TetherDB; `false` if the path did not match.
-   */
-  async handleRequest(
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-  ): Promise<boolean> {
-    return this.handleHttpRequest(req, res);
-  }
-
-  /**
-   * Handles incoming HTTP requests for authentication, discovery, and administration endpoints.
+   * Handles incoming HTTP requests for administration, discovery, and system probes.
    *
    * @param req - Incoming HTTP request.
    * @param res - Server HTTP response.
@@ -557,43 +468,39 @@ export class TetherServer {
     const method = req.method?.toUpperCase();
 
     if (method === 'OPTIONS') {
-      this.handleOptions(req, res);
+      handleCorsPreflight(req, res, this.corsConfig);
       return true;
     }
 
     try {
       if (method === 'GET' && url.pathname === `${this.basePath}/health`) {
-        this.handleHealth(req, res);
+        handleHealth(req, res, this.corsConfig);
         return true;
       }
 
       if (method === 'GET' && url.pathname === `${this.basePath}/ready`) {
-        await this.handleReady(req, res);
+        await handleReady(req, res, this.storage, this.corsConfig, this.logger);
         return true;
       }
 
       if (method === 'GET' && url.pathname === `${this.basePath}/metrics`) {
-        await this.handleMetrics(req, res);
+        await handleMetrics(
+          req,
+          res,
+          this.storage,
+          this.sync.connectedClientsCount,
+          this.corsConfig,
+        );
         return true;
       }
 
-      if (
-        this.allowRegistration &&
-        method === 'POST' &&
-        url.pathname === `${this.basePath}/auth/register`
-      ) {
-        await this.handleRegister(req, res);
-        return true;
-      }
-
-      if (method === 'POST' && url.pathname === `${this.basePath}/auth/login`) {
-        await this.handleLogin(req, res);
-        return true;
-      }
-
-      // Handle /admin/* routes
       if (url.pathname.startsWith(`${this.basePath}/admin`)) {
-        return await this.handleAdminRequest(req, res, url);
+        return await handleAdminRequest(req, res, url, this.basePath, {
+          storage: this.storage,
+          adminSecret: this.adminSecret,
+          corsConfig: this.corsConfig,
+          closeServer: () => this.close(),
+        });
       }
 
       return false;
@@ -605,568 +512,57 @@ export class TetherServer {
         this.logger?.debug('Client error handling HTTP request:', err);
       }
       const msg = err instanceof Error ? err.message : 'Internal server error';
-      this.sendJson(res, status, { error: msg }, req);
+      sendJson(res, status, { error: msg }, this.corsConfig, req);
       return true;
     }
   }
 
-  // -- Private Admin API Handlers -------------------------------------------
-
-  private assertAdminAuth(req: http.IncomingMessage): void {
-    const authHeader = req.headers.authorization ?? '';
-    const xAdmin = req.headers['x-admin-secret'];
-    const token = authHeader.startsWith('Bearer ')
-      ? authHeader.slice(7).trim()
-      : typeof xAdmin === 'string'
-        ? xAdmin.trim()
-        : '';
-
-    const tokenBuf = Buffer.from(token, 'utf-8');
-    const secretBuf = Buffer.from(this.adminSecret, 'utf-8');
-
-    if (
-      tokenBuf.length !== secretBuf.length ||
-      !crypto.timingSafeEqual(tokenBuf, secretBuf)
-    ) {
-      throw new TetherServerError(
-        TetherServerErrorCode.Unauthorized,
-        'Invalid or missing admin authorization token',
-      );
+  /**
+   * Declares a table with optional settings and initial rows.
+   * Creates the table if not already present, updates its settings, and inserts initial rows.
+   *
+   * @param name - Name of the table.
+   * @param settings - Optional table settings.
+   * @param rows - Optional array of table rows to insert if not already present.
+   * @returns TableStorage handle for the declared table.
+   */
+  async declareTable(
+    name: string,
+    settings?: TableSettings,
+    rows?: TableRow[],
+  ): Promise<TableStorage> {
+    const safeName = validateTableName(name);
+    let table = await this.storage.getTable(safeName);
+    if (!table) {
+      table = await this.storage.createTable(safeName, settings);
+    } else if (settings) {
+      await table.updateSettings(settings);
     }
+    const initialRows = rows ?? settings?.rows;
+    if (initialRows && initialRows.length > 0 && table.insertRows) {
+      await table.insertRows(initialRows);
+    }
+    return table;
   }
 
-  private async handleAdminRequest(
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-    url: URL,
-  ): Promise<boolean> {
-    this.assertAdminAuth(req);
-    const method = req.method?.toUpperCase();
-    const adminPath = url.pathname.slice(`${this.basePath}/admin`.length);
-
-    if (method === 'GET' && adminPath === '/status') {
-      const status = await this.storage.getStatus();
-      this.sendJson(res, 200, status, req);
-      return true;
+  /**
+   * Declares a user account with the specified username and password.
+   * Creates the user if not already registered, or updates the existing user's password.
+   *
+   * @param userName - Username for the account.
+   * @param password - Plaintext password for the account.
+   * @returns UserStorage handle for the declared user.
+   */
+  async declareUser(userName: string, password: string): Promise<UserStorage> {
+    const user = await this.storage.getUserByUserName(userName);
+    if (user) {
+      await user.changePassword(password);
+      return user;
     }
-
-    if (method === 'POST' && adminPath === '/maintenance') {
-      const body = (await this.readJsonBody(req)) as {
-        action: 'checkpoint' | 'vacuum' | 'prune';
-        keepCount?: number;
-        tableName?: string;
-      };
-      let result: MaintenanceResult;
-      if (body.action === 'checkpoint') {
-        result = await this.storage.checkpoint(body.tableName);
-      } else if (body.action === 'vacuum') {
-        result = await this.storage.vacuum();
-      } else if (body.action === 'prune') {
-        result = await this.storage.prune(body.keepCount, body.tableName);
-      } else {
-        throw new TetherServerError(
-          TetherServerErrorCode.InvalidInput,
-          `Invalid maintenance action "${body.action}"`,
-        );
-      }
-      this.sendJson(res, 200, result, req);
-      return true;
-    }
-
-    if (method === 'POST' && adminPath === '/stop') {
-      this.sendJson(res, 200, { message: 'Server stopping' }, req);
-      setImmediate(() => {
-        this.close().catch(() => {});
-      });
-      return true;
-    }
-
-    // /admin/tables
-    if (method === 'GET' && adminPath === '/tables') {
-      const tables = await this.storage.getTables();
-      const list = tables.map((t) => ({
-        name: t.name,
-        settings: t.settings,
-      }));
-      this.sendJson(res, 200, list, req);
-      return true;
-    }
-
-    if (method === 'POST' && adminPath === '/tables') {
-      const body = (await this.readJsonBody(req)) as {
-        name: string;
-        settings?: TableSettings;
-      };
-      if (!body.name) {
-        throw new TetherServerError(
-          TetherServerErrorCode.InvalidInput,
-          'Table name is required',
-        );
-      }
-      const table = await this.storage.createTable(body.name, body.settings);
-      this.sendJson(
-        res,
-        201,
-        { name: table.name, settings: table.settings },
-        req,
-      );
-      return true;
-    }
-
-    if (adminPath.startsWith('/tables/')) {
-      const tableName = decodeURIComponent(adminPath.slice('/tables/'.length));
-      if (method === 'GET') {
-        const table = await this.storage.getTable(tableName);
-        if (!table) {
-          throw new TetherServerError(
-            TetherServerErrorCode.NotFound,
-            `Table "${tableName}" not found`,
-          );
-        }
-        this.sendJson(
-          res,
-          200,
-          { name: table.name, settings: table.settings },
-          req,
-        );
-        return true;
-      }
-      if (method === 'PATCH') {
-        const body = (await this.readJsonBody(req)) as {
-          settings: Partial<TableSettings>;
-        };
-        const table = await this.storage.getTable(tableName);
-        if (!table) {
-          throw new TetherServerError(
-            TetherServerErrorCode.NotFound,
-            `Table "${tableName}" not found`,
-          );
-        }
-        const updated = await table.updateSettings(body.settings ?? {});
-        this.sendJson(res, 200, { name: table.name, settings: updated }, req);
-        return true;
-      }
-      if (method === 'DELETE') {
-        const table = await this.storage.getTable(tableName);
-        if (!table) {
-          throw new TetherServerError(
-            TetherServerErrorCode.NotFound,
-            `Table "${tableName}" not found`,
-          );
-        }
-        await table.delete();
-        this.sendJson(res, 200, { deleted: true }, req);
-        return true;
-      }
-    }
-
-    // /admin/users
-    if (method === 'GET' && adminPath === '/users') {
-      const users = await this.storage.getUsers();
-      const list = users.map((u) => ({
-        userId: u.userId,
-        userName: u.userName,
-        createdAt: u.createdAt,
-      }));
-      this.sendJson(res, 200, list, req);
-      return true;
-    }
-
-    if (method === 'POST' && adminPath === '/users') {
-      const body = (await this.readJsonBody(req)) as {
-        userName?: string;
-        password?: string;
-      };
-      const name = body.userName;
-      if (!name || !body.password) {
-        throw new TetherServerError(
-          TetherServerErrorCode.InvalidInput,
-          'Username and password are required',
-        );
-      }
-      const user = await this.storage.createUser(name, body.password);
-      this.sendJson(
-        res,
-        201,
-        {
-          userId: user.userId,
-          userName: user.userName,
-          createdAt: user.createdAt,
-        },
-        req,
-      );
-      return true;
-    }
-
-    if (adminPath.startsWith('/users/')) {
-      const userId = decodeURIComponent(adminPath.slice('/users/'.length));
-      if (method === 'DELETE') {
-        const user = await this.storage.getUser(userId);
-        if (!user) {
-          throw new TetherServerError(
-            TetherServerErrorCode.NotFound,
-            `User "${userId}" not found`,
-          );
-        }
-        await user.delete();
-        this.sendJson(res, 200, { deleted: true }, req);
-        return true;
-      }
-    }
-
-    // /admin/records
-    if (adminPath === '/records') {
-      if (method === 'GET') {
-        const tableName = url.searchParams.get('table');
-        const userParam =
-          url.searchParams.get('user') ?? url.searchParams.get('userId');
-        if (!tableName) {
-          throw new TetherServerError(
-            TetherServerErrorCode.InvalidInput,
-            'Query parameter "table" is required',
-          );
-        }
-        const table = await this.storage.getTable(tableName);
-        if (!table) {
-          throw new TetherServerError(
-            TetherServerErrorCode.NotFound,
-            `Table "${tableName}" not found`,
-          );
-        }
-        const user = userParam
-          ? ((await this.storage.getUser(userParam)) ??
-            (await this.storage.getUserByUserName(userParam)))
-          : undefined;
-        const records = await table.getAllRecords(user);
-        this.sendJson(res, 200, records, req);
-        return true;
-      }
-
-      if (method === 'POST') {
-        const body = (await this.readJsonBody(req)) as {
-          userId?: string;
-          changes?: ChangeRecord[];
-          table?: string;
-          id?: string;
-          data?: unknown;
-          op?: OperationType;
-        };
-        const user = body.userId
-          ? ((await this.storage.getUser(body.userId)) ??
-            (await this.storage.getUserByUserName(body.userId)))
-          : undefined;
-
-        let changes = body.changes;
-        if (!changes && body.table && body.id) {
-          changes = [
-            {
-              table: body.table,
-              id: body.id,
-              op: body.op ?? OperationType.Put,
-              data: body.data,
-              timestamp: Date.now(),
-              clientId: 'admin_cli',
-            },
-          ];
-        }
-        if (!changes) {
-          throw new TetherServerError(
-            TetherServerErrorCode.InvalidInput,
-            'Either "changes" array or "table" and "id" must be provided',
-          );
-        }
-        const result = await this.storage.applyChanges(user, changes);
-        this.sendJson(res, 200, result, req);
-        return true;
-      }
-    }
-
-    return false;
+    return this.storage.createUser(userName, password);
   }
 
-  // -- Private Helpers ------------------------------------------------------
-
-  private getCorsHeaders(req?: http.IncomingMessage): Record<string, string> {
-    if (!this.corsConfig) return {};
-
-    const headers: Record<string, string> = {
-      'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': (
-        this.corsConfig.allowedHeaders ?? [
-          'Content-Type',
-          'Authorization',
-          'X-Admin-Secret',
-        ]
-      ).join(', '),
-    };
-
-    if (
-      this.corsConfig.exposedHeaders &&
-      this.corsConfig.exposedHeaders.length > 0
-    ) {
-      headers['Access-Control-Expose-Headers'] =
-        this.corsConfig.exposedHeaders.join(', ');
-    }
-
-    if (this.corsConfig.maxAge !== undefined) {
-      headers['Access-Control-Max-Age'] = String(this.corsConfig.maxAge);
-    }
-
-    const reqOrigin = req?.headers.origin;
-    const origin = this.corsConfig.origin ?? '*';
-
-    if (origin === '*') {
-      if (this.corsConfig.credentials) {
-        if (reqOrigin) {
-          headers['Access-Control-Allow-Origin'] = reqOrigin;
-          headers.Vary = 'Origin';
-        }
-      } else {
-        headers['Access-Control-Allow-Origin'] = '*';
-      }
-    } else if (typeof origin === 'string') {
-      headers['Access-Control-Allow-Origin'] = origin;
-      headers.Vary = 'Origin';
-    } else if (Array.isArray(origin)) {
-      if (reqOrigin && origin.includes(reqOrigin)) {
-        headers['Access-Control-Allow-Origin'] = reqOrigin;
-        headers.Vary = 'Origin';
-      }
-    } else if (origin === true && reqOrigin) {
-      headers['Access-Control-Allow-Origin'] = reqOrigin;
-      headers.Vary = 'Origin';
-    }
-
-    if (this.corsConfig.credentials) {
-      headers['Access-Control-Allow-Credentials'] = 'true';
-    }
-
-    return headers;
-  }
-
-  private sendJson(
-    res: http.ServerResponse,
-    status: number,
-    data: unknown,
-    req?: http.IncomingMessage,
-  ) {
-    res.writeHead(status, {
-      'Content-Type': 'application/json',
-      ...this.getCorsHeaders(req),
-    });
-    res.end(JSON.stringify(data));
-  }
-
-  private async readJsonBody(req: http.IncomingMessage): Promise<unknown> {
-    return new Promise((resolve, reject) => {
-      let body = '';
-      req.on('data', (chunk) => {
-        body += chunk;
-        if (body.length > 1024 * 1024) {
-          reject(
-            new TetherServerError(
-              TetherServerErrorCode.LimitExceeded,
-              'Payload exceeds maximum allowed size',
-            ),
-          );
-        }
-      });
-      req.on('end', () => {
-        try {
-          resolve(body ? JSON.parse(body) : {});
-        } catch {
-          reject(
-            new TetherServerError(
-              TetherServerErrorCode.InvalidInput,
-              'Invalid JSON payload',
-            ),
-          );
-        }
-      });
-      req.on('error', reject);
-    });
-  }
-
-  private handleOptions(
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-  ): void {
-    res.writeHead(204, this.getCorsHeaders(req));
-    res.end();
-  }
-
-  private handleHealth(
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-  ): void {
-    this.sendJson(
-      res,
-      200,
-      {
-        status: 'ok',
-        uptime: process.uptime(),
-      },
-      req,
-    );
-  }
-
-  private async handleReady(
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-  ): Promise<void> {
-    try {
-      await this.storage.getTables();
-      this.sendJson(res, 200, { status: 'ready' }, req);
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'Storage unavailable';
-      this.logger?.error('Storage readiness error:', err);
-      this.sendJson(res, 503, { status: 'unready', error: message }, req);
-    }
-  }
-
-  private async handleMetrics(
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-  ): Promise<void> {
-    const tables = await this.storage.getTables();
-    this.sendJson(
-      res,
-      200,
-      {
-        uptime: process.uptime(),
-        connectedClients: this.sync.connectedClientsCount,
-        tablesCount: tables.length,
-        memoryUsage: process.memoryUsage(),
-      },
-      req,
-    );
-  }
-
-  private async handleRegister(
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-  ): Promise<void> {
-    const ip = this.getClientIp(req);
-    if (this.ipRegisterLimiter && !this.ipRegisterLimiter.consume(ip)) {
-      this.sendJson(res, 429, { error: 'Too many registration requests' }, req);
-      return;
-    }
-
-    const credentials = await this.readCredentials(req, res);
-    if (!credentials) return;
-
-    try {
-      const user = await this.storage.createUser(
-        credentials.userName,
-        credentials.password,
-      );
-      const token = await user.createToken();
-      this.sendJson(
-        res,
-        201,
-        {
-          userId: user.userId,
-          userName: user.userName,
-          token,
-        },
-        req,
-      );
-    } catch (err) {
-      const status = getHttpStatusForError(err);
-      if (status >= 500) {
-        this.logger?.error('Registration error:', err);
-      } else {
-        this.logger?.debug('Client registration error:', err);
-      }
-      const msg = err instanceof Error ? err.message : 'Registration error';
-      this.sendJson(res, status, { error: msg }, req);
-    }
-  }
-
-  private async handleLogin(
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-  ): Promise<void> {
-    const ip = this.getClientIp(req);
-    if (this.ipLoginLimiter && !this.ipLoginLimiter.consume(ip)) {
-      this.sendJson(res, 429, { error: 'Too many login attempts' }, req);
-      return;
-    }
-
-    const credentials = await this.readCredentials(req, res);
-    if (!credentials) return;
-
-    const userKey = `${ip}:${credentials.userName}`;
-    if (this.userLoginLimiter && !this.userLoginLimiter.consume(userKey)) {
-      this.sendJson(
-        res,
-        429,
-        { error: 'Too many login attempts for this account' },
-        req,
-      );
-      return;
-    }
-
-    const user = await this.storage.getUserByUserName(credentials.userName);
-    const valid = user
-      ? await user.verifyPassword(credentials.password)
-      : await verifyDummyPasswordHash(credentials.password);
-
-    if (!user || !valid) {
-      this.ipLoginLimiter?.recordFailure(ip);
-      this.userLoginLimiter?.recordFailure(userKey);
-      this.sendJson(
-        res,
-        401,
-        {
-          error: 'Invalid username or password',
-        },
-        req,
-      );
-      return;
-    }
-
-    this.ipLoginLimiter?.reset(ip);
-    this.userLoginLimiter?.reset(userKey);
-
-    const token = await user.createToken();
-    this.sendJson(
-      res,
-      200,
-      {
-        userId: user.userId,
-        userName: user.userName,
-        token,
-      },
-      req,
-    );
-  }
-
-  private async readCredentials(
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-  ): Promise<{ userName: string; password: string } | null> {
-    const body = await this.readJsonBody(req);
-    const { userName, password } = body as {
-      userName?: string;
-      password?: string;
-    };
-    const normUserName = normalizeUserName(userName ?? '');
-    const normPassword = normalizePassword(password ?? '');
-    if (!normUserName || !normPassword) {
-      this.sendJson(
-        res,
-        400,
-        {
-          error: 'Missing or invalid required field: username and password',
-        },
-        req,
-      );
-      return null;
-    }
-    return { userName: normUserName, password: normPassword };
-  }
+  // -- Private Helpers --------------------------------------------------------
 
   private getClientIp(req: http.IncomingMessage): string {
     if (this.trustProxy) {
@@ -1210,32 +606,4 @@ export class TetherServer {
       });
     }
   }
-}
-
-// -- Private Helpers --------------------------------------------------------
-
-function getHttpStatusForError(err: unknown): number {
-  if (err instanceof TetherServerError) {
-    switch (err.code) {
-      case TetherServerErrorCode.InvalidInput:
-      case TetherServerErrorCode.ConfigurationError:
-        return 400;
-      case TetherServerErrorCode.Unauthorized:
-      case TetherServerErrorCode.AuthenticationFailed:
-        return 401;
-      case TetherServerErrorCode.Forbidden:
-        return 403;
-      case TetherServerErrorCode.NotFound:
-        return 404;
-      case TetherServerErrorCode.AlreadyExists:
-        return 409;
-      case TetherServerErrorCode.LimitExceeded:
-        return 413;
-      case TetherServerErrorCode.NotSupported:
-        return 501;
-      case TetherServerErrorCode.InternalError:
-        return 500;
-    }
-  }
-  return 500;
 }

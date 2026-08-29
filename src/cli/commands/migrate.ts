@@ -6,10 +6,10 @@ import {
   TetherServerError,
   TetherServerErrorCode,
 } from '../../server/errors.js';
-import { readServerLock } from '../../server/lock.js';
+import { readServerLock } from '../../server/shared/lock.js';
+import { getUserBucket } from '../../server/shared/validate.js';
 import { DEFAULT_TABLE_PERMISSIONS } from '../../server/storage/base/index.js';
 import { BackendType } from '../../server/storage/index.js';
-import { getUserBucket } from '../../server/validate.js';
 import type { StoredRecord } from '../../shared/types.js';
 
 /**
@@ -119,10 +119,10 @@ async function migrateSqliteStorage(
       'INSERT OR IGNORE INTO tables (name, settings, created_at) VALUES (?, ?, ?)',
     );
     const stmtInsertRecord = tablesDb.prepare(
-      'INSERT OR REPLACE INTO records (table_name, user_id, id, version, timestamp, client_id, deleted, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT OR REPLACE INTO records (table_name, partition, id, version, timestamp, client_id, deleted, data, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     );
     const stmtInsertChangelog = tablesDb.prepare(
-      'INSERT OR REPLACE INTO changelog (seq, table_name, user_id, id, op, version, timestamp, client_id, deleted, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT OR REPLACE INTO changelog (seq, table_name, partition, id, op, version, timestamp, client_id, deleted, data, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     );
 
     const appTables = appsDb
@@ -179,6 +179,7 @@ async function migrateSqliteStorage(
                 r.client_id,
                 r.deleted,
                 r.data,
+                userId,
               );
               migratedRecords++;
             }
@@ -219,6 +220,7 @@ async function migrateSqliteStorage(
                 c.client_id,
                 c.deleted,
                 c.data,
+                userId,
               );
               migratedChangelogEntries++;
               if (c.seq > globalMaxSeq) globalMaxSeq = c.seq;
@@ -477,34 +479,36 @@ function initV2TablesSchema(db: DatabaseSync): void {
 
     CREATE TABLE IF NOT EXISTS records (
       table_name TEXT NOT NULL,
-      user_id TEXT NOT NULL,
+      partition TEXT NOT NULL,
       id TEXT NOT NULL,
       version INTEGER NOT NULL,
       timestamp INTEGER NOT NULL,
-      client_id TEXT NOT NULL,
+      client_id TEXT,
       deleted INTEGER NOT NULL,
       data TEXT,
-      PRIMARY KEY (table_name, user_id, id)
+      user_id TEXT,
+      PRIMARY KEY (table_name, partition, id)
     );
 
     CREATE INDEX IF NOT EXISTS idx_records_lookup
-      ON records (table_name, user_id, deleted);
+      ON records (table_name, partition, deleted);
 
     CREATE TABLE IF NOT EXISTS changelog (
       seq INTEGER PRIMARY KEY AUTOINCREMENT,
       table_name TEXT NOT NULL,
-      user_id TEXT NOT NULL,
+      partition TEXT NOT NULL,
       id TEXT NOT NULL,
       op TEXT NOT NULL,
       version INTEGER NOT NULL,
       timestamp INTEGER NOT NULL,
-      client_id TEXT NOT NULL,
+      client_id TEXT,
       deleted INTEGER NOT NULL,
-      data TEXT
+      data TEXT,
+      user_id TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_changelog_seq
-      ON changelog (seq, table_name, user_id);
+      ON changelog (seq, table_name, partition);
 
     CREATE TABLE IF NOT EXISTS meta (
       rowid INTEGER PRIMARY KEY,

@@ -5,18 +5,21 @@ import {
   TetherServerErrorCode,
 } from '../../src/server/errors.js';
 import { startServer, TetherServer } from '../../src/server/server.js';
-import { Permission } from '../../src/shared/types.js';
+import { Permission, type TableRow } from '../../src/shared/types.js';
 import { type StorageContext, storageDescriptors } from './storage/matrix.js';
 
 describe.each(storageDescriptors)(
-  'TetherServer ($name)',
+  'TetherServer HTTP & Admin API ($name)',
   ({ createBackend }) => {
-    let server: TetherServer;
     let storageContext: StorageContext;
+    let server: TetherServer;
 
     beforeEach(async () => {
       storageContext = await createBackend();
-      server = new TetherServer({ storage: storageContext.storage });
+      server = new TetherServer({
+        storage: storageContext.storage,
+        adminSecret: 'test-admin-secret-key-1234567890',
+      });
     });
 
     afterEach(async () => {
@@ -25,167 +28,106 @@ describe.each(storageDescriptors)(
     });
 
     describe('declareTable', () => {
-      it('should declare a table and configure its settings', async () => {
-        await server.declareTable('tasks', { maxRecords: 500 });
-
-        const table = await server.storage.getTable('tasks');
-        expect(table).toBeDefined();
-        expect(table?.name).toBe('tasks');
-        expect(table?.settings.maxRecords).toBe(500);
-      });
-
-      it('should idempotently handle repeated declareTable calls and update settings', async () => {
-        await server.declareTable('my-table', { maxRecords: 100 });
-        await server.declareTable('my-table', { maxRecords: 200 });
-
-        const table = await server.storage.getTable('my-table');
-        expect(table).toBeDefined();
-        expect(table?.settings.maxRecords).toBe(200);
-      });
-
-      it('should declaratively populate rows into a table and resolve userName', async () => {
-        const alice = await server.declareUser('alice', 'pass123');
-        await server.declareTable('categories', {
-          permissions: { read: Permission.Everybody },
-          rows: [
-            { id: 'cat-1', data: { name: 'Tech' }, userName: 'alice' },
-            { id: 'cat-2', data: { name: 'General' } },
-          ],
+      it('should create a new table with settings if it does not exist', async () => {
+        const table = await server.declareTable('documents', {
+          permissions: {
+            read: Permission.Everybody,
+            create: Permission.Authenticated,
+            update: Permission.Owner,
+            delete: Permission.Owner,
+          },
         });
+
+        expect(table.name).toBe('documents');
+        expect(table.settings.permissions?.read).toBe(Permission.Everybody);
+
+        const retrieved = await server.storage.getTable('documents');
+        expect(retrieved).toBeDefined();
+        expect(retrieved?.settings.permissions?.read).toBe(
+          Permission.Everybody,
+        );
+      });
+
+      it('should update settings on an existing table', async () => {
+        await server.declareTable('notes', {
+          permissions: { read: Permission.Owner },
+        });
+
+        const updated = await server.declareTable('notes', {
+          permissions: { read: Permission.Everybody },
+        });
+
+        expect(updated.settings.permissions?.read).toBe(Permission.Everybody);
+
+        const retrieved = await server.storage.getTable('notes');
+        expect(retrieved?.settings.permissions?.read).toBe(
+          Permission.Everybody,
+        );
+      });
+
+      it('should populate initial rows on a newly created table', async () => {
+        const rows: TableRow[] = [
+          { id: 'item1', data: { title: 'First Post' } },
+          { id: 'item2', data: { title: 'Second Post' } },
+        ];
+
+        const table = await server.declareTable(
+          'posts',
+          { permissions: { read: Permission.Everybody } },
+          rows,
+        );
+        const records = await table.getAllRecords();
+
+        expect(records).toHaveLength(2);
+        expect(records.map((r) => r.id).sort()).toEqual(['item1', 'item2']);
+      });
+
+      it('should not duplicate existing rows when declaring table again', async () => {
+        const rows: TableRow[] = [
+          { id: 'cat1', data: { name: 'Electronics' } },
+        ];
+
+        await server.declareTable(
+          'categories',
+          { permissions: { read: Permission.Everybody } },
+          rows,
+        );
+        await server.declareTable(
+          'categories',
+          { permissions: { read: Permission.Everybody } },
+          [
+            { id: 'cat1', data: { name: 'Electronics Updated' } },
+            { id: 'cat2', data: { name: 'Books' } },
+          ],
+        );
 
         const table = await server.storage.getTable('categories');
-        expect(table).toBeDefined();
-
         const records = await table?.getAllRecords();
+
         expect(records).toHaveLength(2);
-
-        const r1 = records?.find((r) => r.id === 'cat-1');
-        expect(r1?.data).toEqual({ name: 'Tech' });
-        // @ts-expect-error - internal storage check
-        expect(r1?.userId).toBe(alice.userId);
-        expect(r1?.clientId).toBeUndefined();
-
-        const r2 = records?.find((r) => r.id === 'cat-2');
-        expect(r2?.data).toEqual({ name: 'General' });
-        // @ts-expect-error - internal storage check
-        expect(r2?.userId).toBeUndefined();
-        expect(r2?.clientId).toBeUndefined();
-
-        // Idempotency: second declare with rows should not duplicate existing records, and unknown users should not set userId
-        const bob = await server.declareUser('bob', 'pass123');
-        await server.declareTable('categories', {
-          permissions: { read: Permission.Everybody },
-          rows: [
-            { id: 'cat-1', data: { name: 'Tech' }, userName: 'alice' },
-            { id: 'cat-3', data: { name: 'News' }, userName: 'bob' },
-            { id: 'cat-4', data: { name: 'Random' }, userName: 'nonexistent' },
-          ],
-        });
-
-        const updatedRecords = await table?.getAllRecords();
-        expect(updatedRecords).toHaveLength(4);
-        const r3 = updatedRecords?.find((r) => r.id === 'cat-3');
-        // @ts-expect-error - internal storage check
-        expect(r3?.userId).toBe(bob.userId);
-        expect(r3?.clientId).toBeUndefined();
-
-        const r4 = updatedRecords?.find((r) => r.id === 'cat-4');
-        // @ts-expect-error - internal storage check
-        expect(r4?.userId).toBeUndefined();
-        expect(r4?.clientId).toBeUndefined();
+        expect(records?.map((r) => r.id).sort()).toEqual(['cat1', 'cat2']);
       });
     });
 
     describe('declareUser', () => {
-      it('should create a new user if not already registered', async () => {
-        const user = await server.declareUser('alice', 'initial_pass_123');
+      it('should create a new user if not already present', async () => {
+        const user = await server.declareUser('alice', 'password123');
 
-        expect(user).toBeDefined();
-        expect(user.userId).toBeDefined();
         expect(user.userName).toBe('alice');
-
-        expect(await user.verifyPassword('initial_pass_123')).toBe(true);
-        expect(await user.verifyPassword('wrong_password')).toBe(false);
-
-        const retrieved = await server.storage.getUserByUserName('alice');
-        expect(retrieved?.userId).toBe(user.userId);
+        expect(user.userId).toBeDefined();
+        expect(await user.verifyPassword('password123')).toBe(true);
+        expect(await user.verifyPassword('wrongPassword')).toBe(false);
       });
 
-      it('should update the password of an existing user and keep the same user id', async () => {
+      it('should update password for an existing user without changing userId', async () => {
         const initialUser = await server.declareUser('bobby', 'password_v1');
-        expect(initialUser.userName).toBe('bobby');
-        expect(await initialUser.verifyPassword('password_v1')).toBe(true);
-
         const updatedUser = await server.declareUser('bobby', 'password_v2');
+
         expect(updatedUser.userId).toBe(initialUser.userId);
         expect(updatedUser.userName).toBe('bobby');
 
-        // Verify old password fails and new password works
         expect(await updatedUser.verifyPassword('password_v1')).toBe(false);
         expect(await updatedUser.verifyPassword('password_v2')).toBe(true);
-
-        // Verify through storage lookup
-        const retrieved = await server.storage.getUserByUserName('bobby');
-        expect(retrieved).toBeDefined();
-        expect(await retrieved?.verifyPassword('password_v1')).toBe(false);
-        expect(await retrieved?.verifyPassword('password_v2')).toBe(true);
-      });
-
-      it('should allow authenticating via HTTP endpoints after declareUser', async () => {
-        await server.declareUser('evelyn', 'evelyn_secret_pwd');
-        const httpServer: http.Server = await server.listen(0, '127.0.0.1');
-        const addr = httpServer.address();
-        const port = typeof addr === 'object' && addr ? addr.port : 8080;
-
-        // Try logging in via HTTP
-        const res = await fetch(`http://127.0.0.1:${port}/auth/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userName: 'evelyn',
-            password: 'evelyn_secret_pwd',
-          }),
-        });
-
-        expect(res.status).toBe(200);
-        const data = (await res.json()) as {
-          userId: string;
-          userName: string;
-          token: string;
-        };
-        expect(data.userName).toBe('evelyn');
-        expect(data.token).toBeDefined();
-
-        // Change password via declareUser
-        await server.declareUser('evelyn', 'evelyn_new_pwd');
-
-        // Old password should fail login
-        const failRes = await fetch(`http://127.0.0.1:${port}/auth/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userName: 'evelyn',
-            password: 'evelyn_secret_pwd',
-          }),
-        });
-        expect(failRes.status).toBe(401);
-
-        // New password should succeed login
-        const successRes = await fetch(`http://127.0.0.1:${port}/auth/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userName: 'evelyn',
-            password: 'evelyn_new_pwd',
-          }),
-        });
-        expect(successRes.status).toBe(200);
-        const successData = (await successRes.json()) as {
-          userId: string;
-          userName: string;
-          token: string;
-        };
-        expect(successData.userId).toBe(data.userId);
       });
     });
 
@@ -197,17 +139,8 @@ describe.each(storageDescriptors)(
         const addr = httpServer.address();
         const port = typeof addr === 'object' && addr ? addr.port : 8080;
 
-        const res = await fetch(`http://127.0.0.1:${port}/auth/register`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userName: 'default_path_user',
-            password: 'password123',
-          }),
-        });
-        expect(res.status).toBe(201);
-        const data = (await res.json()) as { userName: string };
-        expect(data.userName).toBe('default_path_user');
+        const res = await fetch(`http://127.0.0.1:${port}/health`);
+        expect(res.status).toBe(200);
       });
 
       it('should prefix all REST endpoints and default WebSocket path when basePath is configured', async () => {
@@ -224,35 +157,15 @@ describe.each(storageDescriptors)(
         const port = typeof addr === 'object' && addr ? addr.port : 8080;
 
         try {
-          // Register on root path should return 404 when basePath is /api/v1
-          const rootRes = await fetch(
-            `http://127.0.0.1:${port}/auth/register`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                userName: 'custom_path_user',
-                password: 'password123',
-              }),
-            },
-          );
+          // Health on root path should return 404 when basePath is /api/v1
+          const rootRes = await fetch(`http://127.0.0.1:${port}/health`);
           expect(rootRes.status).toBe(404);
 
-          // Register on prefixed path /api/v1/auth/register should succeed
+          // Health on prefixed path /api/v1/health should succeed
           const prefixedRes = await fetch(
-            `http://127.0.0.1:${port}/api/v1/auth/register`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                userName: 'custom_path_user',
-                password: 'password123',
-              }),
-            },
+            `http://127.0.0.1:${port}/api/v1/health`,
           );
-          expect(prefixedRes.status).toBe(201);
-          const data = (await prefixedRes.json()) as { userName: string };
-          expect(data.userName).toBe('custom_path_user');
+          expect(prefixedRes.status).toBe(200);
         } finally {
           await customServer.close();
           await customCtx.cleanup();
@@ -304,14 +217,17 @@ describe.each(storageDescriptors)(
         }
       });
 
-      it('should return 400 for malformed JSON request bodies', async () => {
+      it('should return 400 for malformed JSON request bodies on admin endpoints', async () => {
         const httpServer = await server.listen(0, '127.0.0.1');
         const addr = httpServer.address();
         const port = typeof addr === 'object' && addr ? addr.port : 8080;
 
-        const res = await fetch(`http://127.0.0.1:${port}/auth/register`, {
+        const res = await fetch(`http://127.0.0.1:${port}/admin/tables`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer test-admin-secret-key-1234567890',
+          },
           body: 'invalid-non-json{',
         });
         expect(res.status).toBe(400);
@@ -334,131 +250,6 @@ describe.each(storageDescriptors)(
           body: JSON.stringify({}),
         });
         expect(postRes.status).toBe(404);
-      });
-
-      it('should map various TetherServerErrors and unexpected errors to correct HTTP status codes', async () => {
-        const httpServer = await server.listen(0, '127.0.0.1');
-        const addr = httpServer.address();
-        const port = typeof addr === 'object' && addr ? addr.port : 8080;
-
-        // Mock storage.createUser to throw LimitExceeded
-        const createSpy = vi
-          .spyOn(server.storage, 'createUser')
-          .mockRejectedValueOnce(
-            new TetherServerError(
-              TetherServerErrorCode.LimitExceeded,
-              'User limit reached',
-            ),
-          );
-
-        const limitRes = await fetch(`http://127.0.0.1:${port}/auth/register`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userName: 'validuser',
-            password: 'password123',
-          }),
-        });
-        expect(limitRes.status).toBe(413);
-
-        // Mock storage.createUser to throw InternalError
-        createSpy.mockRejectedValueOnce(
-          new TetherServerError(
-            TetherServerErrorCode.InternalError,
-            'Disk failure',
-          ),
-        );
-        const internalRes = await fetch(
-          `http://127.0.0.1:${port}/auth/register`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userName: 'validuser',
-              password: 'password123',
-            }),
-          },
-        );
-        expect(internalRes.status).toBe(500);
-
-        // Mock storage.createUser to throw Unauthorized
-        createSpy.mockRejectedValueOnce(
-          new TetherServerError(
-            TetherServerErrorCode.Unauthorized,
-            'Unauthorized action',
-          ),
-        );
-        const unauthRes = await fetch(
-          `http://127.0.0.1:${port}/auth/register`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userName: 'validuser',
-              password: 'password123',
-            }),
-          },
-        );
-        expect(unauthRes.status).toBe(401);
-
-        // Mock storage.createUser to throw NotFound
-        createSpy.mockRejectedValueOnce(
-          new TetherServerError(
-            TetherServerErrorCode.NotFound,
-            'Resource not found',
-          ),
-        );
-        const notFoundRes = await fetch(
-          `http://127.0.0.1:${port}/auth/register`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userName: 'validuser',
-              password: 'password123',
-            }),
-          },
-        );
-        expect(notFoundRes.status).toBe(404);
-
-        // Mock storage.createUser to throw AlreadyExists
-        createSpy.mockRejectedValueOnce(
-          new TetherServerError(
-            TetherServerErrorCode.AlreadyExists,
-            'User already exists',
-          ),
-        );
-        const existsRes = await fetch(
-          `http://127.0.0.1:${port}/auth/register`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userName: 'validuser',
-              password: 'password123',
-            }),
-          },
-        );
-        expect(existsRes.status).toBe(409);
-
-        // Mock storage.createUser to throw generic non-TetherServerError
-        createSpy.mockRejectedValueOnce(
-          new Error('Unexpected runtime exception'),
-        );
-        const genericRes = await fetch(
-          `http://127.0.0.1:${port}/auth/register`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userName: 'validuser',
-              password: 'password123',
-            }),
-          },
-        );
-        expect(genericRes.status).toBe(500);
-
-        createSpy.mockRestore();
       });
 
       it('should handle /health, /ready, and /metrics endpoints', async () => {
@@ -489,7 +280,7 @@ describe.each(storageDescriptors)(
           status?: string;
           uptime: number;
           connectedClients: number;
-          appsCount: number;
+          tablesCount: number;
           memoryUsage: { rss: number };
         };
         expect(metricsData.connectedClients).toBe(0);
@@ -537,416 +328,7 @@ describe.each(storageDescriptors)(
       });
     });
 
-    describe('Auth Endpoint Protection & Rate Limiting', () => {
-      it('should return 404 Not found when allowRegistration is false', async () => {
-        const noRegServer = new TetherServer({
-          allowRegistration: false,
-        });
-        const httpServer = await noRegServer.listen(0, '127.0.0.1');
-        const port = (httpServer.address() as { port: number }).port;
-
-        try {
-          const res = await fetch(`http://127.0.0.1:${port}/auth/register`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userName: 'new_user',
-              password: 'secure_password_123',
-            }),
-          });
-          expect(res.status).toBe(404);
-          const data = (await res.json()) as { error: string };
-          expect(data.error).toBe('Not found');
-        } finally {
-          await noRegServer.close();
-        }
-      });
-
-      it('should enforce registration rate limits and return 429', async () => {
-        const limitedServer = new TetherServer({
-          rateLimiting: {
-            ipRegisterMaxRequests: 2,
-          },
-        });
-        const httpServer = await limitedServer.listen(0, '127.0.0.1');
-        const port = (httpServer.address() as { port: number }).port;
-
-        try {
-          // 1st registration -> 201
-          const res1 = await fetch(`http://127.0.0.1:${port}/auth/register`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userName: 'reg_user1',
-              password: 'password1',
-            }),
-          });
-          expect(res1.status).toBe(201);
-
-          // 2nd registration -> 201
-          const res2 = await fetch(`http://127.0.0.1:${port}/auth/register`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userName: 'reg_user2',
-              password: 'password2',
-            }),
-          });
-          expect(res2.status).toBe(201);
-
-          // 3rd registration (exceeds limit) -> 429
-          const res3 = await fetch(`http://127.0.0.1:${port}/auth/register`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userName: 'reg_user3',
-              password: 'password3',
-            }),
-          });
-          expect(res3.status).toBe(429);
-          const data = (await res3.json()) as { error: string };
-          expect(data.error).toContain('Too many registration requests');
-        } finally {
-          await limitedServer.close();
-        }
-      });
-
-      it('should apply progressive backoff on repeated failed logins', async () => {
-        const limitedServer = new TetherServer({
-          rateLimiting: {
-            maxFailures: 2,
-            initialBackoffMs: 2_000,
-          },
-        });
-        await limitedServer.declareUser('target_user', 'correct_password');
-        const httpServer = await limitedServer.listen(0, '127.0.0.1');
-        const port = (httpServer.address() as { port: number }).port;
-
-        try {
-          // 1st failed attempt -> 401
-          const res1 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userName: 'target_user',
-              password: 'wrong_password_1',
-            }),
-          });
-          expect(res1.status).toBe(401);
-
-          // 2nd failed attempt (hits maxFailures=2) -> 401 and triggers backoff
-          const res2 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userName: 'target_user',
-              password: 'wrong_password_2',
-            }),
-          });
-          expect(res2.status).toBe(401);
-
-          // 3rd attempt while under cooldown -> 429 Too Many Requests
-          const res3 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userName: 'target_user',
-              password: 'correct_password',
-            }),
-          });
-          expect(res3.status).toBe(429);
-        } finally {
-          await limitedServer.close();
-        }
-      });
-
-      it('should isolate account login lockout per IP to prevent unauthenticated DoS', async () => {
-        const limitedServer = new TetherServer({
-          trustProxy: true,
-          rateLimiting: {
-            ipLoginMaxRequests: 100,
-            userLoginMaxRequests: 2,
-            maxFailures: 2,
-            initialBackoffMs: 10_000,
-          },
-        });
-        await limitedServer.declareUser('target_user', 'correct_password');
-        const httpServer = await limitedServer.listen(0, '127.0.0.1');
-        const port = (httpServer.address() as { port: number }).port;
-
-        try {
-          // Attacker from IP 198.51.100.1 spams failed passwords for target_user
-          for (let i = 0; i < 2; i++) {
-            const res = await fetch(`http://127.0.0.1:${port}/auth/login`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-Forwarded-For': '198.51.100.1',
-              },
-              body: JSON.stringify({
-                userName: 'target_user',
-                password: 'wrong_password',
-              }),
-            });
-            expect(res.status).toBe(401);
-          }
-
-          // Attacker from IP 198.51.100.1 is now locked out (429)
-          const attackerRes = await fetch(
-            `http://127.0.0.1:${port}/auth/login`,
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-Forwarded-For': '198.51.100.1',
-              },
-              body: JSON.stringify({
-                userName: 'target_user',
-                password: 'correct_password',
-              }),
-            },
-          );
-          expect(attackerRes.status).toBe(429);
-
-          // Legitimate user from IP 203.0.113.50 can still log in successfully
-          const legitRes = await fetch(`http://127.0.0.1:${port}/auth/login`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Forwarded-For': '203.0.113.50',
-            },
-            body: JSON.stringify({
-              userName: 'target_user',
-              password: 'correct_password',
-            }),
-          });
-          expect(legitRes.status).toBe(200);
-        } finally {
-          await limitedServer.close();
-        }
-      });
-
-      it('should reset failure tracking on valid login', async () => {
-        const limitedServer = new TetherServer({
-          rateLimiting: {
-            maxFailures: 3,
-            initialBackoffMs: 2_000,
-          },
-        });
-        await limitedServer.declareUser('alice_user', 'correct_password');
-        const httpServer = await limitedServer.listen(0, '127.0.0.1');
-        const port = (httpServer.address() as { port: number }).port;
-
-        try {
-          // 1 failed attempt
-          const res1 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userName: 'alice_user',
-              password: 'wrong_password',
-            }),
-          });
-          expect(res1.status).toBe(401);
-
-          // 1 successful login -> resets failure counter
-          const res2 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userName: 'alice_user',
-              password: 'correct_password',
-            }),
-          });
-          expect(res2.status).toBe(200);
-
-          // Verify failure count is reset: a subsequent single bad password gives 401 instead of 429 backoff
-          const res3 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userName: 'alice_user',
-              password: 'wrong_password_again',
-            }),
-          });
-          expect(res3.status).toBe(401);
-        } finally {
-          await limitedServer.close();
-        }
-      });
-
-      it('should ignore X-Forwarded-For when trustProxy is false (default)', async () => {
-        const limitedServer = new TetherServer({
-          rateLimiting: {
-            ipLoginMaxRequests: 2,
-          },
-        });
-        await limitedServer.declareUser('bob_user', 'correct_password');
-        const httpServer = await limitedServer.listen(0, '127.0.0.1');
-        const port = (httpServer.address() as { port: number }).port;
-
-        try {
-          // Attempt 1 with spoofed IP header
-          const res1 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Forwarded-For': '198.51.100.1',
-            },
-            body: JSON.stringify({
-              userName: 'bob_user',
-              password: 'wrong_password',
-            }),
-          });
-          expect(res1.status).toBe(401);
-
-          // Attempt 2 with another spoofed IP header
-          const res2 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Forwarded-For': '198.51.100.2',
-            },
-            body: JSON.stringify({
-              userName: 'bob_user',
-              password: 'wrong_password',
-            }),
-          });
-          expect(res2.status).toBe(401);
-
-          // Attempt 3 with yet another spoofed IP header: rate limiter (scoped to actual socket IP 127.0.0.1) blocks it
-          const res3 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Forwarded-For': '198.51.100.3',
-            },
-            body: JSON.stringify({
-              userName: 'bob_user',
-              password: 'wrong_password',
-            }),
-          });
-          expect(res3.status).toBe(429);
-        } finally {
-          await limitedServer.close();
-        }
-      });
-
-      it('should respect X-Forwarded-For when trustProxy is true', async () => {
-        const proxyServer = new TetherServer({
-          trustProxy: true,
-          rateLimiting: {
-            ipLoginMaxRequests: 2,
-            userLoginMaxRequests: 100,
-          },
-        });
-        await proxyServer.declareUser('charlie_user', 'correct_password');
-        const httpServer = await proxyServer.listen(0, '127.0.0.1');
-        const port = (httpServer.address() as { port: number }).port;
-
-        try {
-          // Send 2 requests from IP A
-          for (let i = 0; i < 2; i++) {
-            const res = await fetch(`http://127.0.0.1:${port}/auth/login`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-Forwarded-For': '203.0.113.195',
-              },
-              body: JSON.stringify({
-                userName: 'charlie_user',
-                password: 'wrong_password',
-              }),
-            });
-            expect(res.status).toBe(401);
-          }
-
-          // 3rd request from IP A is rate limited
-          const resA3 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Forwarded-For': '203.0.113.195',
-            },
-            body: JSON.stringify({
-              userName: 'charlie_user',
-              password: 'wrong_password',
-            }),
-          });
-          expect(resA3.status).toBe(429);
-
-          // Request from IP B is allowed
-          const resB = await fetch(`http://127.0.0.1:${port}/auth/login`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Forwarded-For': '203.0.113.196',
-            },
-            body: JSON.stringify({
-              userName: 'charlie_user',
-              password: 'wrong_password',
-            }),
-          });
-          expect(resB.status).toBe(401);
-        } finally {
-          await proxyServer.close();
-        }
-      });
-
-      it('should rate limit per target username when userLoginMaxRequests is exceeded', async () => {
-        const userLimiterServer = new TetherServer({
-          storage: storageContext.storage,
-          rateLimiting: {
-            ipLoginMaxRequests: 100,
-            userLoginMaxRequests: 2,
-          },
-        });
-        await userLimiterServer.declareUser('target_user', 'correct_pass');
-        const httpServer = await userLimiterServer.listen(0, '127.0.0.1');
-        const port = (httpServer.address() as { port: number }).port;
-
-        try {
-          // Attempt 1: 401
-          const res1 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userName: 'target_user',
-              password: 'wrong_password',
-            }),
-          });
-          expect(res1.status).toBe(401);
-
-          // Attempt 2: 401
-          const res2 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userName: 'target_user',
-              password: 'wrong_password',
-            }),
-          });
-          expect(res2.status).toBe(401);
-
-          // Attempt 3: 429 Too many login attempts for this account
-          const res3 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userName: 'target_user',
-              password: 'wrong_password',
-            }),
-          });
-          expect(res3.status).toBe(429);
-          const data3 = (await res3.json()) as { error: string };
-          expect(data3.error).toBe('Too many login attempts for this account');
-        } finally {
-          await userLimiterServer.close();
-        }
-      });
-    });
-
-    describe('CORS Configuration', () => {
+    describe('CORS Integration', () => {
       it('should return default permissive CORS headers when not configured', async () => {
         const running = await server.listen(0, '127.0.0.1');
         const port = (running.address() as { port: number }).port;
@@ -1024,7 +406,7 @@ describe.each(storageDescriptors)(
         const port = (running.address() as { port: number }).port;
 
         try {
-          const res = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+          const res = await fetch(`http://127.0.0.1:${port}/admin/status`, {
             method: 'OPTIONS',
             headers: { Origin: 'https://myclient.com' },
           });
@@ -1078,30 +460,36 @@ describe.each(storageDescriptors)(
         const loggedServer = new TetherServer({
           storage: storageContext.storage,
           logger: mockLogger,
+          adminSecret: 'test-admin-secret',
         });
         const running = await loggedServer.listen(0, '127.0.0.1');
         const port = (running.address() as { port: number }).port;
 
         try {
           // Send invalid JSON to trigger 400 debug log
-          const res400 = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+          const res400 = await fetch(`http://127.0.0.1:${port}/admin/tables`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: 'Bearer test-admin-secret',
+            },
             body: '{invalid-json',
           });
           expect(res400.status).toBe(400);
           expect(mockLogger.debug).toHaveBeenCalled();
 
           // Mock an unexpected internal error to trigger 500 error log
-          vi.spyOn(loggedServer.storage, 'createUser').mockRejectedValueOnce(
+          vi.spyOn(loggedServer.storage, 'createTable').mockRejectedValueOnce(
             new Error('Database disk failure'),
           );
-          const res500 = await fetch(`http://127.0.0.1:${port}/auth/register`, {
+          const res500 = await fetch(`http://127.0.0.1:${port}/admin/tables`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: 'Bearer test-admin-secret',
+            },
             body: JSON.stringify({
-              userName: 'testuser',
-              password: 'password123',
+              name: 'error_table',
             }),
           });
           expect(res500.status).toBe(500);
@@ -1151,40 +539,50 @@ describe.each(storageDescriptors)(
         const httpServer = await server.listen(0, '127.0.0.1');
         const port = (httpServer.address() as { port: number }).port;
         const authHeader = {
-          Authorization: `Bearer ${server.adminSecret}`,
+          Authorization: 'Bearer test-admin-secret-key-1234567890',
           'Content-Type': 'application/json',
         };
 
-        // 1. Create table via POST /admin/tables
+        // 1. GET /admin/status
+        const statusRes = await fetch(`http://127.0.0.1:${port}/admin/status`, {
+          headers: authHeader,
+        });
+        expect(statusRes.status).toBe(200);
+        const statusData = (await statusRes.json()) as { backend: string };
+        expect(statusData.backend).toBeDefined();
+
+        // 2. POST /admin/tables (create table)
         const createTableRes = await fetch(
           `http://127.0.0.1:${port}/admin/tables`,
           {
             method: 'POST',
             headers: authHeader,
             body: JSON.stringify({
-              name: 'customers',
-              settings: { maxRecords: 100 },
+              name: 'admin_test_table',
+              settings: { permissions: { read: Permission.Everybody } },
             }),
           },
         );
         expect(createTableRes.status).toBe(201);
         const tableData = (await createTableRes.json()) as { name: string };
-        expect(tableData.name).toBe('customers');
+        expect(tableData.name).toBe('admin_test_table');
 
-        // 2. List tables via GET /admin/tables
-        const listTablesRes = await fetch(
+        // 3. GET /admin/tables
+        const getTablesRes = await fetch(
           `http://127.0.0.1:${port}/admin/tables`,
           {
             headers: authHeader,
           },
         );
-        expect(listTablesRes.status).toBe(200);
-        const tablesList = (await listTablesRes.json()) as Array<{
+        expect(getTablesRes.status).toBe(200);
+        const tablesList = (await getTablesRes.json()) as Array<{
           name: string;
         }>;
-        expect(tablesList.some((t) => t.name === 'customers')).toBe(true);
+        expect(tablesList.some((t) => t.name === 'admin_test_table')).toBe(
+          true,
+        );
 
-        // 3. Create user via POST /admin/users
+        // 4. POST /admin/users
         const createUserRes = await fetch(
           `http://127.0.0.1:${port}/admin/users`,
           {
@@ -1192,7 +590,7 @@ describe.each(storageDescriptors)(
             headers: authHeader,
             body: JSON.stringify({
               userName: 'admin_created_user',
-              password: 'password123',
+              password: 'secretpassword123',
             }),
           },
         );
@@ -1203,25 +601,31 @@ describe.each(storageDescriptors)(
         };
         expect(userData.userName).toBe('admin_created_user');
 
-        // 4. Put record via POST /admin/records
-        const putRecordRes = await fetch(
+        // 5. POST /admin/records (insert record)
+        const insertRecordRes = await fetch(
           `http://127.0.0.1:${port}/admin/records`,
           {
             method: 'POST',
             headers: authHeader,
             body: JSON.stringify({
-              table: 'customers',
-              id: 'c1',
-              data: { name: 'Acme Corp' },
               userId: userData.userId,
+              changes: [
+                {
+                  table: 'admin_test_table',
+                  id: 'rec-1',
+                  op: 'put',
+                  data: { message: 'Hello from admin API' },
+                  timestamp: Date.now(),
+                },
+              ],
             }),
           },
         );
-        expect(putRecordRes.status).toBe(200);
+        expect(insertRecordRes.status).toBe(200);
 
-        // 5. Query records via GET /admin/records
+        // 6. GET /admin/records
         const getRecordsRes = await fetch(
-          `http://127.0.0.1:${port}/admin/records?table=customers&userId=${userData.userId}`,
+          `http://127.0.0.1:${port}/admin/records?table=admin_test_table&user=${userData.userId}`,
           {
             headers: authHeader,
           },
@@ -1229,23 +633,13 @@ describe.each(storageDescriptors)(
         expect(getRecordsRes.status).toBe(200);
         const records = (await getRecordsRes.json()) as Array<{
           id: string;
-          data: { name: string };
+          data: { message: string };
         }>;
         expect(records).toHaveLength(1);
-        expect(records[0].data.name).toBe('Acme Corp');
+        expect(records[0].id).toBe('rec-1');
+        expect(records[0].data.message).toBe('Hello from admin API');
 
-        // 6. Get status via GET /admin/status
-        const statusRes = await fetch(`http://127.0.0.1:${port}/admin/status`, {
-          headers: authHeader,
-        });
-        expect(statusRes.status).toBe(200);
-        const status = (await statusRes.json()) as {
-          backend: string;
-          tablesCount: number;
-        };
-        expect(status.tablesCount).toBeGreaterThanOrEqual(1);
-
-        // 7. Prune via POST /admin/maintenance
+        // 7. POST /admin/maintenance
         const maintRes = await fetch(
           `http://127.0.0.1:${port}/admin/maintenance`,
           {
@@ -1283,28 +677,6 @@ describe('TetherServer Standalone Lifecycle & Error Mapping', () => {
     }
   });
 
-  it('should verify dummy password hash on login when user does not exist', async () => {
-    const server = new TetherServer();
-    const running = await server.listen(0, '127.0.0.1');
-    const port = (running.address() as { port: number }).port;
-
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userName: 'non_existent_user',
-          password: 'some_password',
-        }),
-      });
-      expect(res.status).toBe(401);
-      const data = (await res.json()) as { error: string };
-      expect(data.error).toBe('Invalid username or password');
-    } finally {
-      await server.close();
-    }
-  });
-
   it('should handle listen errors when port is already occupied', async () => {
     const server1 = new TetherServer();
     const running1 = await server1.listen(0, '127.0.0.1');
@@ -1323,45 +695,24 @@ describe('TetherServer Standalone Lifecycle & Error Mapping', () => {
     }
   });
 
-  it('should return 400 when registration or login request is missing required fields', async () => {
-    const server = new TetherServer();
-    const running = await server.listen(0, '127.0.0.1');
-    const port = (running.address() as { port: number }).port;
-
-    try {
-      // Register missing password
-      const resReg = await fetch(`http://127.0.0.1:${port}/auth/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userName: 'only_username' }),
-      });
-      expect(resReg.status).toBe(400);
-
-      // Login missing username
-      const resLog = await fetch(`http://127.0.0.1:${port}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: 'only_password' }),
-      });
-      expect(resLog.status).toBe(400);
-    } finally {
-      await server.close();
-    }
-  });
-
-  it('should return 413 when JSON payload exceeds 1MB limit', async () => {
-    const server = new TetherServer();
+  it('should return 413 when JSON payload exceeds 1MB limit on admin routes', async () => {
+    const server = new TetherServer({
+      adminSecret: 'test-secret',
+    });
     const running = await server.listen(0, '127.0.0.1');
     const port = (running.address() as { port: number }).port;
 
     try {
       const hugeString = 'a'.repeat(1024 * 1024 + 100);
-      const res = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+      const res = await fetch(`http://127.0.0.1:${port}/admin/tables`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer test-secret',
+        },
         body: JSON.stringify({
-          userName: 'huge_user',
-          password: hugeString,
+          name: 'huge_table',
+          extra: hugeString,
         }),
       });
       expect(res.status).toBe(413);
@@ -1443,7 +794,7 @@ describe('TetherServer Standalone Lifecycle & Error Mapping', () => {
       await server.close();
     });
 
-    it('should support server.handleRequest alias directly', async () => {
+    it('should support server.handleHttpRequest directly', async () => {
       const server = new TetherServer();
       let status = 0;
       let body = '';
@@ -1462,7 +813,7 @@ describe('TetherServer Standalone Lifecycle & Error Mapping', () => {
         },
       } as unknown as http.ServerResponse;
 
-      const handled = await server.handleRequest(req, res);
+      const handled = await server.handleHttpRequest(req, res);
       expect(handled).toBe(true);
       expect(status).toBe(200);
       expect(JSON.parse(body).status).toBe('ok');

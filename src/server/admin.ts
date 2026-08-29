@@ -5,7 +5,7 @@ import type {
 } from '../shared/types.js';
 import { OperationType } from '../shared/types.js';
 import { TetherServerError, TetherServerErrorCode } from './errors.js';
-import type { ServerLockInfo } from './lock.js';
+import type { ServerLockInfo } from './shared/lock.js';
 import type {
   MaintenanceResult,
   Storage,
@@ -100,11 +100,11 @@ export interface AdminTarget {
  */
 export interface ResolvedAdminContext {
   /** Active administration target (RemoteAdminTarget or LocalAdminTarget). */
-  target: AdminTarget;
+  readonly target: AdminTarget;
   /** Whether the target is a remote running server. */
-  isRemote: boolean;
+  readonly isRemote: boolean;
   /** Server lock information if a server is running. */
-  lock: ServerLockInfo | null;
+  readonly lock: ServerLockInfo | null;
   /** Cleanup function closing connections or local storage handles. */
   close(): Promise<void>;
 }
@@ -120,43 +120,6 @@ export class AdminClient implements AdminTarget {
     const safeHost = host === '0.0.0.0' ? '127.0.0.1' : host;
     this.baseUrl = `http://${safeHost}:${port}`;
     this.adminSecret = adminSecret;
-  }
-
-  private async request<T>(
-    method: string,
-    path: string,
-    body?: unknown,
-  ): Promise<T> {
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${this.adminSecret}`,
-    };
-    if (body !== undefined) {
-      headers['Content-Type'] = 'application/json';
-    }
-
-    let res: Response;
-    try {
-      res = await fetch(`${this.baseUrl}${path}`, {
-        method,
-        headers,
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-      });
-    } catch (err) {
-      throw new TetherServerError(
-        TetherServerErrorCode.InternalError,
-        `Failed to connect to running server at ${this.baseUrl}: ${(err as Error).message}`,
-      );
-    }
-
-    if (!res.ok) {
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
-      throw new TetherServerError(
-        TetherServerErrorCode.InternalError,
-        data.error ?? `Server returned HTTP ${res.status}`,
-      );
-    }
-
-    return (await res.json()) as T;
   }
 
   async getStatus(): Promise<StorageStatus> {
@@ -301,6 +264,45 @@ export class AdminClient implements AdminTarget {
 
   async stop(): Promise<{ message: string }> {
     return this.request('POST', '/admin/stop');
+  }
+
+  // -- Private Helpers --------------------------------------------------------
+
+  private async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+  ): Promise<T> {
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.adminSecret}`,
+    };
+    if (body !== undefined) {
+      headers['Content-Type'] = 'application/json';
+    }
+
+    let res: Response;
+    try {
+      res = await fetch(`${this.baseUrl}${path}`, {
+        method,
+        headers,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      });
+    } catch (err) {
+      throw new TetherServerError(
+        TetherServerErrorCode.InternalError,
+        `Failed to connect to running server at ${this.baseUrl}: ${(err as Error).message}`,
+      );
+    }
+
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new TetherServerError(
+        TetherServerErrorCode.InternalError,
+        data.error ?? `Server returned HTTP ${res.status}`,
+      );
+    }
+
+    return (await res.json()) as T;
   }
 }
 
@@ -477,7 +479,7 @@ export class LocalAdminTarget implements AdminTarget {
     await this.storage.close?.();
   }
 
-  // -- Private Helpers ------------------------------------------------------
+  // -- Private Helpers --------------------------------------------------------
 
   private async applyAdminChange(
     table: string,

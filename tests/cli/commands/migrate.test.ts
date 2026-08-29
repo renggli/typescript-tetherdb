@@ -9,13 +9,13 @@ import {
   TetherServerError,
   TetherServerErrorCode,
 } from '../../../src/server/errors.js';
-import { acquireServerLock } from '../../../src/server/lock.js';
+import { acquireServerLock } from '../../../src/server/shared/lock.js';
+import { getUserBucket } from '../../../src/server/shared/validate.js';
 import {
   BackendType,
   FileStorage,
   SqliteStorage,
 } from '../../../src/server/storage/index.js';
-import { getUserBucket } from '../../../src/server/validate.js';
 import { OperationType } from '../../../src/shared/types.js';
 
 describe('handleMigrateCommand', () => {

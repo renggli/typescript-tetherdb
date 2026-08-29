@@ -1,12 +1,12 @@
 import type { ChangeRecord, TableSettings } from '../../../shared/types.js';
-import { verifySessionToken } from '../../crypto.js';
 import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
+import { verifySessionToken } from '../../shared/crypto.js';
 import {
   calculateByteSize,
   validateRecordId,
   validateTableName,
   validateTimestamp,
-} from '../../validate.js';
+} from '../../shared/validate.js';
 import type {
   BackendType,
   MaintenanceResult,

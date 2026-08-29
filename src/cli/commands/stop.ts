@@ -3,7 +3,7 @@ import {
   TetherServerError,
   TetherServerErrorCode,
 } from '../../server/index.js';
-import { readServerLock } from '../../server/lock.js';
+import { readServerLock } from '../../server/shared/lock.js';
 
 /**
  * Handles the 'stop' command to gracefully shut down a running TetherDB server.

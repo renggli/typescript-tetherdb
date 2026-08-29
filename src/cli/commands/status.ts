@@ -1,5 +1,5 @@
 import type { StorageStatus } from '../../server/index.js';
-import type { ServerLockInfo } from '../../server/lock.js';
+import type { ServerLockInfo } from '../../server/shared/lock.js';
 import type { AdminTarget } from '../admin.js';
 
 /**

@@ -73,6 +73,7 @@ describe('TestLogger', () => {
     const server = new TetherServer({
       storage: new MemoryStorage(),
       logger: customLogger,
+      adminSecret: 'secret-key',
     });
     const running = await server.listen(0, '127.0.0.1');
     const port = (running.address() as { port: number }).port;
@@ -81,10 +82,13 @@ describe('TestLogger', () => {
       const res = await fetch(`http://127.0.0.1:${port}/health`);
       expect(res.status).toBe(200);
 
-      // Trigger 400 debug log
-      await fetch(`http://127.0.0.1:${port}/auth/login`, {
+      // Trigger 400 debug log with malformed json body
+      await fetch(`http://127.0.0.1:${port}/admin/tables`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer secret-key',
+        },
         body: 'invalid-json',
       });
 

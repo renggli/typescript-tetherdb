@@ -13,7 +13,7 @@ import {
   acquireServerLock,
   isProcessAlive,
   readServerLock,
-} from '../../src/server/lock.js';
+} from '../../src/server/shared/lock.js';
 import { OperationType } from '../../src/shared/types.js';
 
 describe('ServerLock', () => {

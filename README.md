@@ -204,7 +204,7 @@ export default defineConfig({
 });
 ```
 
-Now running `vite` serves frontend assets (HMR), REST authentication endpoints (`/auth/login`, `/auth/register`), and real-time WebSocket sync (`/tether`) all on the same dev port with zero CORS configuration!
+Now running `vite` serves frontend assets (HMR), observability endpoints, and real-time WebSocket sync & auth (`/tether`) all on the same dev port with zero CORS configuration!
 
 ### Connect & Express Middleware
 
@@ -217,12 +217,12 @@ import { TetherServer } from 'tetherdb/server';
 const app = express();
 const tetherServer = new TetherServer();
 
-// Mount authentication and health REST middleware
+// Mount observability and admin REST middleware
 app.use(tetherServer.createMiddleware());
 
 const server = app.listen(8080);
 
-// Attach WebSocket sync handler
+// Attach WebSocket sync & auth handler
 tetherServer.attach(server);
 ```
 
@@ -278,16 +278,14 @@ npx tetherdb --sqlite=./data --port=8080
 # Start with filesystem storage
 npx tetherdb --file=./data --port=8080
 
-# Manage apps, tables, and users
-npx tetherdb apps list --sqlite=./data
-npx tetherdb apps add todo-app --sqlite=./data
-npx tetherdb tables add todo-app todos --sqlite=./data
+# Manage tables and users
+npx tetherdb tables add todos --sqlite=./data
 npx tetherdb users add alice secret --sqlite=./data
 
 # Run database maintenance & compaction
 npx tetherdb maintenance checkpoint --sqlite=./data
 npx tetherdb maintenance vacuum --sqlite=./data
-npx tetherdb maintenance prune todo-app 1000 --sqlite=./data
+npx tetherdb maintenance prune 1000 --sqlite=./data
 ```
 
 ## HTTP & WebSocket Endpoints
@@ -296,10 +294,9 @@ npx tetherdb maintenance prune todo-app 1000 --sqlite=./data
 | :--- | :--- | :--- | :--- |
 | `GET` | `/health` | Server uptime and health probe | Public |
 | `GET` | `/ready` | Storage backend readiness check | Public |
-| `GET` | `/metrics` | Connected clients and application metrics | Public |
-| `POST` | `/auth/register` | Create a new user account | Public |
-| `POST` | `/auth/login` | Log in and receive a signed session token | Public |
-| `WS` | `/tether` | Bi-directional WebSocket synchronization stream | Token handshake |
+| `GET` | `/metrics` | Connected clients and storage metrics | Public |
+| `*` | `/admin/*` | Database administration and maintenance REST API | Bearer token |
+| `WS` | `/tether` | Bi-directional WebSocket synchronization and auth stream | Protocol handshake |
 
 ## Production Deployment
 
@@ -357,27 +354,33 @@ server {
 Check out the included example applications demonstrating TetherDB features across different server persistence engines:
 
 - **Collaborative Editor** ([`examples/editor/`](examples/editor)): Real-time collaborative markdown editor with multi-user presence, remote cursors, and line-based collaborative document sync powered by in-memory storage (`MemoryStorage`).
+
   ```bash
   npm run example:editor
   ```
+
   Open `http://localhost:3000` to test.
 
 - **Discussion Forum** ([`examples/forum/`](examples/forum)): Reddit-style community discussion board with sub-communities, multi-user upvoting/downvoting, recursive threaded comments, server-enforced permissions, and persona switching backed by filesystem storage (`FileStorage`).
+
   ```bash
   npm run example:forum
   ```
+
   Open `http://localhost:3001` to test.
 
 - **Collaborative Todo** ([`examples/todo/`](examples/todo)): Local-first task manager with reactive secondary status indexes, active counts, live event stream, and user authentication backed by SQLite persistence (`SqliteStorage`).
+
   ```bash
   npm run example:todo
   ```
+
   Open `http://localhost:3002` to test.
 
 ## Development & Testing
 
 ```bash
-# Format code & lint fix
+# Format code & lint fix 
 npm run format
 npm run lint
 

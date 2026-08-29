@@ -4,7 +4,7 @@ import {
   LocalAdminTarget,
   type ResolvedAdminContext,
 } from '../server/admin.js';
-import { readServerLock } from '../server/lock.js';
+import { readServerLock } from '../server/shared/lock.js';
 import { BackendType, createBackend } from './backend.js';
 
 export {

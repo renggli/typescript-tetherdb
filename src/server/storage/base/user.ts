@@ -3,8 +3,8 @@ import {
   hashPassword,
   verifyPasswordHash,
   verifySessionToken,
-} from '../../crypto.js';
-import { normalizePassword, validatePassword } from '../../validate.js';
+} from '../../shared/crypto.js';
+import { normalizePassword, validatePassword } from '../../shared/validate.js';
 import type { UserStorage } from '../user.js';
 import type { BaseStorage } from './storage.js';
 

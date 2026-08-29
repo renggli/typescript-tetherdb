@@ -18,7 +18,7 @@ import {
   validateTimestamp,
   validateUserId,
   validateUserName,
-} from '../../src/server/validate.js';
+} from '../../src/server/shared/validate.js';
 
 describe('Validation', () => {
   describe('validateUserId', () => {

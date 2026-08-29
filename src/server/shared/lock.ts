@@ -1,8 +1,8 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { TetherServerError, TetherServerErrorCode } from './errors.js';
-import type { BackendType } from './storage/storage.js';
+import { TetherServerError, TetherServerErrorCode } from '../errors.js';
+import type { BackendType } from '../storage/storage.js';
 
 /**
  * Metadata recorded inside the server lockfile.

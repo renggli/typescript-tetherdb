@@ -6,7 +6,7 @@ import { createServer as createViteServer, type ViteDevServer } from 'vite';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import { SqliteStorage } from '../../src/server/index.js';
-import { readServerLock } from '../../src/server/lock.js';
+import { readServerLock } from '../../src/server/shared/lock.js';
 import { tetherPlugin } from '../../src/vite/index.js';
 
 describe('tetherPlugin (Vite Dev Server Integration)', () => {
@@ -47,24 +47,7 @@ describe('tetherPlugin (Vite Dev Server Integration)', () => {
     const healthData = (await healthRes.json()) as { status: string };
     expect(healthData.status).toBe('ok');
 
-    // 2. Verify pre-provisioned user login
-    const loginRes = await fetch(`http://127.0.0.1:${port}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        userName: 'vite-user',
-        password: 'vite-password-123',
-      }),
-    });
-    expect(loginRes.status).toBe(200);
-    const loginData = (await loginRes.json()) as {
-      token: string;
-      userId: string;
-    };
-    expect(loginData.token).toBeDefined();
-    expect(loginData.userId).toBeDefined();
-
-    // 3. Verify WebSocket sync handshake over the same port
+    // 2. Verify WebSocket sync handshake and pre-provisioned user login
     const ws = new WebSocket(`ws://127.0.0.1:${port}/tether`);
     const messages: unknown[] = [];
 
@@ -76,10 +59,11 @@ describe('tetherPlugin (Vite Dev Server Integration)', () => {
       ws.on('open', () => {
         ws.send(
           JSON.stringify({
-            type: 'auth',
+            type: 'login',
             protocolVersion: 1,
             clientId: 'vite-test-client',
-            token: loginData.token,
+            userName: 'vite-user',
+            password: 'vite-password-123',
           }),
         );
       });

@@ -6,8 +6,8 @@ import {
   type StoredRecord,
   type TableSettings,
 } from '../../../shared/types.js';
-import { hashPassword } from '../../crypto.js';
 import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
+import { hashPassword } from '../../shared/crypto.js';
 import {
   normalizeUserName,
   validatePassword,
@@ -15,7 +15,7 @@ import {
   validateTableName,
   validateUserId,
   validateUserName,
-} from '../../validate.js';
+} from '../../shared/validate.js';
 import {
   applyChangeToRecord,
   assertCanMutate,

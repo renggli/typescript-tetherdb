@@ -10,7 +10,7 @@ import {
   verifyDummyPasswordHash,
   verifyPasswordHash,
   verifySessionToken,
-} from '../../src/server/crypto.js';
+} from '../../src/server/shared/crypto.js';
 
 describe('Crypto', () => {
   it('should hash and verify passwords using scrypt', async () => {

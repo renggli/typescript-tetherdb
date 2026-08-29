@@ -10,8 +10,8 @@ import {
   type StoredRecord,
   type TableSettings,
 } from '../../../shared/types.js';
-import { getOrCreateKeyfileSecret, hashPassword } from '../../crypto.js';
 import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
+import { getOrCreateKeyfileSecret, hashPassword } from '../../shared/crypto.js';
 import {
   normalizeUserName,
   validatePassword,
@@ -19,7 +19,7 @@ import {
   validateTableName,
   validateUserId,
   validateUserName,
-} from '../../validate.js';
+} from '../../shared/validate.js';
 import {
   assertCanMutate,
   BaseStorage,
@@ -795,13 +795,6 @@ function initUsersSchema(db: DatabaseSync): void {
       password_hash TEXT,
       created_at INTEGER NOT NULL
     );
-  `);
-  try {
-    db.exec('ALTER TABLE users RENAME COLUMN username TO user_name;');
-  } catch {
-    // Already migrated or column user_name exists
-  }
-  db.exec(`
     CREATE INDEX IF NOT EXISTS idx_users_user_name ON users (user_name);
   `);
 }
@@ -854,27 +847,6 @@ function initTablesSchema(db: DatabaseSync): void {
       min_seq INTEGER NOT NULL
     );
   `);
-
-  try {
-    db.exec('ALTER TABLE records RENAME COLUMN user_id TO partition;');
-  } catch {
-    // Already partitioned or fresh table
-  }
-  try {
-    db.exec('ALTER TABLE changelog RENAME COLUMN user_id TO partition;');
-  } catch {
-    // Already partitioned or fresh table
-  }
-  try {
-    db.exec('ALTER TABLE records ADD COLUMN user_id TEXT;');
-  } catch {
-    // Column already present
-  }
-  try {
-    db.exec('ALTER TABLE changelog ADD COLUMN user_id TEXT;');
-  } catch {
-    // Column already present
-  }
 }
 
 function createDatabase(
