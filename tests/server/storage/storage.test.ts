@@ -278,6 +278,27 @@ function runStorageTestSuite(createStorage: () => Storage) {
     expect(await storage.getUserByUserName('user_to_delete')).toBeUndefined();
     expect(await todosTable?.getRecord(user, 'td1')).toBeUndefined();
     expect(await notesTable?.getRecord(user, 'nt1')).toBeUndefined();
+
+    // Directly test storage.deleteUser
+    const user2 = await storage.createUser('user_to_delete_direct', 'pass');
+    expect(await storage.deleteUser(user2.userId)).toBe(true);
+    expect(await storage.deleteUser(user2.userId)).toBe(false);
+  });
+
+  it('should insert initial rows with author userName', async () => {
+    const user = await storage.createUser('seed_author', 'pass');
+    const table = await storage.createTable('seeded_table');
+
+    const count = await table.insertRows?.([
+      { id: 's1', data: { title: 'First' }, userName: 'seed_author' },
+      { id: 's2', data: { title: 'Second' }, userName: 'non_existent_author' },
+      { id: 's3', data: { title: 'Third' } },
+    ]);
+
+    expect(count).toBe(3);
+    const rec1 = await table.getRecord(user, 's1');
+    expect(rec1?.data).toEqual({ title: 'First' });
+    expect(rec1?.userId).toBe(user.userId);
   });
 
   it('should delete a table via table.delete and clean up all data', async () => {

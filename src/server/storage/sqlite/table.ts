@@ -74,7 +74,7 @@ export class TableSqliteStorage extends TableBaseStorage<SqliteStorage> {
       effectiveUserId,
       safeId,
     ) as RawRecordRow | undefined;
-    if (!row) return undefined;
+    if (!row || row.deleted) return undefined;
 
     return {
       id: row.id,

@@ -682,20 +682,19 @@ export class FileStorage extends BaseStorage {
     const safeUserId = validateUserId(userId);
     return this.withLock('__users__', async () => {
       let deleted = false;
-      const bucket = getUserBucket(safeUserId);
-      const userDir = path.join(this.baseDir, 'users', bucket, safeUserId);
-      try {
-        await fs.rm(userDir, { recursive: true, force: true });
-        deleted = true;
-      } catch {
-        // Ignore
-      }
-
       const users = await this.readUsersFile();
       if (users.has(safeUserId)) {
         users.delete(safeUserId);
         await this.writeUsersFile(users);
         deleted = true;
+      }
+
+      const bucket = getUserBucket(safeUserId);
+      const userDir = path.join(this.baseDir, 'users', bucket, safeUserId);
+      try {
+        await fs.rm(userDir, { recursive: true, force: true });
+      } catch {
+        // Ignore
       }
 
       return deleted;
