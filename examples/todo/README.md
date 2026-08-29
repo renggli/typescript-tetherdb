@@ -10,11 +10,11 @@ A real-time, local-first Todo application demonstrating two-way synchronization,
 - **⚡ Declarative Secondary Indexes**: Fast status filtering (`todosTable.index('status')`), active counts, and primary key lookups.
 - **🔐 User Accounts & Data Isolation**: Start as an offline guest with local storage, then attach cloud sync on demand with user registration or login (`client.login()`, `client.register()`).
 - **📊 Reactive Event Stream**: On-screen live event stream distinguishing local IndexedDB writes from remote WebSocket sync broadcasts.
-- **⚡ Embedded Vite Backend**: Zero-config backend sync and persistent SQLite storage ([`SqliteStorage`](../../src/server/storage/sqlite.ts)) served directly via `tetherPlugin` in [`vite.config.ts`](vite.config.ts).
+- **⚡ Embedded Vite Backend**: Zero-config backend sync and persistent SQLite storage ([`SqliteStorage`](../../src/server/storage/sqlite/index.ts)) served directly via `tetherPlugin` in [`vite.config.ts`](vite.config.ts).
 
 ## Data Model & Architecture
 
-The todo app uses a single typed table backed by persistent SQLite storage ([`SqliteStorage`](../../src/server/storage/sqlite.ts)):
+The todo app uses a single typed table backed by persistent SQLite storage ([`SqliteStorage`](../../src/server/storage/sqlite/index.ts)):
 
 - **`todos`** ([`src/client.ts`](src/client.ts)): Stores task items with `title` and `status` (`active` / `completed`).
 

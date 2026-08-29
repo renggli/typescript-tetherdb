@@ -9,7 +9,7 @@ A real-time, zero-sign-in collaborative markdown editor demonstrating multi-user
 - **👥 Live Presence & Multi-Cursors**: Real-time cursor positions, text selection ranges, and active collaborator status are synchronized across all connected participants via a reactive `presence` table.
 - **📝 Line-Based Collaborative Document Sync**: The document is structured as ordered lines in a `document` table. Edits, line inserts, and deletions sync instantly across participants without clobbering other lines.
 - **👁️ Live Markdown Preview**: Split-pane view with real-time rendered HTML preview that auto-updates as users collaborate.
-- **⚡ Embedded Vite Backend**: Zero-config backend sync with in-memory storage ([`MemoryStorage`](../../src/server/storage/memory.ts)) served directly via `tetherPlugin` in [`vite.config.ts`](vite.config.ts).
+- **⚡ Embedded Vite Backend**: Zero-config backend sync with in-memory storage ([`MemoryStorage`](../../src/server/storage/memory/index.ts)) served directly via `tetherPlugin` in [`vite.config.ts`](vite.config.ts).
 
 ## Data Model & Architecture
 

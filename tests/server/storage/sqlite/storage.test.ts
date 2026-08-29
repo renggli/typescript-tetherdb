@@ -312,4 +312,18 @@ describe('SqliteStorage', () => {
       await limitedContext.cleanup();
     }
   });
+
+  it('should delete users and remove their data partitions cleanly', async () => {
+    const user = await context.backend.createUser('to_delete', 'pass');
+    expect(await context.backend.getUserByUserName('to_delete')).toBeDefined();
+
+    const deleted = await context.backend.deleteUser(user.userId);
+    expect(deleted).toBe(true);
+    expect(
+      await context.backend.getUserByUserName('to_delete'),
+    ).toBeUndefined();
+
+    // Deleting again should return false
+    expect(await context.backend.deleteUser(user.userId)).toBe(false);
+  });
 });

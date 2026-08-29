@@ -58,4 +58,16 @@ describe('handleStopCommand', () => {
     expect(testLogger.hasMessage('Server stopping')).toBe(true);
     server = null;
   });
+
+  it('should stop a running server using an explicit admin token', async () => {
+    server = new TetherServer({ adminSecret: 'custom-secret' });
+    await server.listen(0, '127.0.0.1');
+    const token = server.getAdminToken('127.0.0.1');
+
+    testLogger.clear();
+    await handleStopCommand(tmpDir, token);
+
+    expect(testLogger.hasMessage('Server stopping')).toBe(true);
+    server = null;
+  });
 });

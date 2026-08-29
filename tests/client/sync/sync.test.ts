@@ -2,21 +2,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   TetherClientError,
   TetherClientErrorCode,
-} from '../../src/client/errors.js';
-import { Storage } from '../../src/client/storage.js';
+} from '../../../src/client/errors.js';
+import { Storage } from '../../../src/client/storage.js';
 import {
   Sync,
   SyncStatus,
   type WebSocketConstructor,
-} from '../../src/client/sync.js';
+} from '../../../src/client/sync.js';
 import {
   type ClientMessage,
   ClientMessageType,
   OperationType,
   type ServerMessage,
   ServerMessageType,
-} from '../../src/shared/types.js';
-import { waitForCondition } from '../helpers.js';
+} from '../../../src/shared/types.js';
+import { waitForCondition } from '../../helpers.js';
 
 class MockWebSocket {
   static instances: MockWebSocket[] = [];

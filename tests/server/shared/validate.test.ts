@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   TetherServerError,
   TetherServerErrorCode,
-} from '../../src/server/errors.js';
+} from '../../../src/server/errors.js';
 import {
   calculateByteSize,
   getUserBucket,
@@ -18,7 +18,7 @@ import {
   validateTimestamp,
   validateUserId,
   validateUserName,
-} from '../../src/server/shared/validate.js';
+} from '../../../src/server/shared/validate.js';
 
 describe('Validation', () => {
   describe('validateUserId', () => {

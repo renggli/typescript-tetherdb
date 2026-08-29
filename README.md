@@ -269,34 +269,125 @@ export function useIndex<T, K extends IDBValidKey = IDBValidKey>(
 
 ## CLI & Server Administration
 
-TetherDB includes a full CLI suite for running servers and managing databases:
+TetherDB includes a comprehensive command-line interface for managing storage backends, table schemas, permissions, records, user accounts, and running maintenance tasks offline or against a running server.
+
+### Global Options
+
+All CLI commands support target backend flags:
+
+- `--sqlite[=<dir>]` — Target persistent SQLite database (default directory: `.data`).
+- `--file[=<dir>]` — Target filesystem JSON storage (default directory: `.data`).
+- `--memory[=<token>]` — Target in-memory storage (pass admin token for remote servers).
+- `-p, --port <number>` — Server port to bind or connect to (default: `8080`).
+- `-H, --host <string>` — Host interface to bind (default: `0.0.0.0`).
+- `-t, --token <token>` — Self-contained admin connection token.
+
+### Server Lifecycle
 
 ```bash
 # Start standalone server with SQLite persistence
-npx tetherdb --sqlite=./data --port=8080
+npx tetherdb serve --sqlite=./data --port=8080
 
-# Start with filesystem storage
-npx tetherdb --file=./data --port=8080
+# Start server in background with custom host
+npx tetherdb serve --file=./data --host=127.0.0.1 --port=9000
 
-# Manage tables and users
-npx tetherdb tables add todos --sqlite=./data
-npx tetherdb users add alice secret --sqlite=./data
+# Inspect server status, database size, table count, and user count
+npx tetherdb status --sqlite=./data
 
-# Run database maintenance & compaction
+# Gracefully stop a running server via its lockfile or admin token
+npx tetherdb stop --sqlite=./data
+```
+
+### Table & Schema Management
+
+Create and configure tables with predefined permission presets (`user-private`, `public-read`, `public-read-write`, `shared`) or fine-grained limits:
+
+```bash
+# List all tables
+npx tetherdb tables --sqlite=./data
+
+# Create a table with specific permission mode
+npx tetherdb tables add todos --mode=user-private --sqlite=./data
+npx tetherdb tables add posts --mode=public-read --sqlite=./data
+npx tetherdb tables add comments --mode=shared --sqlite=./data
+
+# Create a table with quota limits
+npx tetherdb tables add logs --max-records=50000 --max-record-bytes=10240 --sqlite=./data
+
+# Show table schema, settings, and permissions
+npx tetherdb tables show todos --sqlite=./data
+
+# Update table permissions or reset to default
+npx tetherdb tables update todos --mode=public-read --sqlite=./data
+npx tetherdb tables update todos --reset --sqlite=./data
+
+# Delete a table and all its data
+npx tetherdb tables rm old_table --sqlite=./data
+```
+
+### User Account Administration
+
+```bash
+# List registered user accounts
+npx tetherdb users --sqlite=./data
+
+# Register a new user account
+npx tetherdb users add alice securepassword123 --sqlite=./data
+
+# Delete a user account and purge user data partitions
+npx tetherdb users rm usr_alice123 --sqlite=./data
+```
+
+### Record Inspection & Mutations
+
+```bash
+# List records in a table
+npx tetherdb records list todos --sqlite=./data
+
+# List records belonging to a specific user
+npx tetherdb records list todos --user=usr_alice123 --sqlite=./data
+
+# Put or update a record directly with JSON data
+npx tetherdb records put todos task-1 '{"title":"Buy milk","completed":false}' --sqlite=./data
+
+# Delete a record
+npx tetherdb records rm todos task-1 --sqlite=./data
+```
+
+### Storage Maintenance & Compaction
+
+Keep SQLite and filesystem databases compact and fast with built-in maintenance commands:
+
+```bash
+# Truncate SQLite Write-Ahead Log (WAL) files
 npx tetherdb maintenance checkpoint --sqlite=./data
+
+# Reclaim disk space, defragment, and rebuild database files
 npx tetherdb maintenance vacuum --sqlite=./data
+
+# Prune historical changelogs older than the specified retention threshold
 npx tetherdb maintenance prune 1000 --sqlite=./data
+npx tetherdb maintenance prune todos 500 --sqlite=./data
+
+# Migrate legacy multi-app database to the unified storage schema
+npx tetherdb migrate --sqlite=./data
 ```
 
 ## HTTP & WebSocket Endpoints
 
-| Method | Endpoint | Description | Authentication |
+| Method | Endpoint | Description | Access Level |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/health` | Server uptime and health probe | Public |
-| `GET` | `/ready` | Storage backend readiness check | Public |
-| `GET` | `/metrics` | Connected clients and storage metrics | Public |
-| `*` | `/admin/*` | Database administration and maintenance REST API | Bearer token |
-| `WS` | `/tether` | Bi-directional WebSocket synchronization and auth stream | Protocol handshake |
+| `WS` | `/tether` | Bi-directional WebSocket synchronization and auth stream | **Public** (Client App) |
+| `GET` | `/health` | Server uptime and liveness probe | Public / Internal |
+| `GET` | `/ready` | Storage backend readiness check | Internal Management |
+| `GET` | `/metrics` | Connected clients, table counts, memory metrics | Internal Management |
+| `*` | `/admin/*` | REST API for tables, users, records, and maintenance | Admin (Bearer Token) |
+
+> [!IMPORTANT]
+> **Security Notice — Expose Only the WebSocket Port / Route (`/tether`)**:
+> TetherDB clients communicate and synchronize exclusively over the real-time WebSocket connection (`/tether`). All other endpoints (`/admin/*`, `/metrics`, `/ready`) are private management and observability interfaces intended strictly for server operators.
+>
+> In production environments, configure your reverse proxy or firewall to expose **only** the WebSocket path (`/tether`) to public client traffic. Keep administrative and metrics routes private and inaccessible from untrusted networks.
 
 ## Production Deployment
 
@@ -318,14 +409,40 @@ TetherDB supports pluggable server storage backends:
 
 ### Reverse Proxy & SSL Termination
 
-For production, run TetherDB behind a reverse proxy (such as Caddy or Nginx) to handle SSL/TLS and proxy WebSocket connections:
+In production, run TetherDB behind a reverse proxy (Apache, Nginx, or Caddy) to terminate SSL/TLS and forward WebSocket connections to your local TetherDB daemon.
 
-#### Caddy
+#### Apache HTTP Server (`httpd`)
 
-```caddy
-api.example.com {
-  reverse_proxy localhost:8080
-}
+Ensure `mod_proxy`, `mod_proxy_http`, `mod_proxy_wstunnel`, and `mod_rewrite` are enabled:
+
+```apache
+<VirtualHost *:443>
+  ServerName api.example.com
+
+  SSLEngine on
+  SSLCertificateFile /path/to/cert.pem
+  SSLCertificateKeyFile /path/to/key.pem
+
+  # Forward WebSocket handshake upgrades to TetherDB
+  RewriteEngine On
+  RewriteCond %{HTTP:Upgrade} =websocket [NC]
+  RewriteCond %{HTTP:Connection} upgrade [NC]
+  RewriteRule ^/tether(.*) ws://127.0.0.1:8080/tether$1 [P,L]
+
+  # Expose only the public WebSocket sync endpoint
+  <Location "/tether">
+    ProxyPass http://127.0.0.1:8080/tether
+    ProxyPassReverse http://127.0.0.1:8080/tether
+  </Location>
+
+  # Block public access to private administration and metrics endpoints
+  <Location "/admin">
+    Require all denied
+  </Location>
+  <Location "/metrics">
+    Require all denied
+  </Location>
+</VirtualHost>
 ```
 
 #### Nginx
@@ -338,13 +455,44 @@ server {
   ssl_certificate /path/to/cert.pem;
   ssl_certificate_key /path/to/key.pem;
 
-  location / {
-    proxy_pass http://127.0.0.1:8080;
+  # Expose only the public WebSocket sync endpoint
+  location /tether {
+    proxy_pass http://127.0.0.1:8080/tether;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
     proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $remote_addr;
     proxy_buffering off;
+  }
+
+  # Block public access to private administration and metrics endpoints
+  location /admin {
+    deny all;
+    return 404;
+  }
+  location /metrics {
+    deny all;
+    return 404;
+  }
+}
+```
+
+#### Caddy
+
+```caddy
+api.example.com {
+  # Forward WebSocket synchronization route
+  handle /tether* {
+    reverse_proxy localhost:8080
+  }
+
+  # Block private administrative endpoints
+  handle /admin* {
+    abort
+  }
+  handle /metrics* {
+    abort
   }
 }
 ```

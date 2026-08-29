@@ -8,13 +8,13 @@ import {
   TetherServer,
   TetherServerError,
   TetherServerErrorCode,
-} from '../../src/server/index.js';
+} from '../../../src/server/index.js';
 import {
   acquireServerLock,
   isProcessAlive,
   readServerLock,
-} from '../../src/server/shared/lock.js';
-import { OperationType } from '../../src/shared/types.js';
+} from '../../../src/server/shared/lock.js';
+import { OperationType } from '../../../src/shared/types.js';
 
 describe('ServerLock', () => {
   let tmpDir: string;
@@ -327,5 +327,46 @@ describe('ServerLock', () => {
 
     handle.release();
     expect(() => handle.release()).not.toThrow();
+  });
+
+  it('should re-acquire lock seamlessly if the current PID already owns it', () => {
+    const handle1 = acquireServerLock(tmpDir, {
+      port: 9000,
+      host: '127.0.0.1',
+      backend: 'sqlite',
+    });
+    expect(handle1.info.pid).toBe(process.pid);
+
+    const handle2 = acquireServerLock(tmpDir, {
+      port: 9001,
+      host: '127.0.0.1',
+      backend: 'sqlite',
+    });
+    expect(handle2.info.port).toBe(9001);
+
+    handle2.release();
+  });
+
+  it('should overwrite stale lock when process is no longer alive', () => {
+    const deadPid = 9999999;
+    const lockFile = path.join(tmpDir, 'server.lock');
+    fs.writeFile(
+      lockFile,
+      JSON.stringify({
+        pid: deadPid,
+        port: 8080,
+        host: '127.0.0.1',
+        backend: 'sqlite',
+        startedAt: Date.now() - 10000,
+      }),
+    );
+
+    const handle = acquireServerLock(tmpDir, {
+      port: 8080,
+      host: '127.0.0.1',
+      backend: 'sqlite',
+    });
+    expect(handle.info.pid).toBe(process.pid);
+    handle.release();
   });
 });

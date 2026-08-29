@@ -4,19 +4,19 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { handleMigrateCommand } from '../../../src/cli/commands/migrate/index.js';
+import { handleMigrateCommand } from '../../../../src/cli/commands/migrate/index.js';
 import {
   TetherServerError,
   TetherServerErrorCode,
-} from '../../../src/server/errors.js';
-import { acquireServerLock } from '../../../src/server/shared/lock.js';
-import { getUserBucket } from '../../../src/server/shared/validate.js';
+} from '../../../../src/server/errors.js';
+import { acquireServerLock } from '../../../../src/server/shared/lock.js';
+import { getUserBucket } from '../../../../src/server/shared/validate.js';
 import {
   BackendType,
   FileStorage,
   SqliteStorage,
-} from '../../../src/server/storage/index.js';
-import { OperationType } from '../../../src/shared/types.js';
+} from '../../../../src/server/storage/index.js';
+import { OperationType } from '../../../../src/shared/types.js';
 
 describe('handleMigrateCommand', () => {
   let tmpDir: string;
@@ -275,5 +275,49 @@ describe('handleMigrateCommand', () => {
     expect(records?.[0].data).toEqual({ title: 'File Todo' });
 
     await storage.close();
+  });
+
+  it('should return early when File database is already on v2 schema', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'tables.json'),
+      JSON.stringify([{ name: 'todos', settings: {}, createdAt: Date.now() }]),
+      'utf-8',
+    );
+
+    const result = await handleMigrateCommand(
+      ['migrate'],
+      BackendType.File,
+      tmpDir,
+    );
+    expect(result.migratedTables).toBe(0);
+    expect(result.message).toContain(
+      'Database is already on the current schema (v2)',
+    );
+  });
+
+  it('should throw NotFound when no v1 database or apps.json exists', async () => {
+    await expect(
+      handleMigrateCommand(['migrate'], BackendType.File, tmpDir),
+    ).rejects.toMatchObject({
+      code: TetherServerErrorCode.NotFound,
+    });
+  });
+
+  it('should throw NotFound when --app filter does not match any app in v1 database', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'apps.json'),
+      JSON.stringify([{ id: 'existing-app', createdAt: 1000 }]),
+      'utf-8',
+    );
+
+    await expect(
+      handleMigrateCommand(
+        ['migrate', '--app=nonexistent-app'],
+        BackendType.File,
+        tmpDir,
+      ),
+    ).rejects.toMatchObject({
+      code: TetherServerErrorCode.NotFound,
+    });
   });
 });

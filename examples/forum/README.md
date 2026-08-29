@@ -14,11 +14,11 @@ A real-time, offline-first collaborative discussion board demonstrating unified 
   - `postsTable.index<string>('parentId')` — reactive lookup and live subscriptions for nested child replies.
   - `votesTable.index<string>('targetId')` — fast retrieval and live score calculation.
 - **👤 Multi-Persona Simulation**: Quickly switch between pre-seeded users (`alice`, `bob`, `charlie`) or register new accounts to simulate multi-user collaboration in real time across tabs.
-- **⚡ Embedded Vite Backend**: Zero-config backend sync and filesystem storage ([`FileStorage`](../../src/server/storage/file.ts)) served directly via `tetherPlugin` in [`vite.config.ts`](vite.config.ts).
+- **⚡ Embedded Vite Backend**: Zero-config backend sync and filesystem storage ([`FileStorage`](../../src/server/storage/file/index.ts)) served directly via `tetherPlugin` in [`vite.config.ts`](vite.config.ts).
 
 ## Data Model & Architecture
 
-The forum uses three tables backed by per-user filesystem storage ([`FileStorage`](../../src/server/storage/file.ts)):
+The forum uses three tables backed by per-user filesystem storage ([`FileStorage`](../../src/server/storage/file/index.ts)):
 
 - **`communities`** ([`src/client.ts`](src/client.ts)): Discussion channels with public read and restricted write permissions, pre-seeded from [`seed.ts`](seed.ts).
 - **`posts`** ([`src/client.ts`](src/client.ts)): Unified root threads and nested comments/replies with owner-only mutation permissions.

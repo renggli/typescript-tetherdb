@@ -8,7 +8,7 @@ import {
   USER_PRIVATE_PERMISSIONS,
 } from '../../src/shared/types.js';
 
-describe('Table Permission Presets', () => {
+describe('Permission', () => {
   it('should define USER_PRIVATE_PERMISSIONS matching defaults', () => {
     expect(USER_PRIVATE_PERMISSIONS).toEqual({
       create: Permission.Authenticated,
