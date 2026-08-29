@@ -1,8 +1,8 @@
 import {
-  type AdminTarget,
   TetherServerError,
   TetherServerErrorCode,
 } from '../../server/index.js';
+import type { AdminTarget } from '../admin.js';
 
 /**
  * Handles the 'users' command family (list, add, rm).

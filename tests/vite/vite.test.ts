@@ -65,7 +65,7 @@ describe('tetherPlugin (Vite Dev Server Integration)', () => {
     expect(loginData.userId).toBeDefined();
 
     // 3. Verify WebSocket sync handshake over the same port
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/sync`);
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/tether`);
     const messages: unknown[] = [];
 
     await new Promise<void>((resolve, reject) => {
@@ -109,6 +109,41 @@ describe('tetherPlugin (Vite Dev Server Integration)', () => {
     ).toBe(true);
 
     ws.close();
+
+    // 4. Verify Vite HMR WebSocket connection is not intercepted by TetherDB
+    const hmrWs = new WebSocket(`ws://127.0.0.1:${port}`, 'vite-hmr');
+    const hmrMessages: unknown[] = [];
+
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Vite HMR WebSocket connection timed out'));
+      }, 5000);
+
+      hmrWs.on('message', (data) => {
+        const msg = JSON.parse(data.toString());
+        hmrMessages.push(msg);
+        if (msg.type === 'connected') {
+          clearTimeout(timeout);
+          resolve();
+        }
+      });
+
+      hmrWs.on('error', (err) => {
+        clearTimeout(timeout);
+        reject(err);
+      });
+    });
+
+    expect(
+      hmrMessages.some(
+        (m) =>
+          typeof m === 'object' &&
+          m !== null &&
+          (m as { type?: string }).type === 'connected',
+      ),
+    ).toBe(true);
+
+    hmrWs.close();
   });
 
   it('should handle preview server configuration and close cleanly', async () => {

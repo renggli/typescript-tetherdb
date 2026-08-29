@@ -1,5 +1,5 @@
+import { AdminClient } from '../../server/admin.js';
 import {
-  AdminClient,
   TetherServerError,
   TetherServerErrorCode,
 } from '../../server/index.js';

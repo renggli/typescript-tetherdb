@@ -47,13 +47,6 @@ export type TableChangeListener<T = unknown> = (
 ) => void;
 
 /**
- * Package-internal storage accessor for Table instances.
- */
-export function getTableStorage<T>(table: Table<T>): Storage {
-  return (table as unknown as { storage: Storage }).storage;
-}
-
-/**
  * Typed table wrapper providing local-first CRUD operations and reactive event subscriptions
  * against an underlying IndexedDB table.
  * Operations are batched by default for maximum performance.
@@ -63,8 +56,9 @@ export function getTableStorage<T>(table: Table<T>): Storage {
 export class Table<T = unknown> {
   /** Reactive event registry triggered when records in this table are created, updated, or deleted. */
   readonly onChange = new EventRegistry<TableChangeEvent<T>[]>();
+  /** Internal storage coordinator reference. */
+  readonly storage: Storage;
   private tableName: string;
-  private storage: Storage;
 
   /**
    * Creates a new Table instance.

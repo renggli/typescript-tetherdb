@@ -207,18 +207,18 @@ describe('Sync', () => {
     let sync: Sync;
     let ws: MockWebSocket;
     const tokenRefreshCallback = vi.fn();
-    const authErrorCallback = vi.fn();
+    const errorCallback = vi.fn();
 
     beforeEach(async () => {
       tokenRefreshCallback.mockReset();
-      authErrorCallback.mockReset();
+      errorCallback.mockReset();
 
       sync = createSync({
         token: 'token-initial',
-        onTokenRefresh: tokenRefreshCallback,
-        onAuthError: authErrorCallback,
         pingIntervalMs: 5000,
       });
+      sync.onTokenRefresh.register(tokenRefreshCallback);
+      sync.onError.register(errorCallback);
 
       ws = MockWebSocket.instances[0];
       ws.triggerOpen();
@@ -237,7 +237,7 @@ describe('Sync', () => {
       expect(tokenRefreshCallback).toHaveBeenCalledWith('new-sliding-token');
     });
 
-    it('should handle ServerMessageType.AuthError, disconnect, and call onAuthError', async () => {
+    it('should handle ServerMessageType.AuthError, disconnect, and notify onError', async () => {
       ws.triggerMessage({
         type: ServerMessageType.AuthError,
         message: 'Invalid signature',
@@ -245,7 +245,12 @@ describe('Sync', () => {
       await new Promise((r) => setTimeout(r, 2));
 
       expect(sync.status).toBe(SyncStatus.Disconnected);
-      expect(authErrorCallback).toHaveBeenCalledWith('Invalid signature');
+      expect(errorCallback).toHaveBeenCalledWith(
+        expect.objectContaining({
+          code: TetherClientErrorCode.AuthenticationFailed,
+          message: 'Invalid signature',
+        }),
+      );
     });
 
     it('should handle ServerMessageType.SyncSnapshot and notify table subscribers', async () => {

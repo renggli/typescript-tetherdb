@@ -1,5 +1,5 @@
 /**
- * WebSocket client-to-server wire messages.
+ * Client-to-server wire messages.
  *
  * @module tetherdb/shared/types/client-messages
  */
@@ -7,13 +7,19 @@
 import type { ChangeRecord } from './records.js';
 
 /**
- * Types of messages sent from the client to the server over the WebSocket sync connection.
+ * Types of messages sent from the client to the server over the sync connection.
  */
 export enum ClientMessageType {
   /** Heartbeat ping message to verify connection liveness. */
   Ping = 'ping',
   /** Authenticate connection with user token and initial sync sequence. */
   Auth = 'auth',
+  /** Register a new user account. */
+  Register = 'register',
+  /** Login with user credentials or token. */
+  Login = 'login',
+  /** Log out and unbind active user session. */
+  Logout = 'logout',
   /** Submit a batch of local pending changes to the server. */
   ChangeBatch = 'change_batch',
 }
@@ -45,6 +51,43 @@ export interface AuthClientMessage {
 }
 
 /**
+ * Client user registration request message.
+ */
+export interface RegisterClientMessage {
+  type: ClientMessageType.Register;
+  /** Unique request correlation identifier. */
+  requestId: string;
+  /** Desired account username. */
+  userName: string;
+  /** Account password. */
+  password: string;
+}
+
+/**
+ * Client user login request message.
+ */
+export interface LoginClientMessage {
+  type: ClientMessageType.Login;
+  /** Unique request correlation identifier. */
+  requestId: string;
+  /** Account username (when logging in with credentials). */
+  userName?: string;
+  /** Account password (when logging in with credentials). */
+  password?: string;
+  /** Signed authentication token (when authenticating with existing token). */
+  token?: string;
+}
+
+/**
+ * Client user logout request message.
+ */
+export interface LogoutClientMessage {
+  type: ClientMessageType.Logout;
+  /** Unique request correlation identifier. */
+  requestId: string;
+}
+
+/**
  * Client mutation batch message.
  */
 export interface ChangeBatchClientMessage {
@@ -63,4 +106,7 @@ export interface ChangeBatchClientMessage {
 export type ClientMessage =
   | PingClientMessage
   | AuthClientMessage
+  | RegisterClientMessage
+  | LoginClientMessage
+  | LogoutClientMessage
   | ChangeBatchClientMessage;

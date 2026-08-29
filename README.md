@@ -204,7 +204,7 @@ export default defineConfig({
 });
 ```
 
-Now running `vite` serves frontend assets (HMR), REST authentication endpoints (`/auth/login`, `/auth/register`), and real-time WebSocket sync (`/sync`) all on the same dev port with zero CORS configuration!
+Now running `vite` serves frontend assets (HMR), REST authentication endpoints (`/auth/login`, `/auth/register`), and real-time WebSocket sync (`/tether`) all on the same dev port with zero CORS configuration!
 
 ### Connect & Express Middleware
 
@@ -299,7 +299,7 @@ npx tetherdb maintenance prune todo-app 1000 --sqlite=./data
 | `GET` | `/metrics` | Connected clients and application metrics | Public |
 | `POST` | `/auth/register` | Create a new user account | Public |
 | `POST` | `/auth/login` | Log in and receive a signed session token | Public |
-| `WS` | `/sync` | Bi-directional WebSocket synchronization stream | Token handshake |
+| `WS` | `/tether` | Bi-directional WebSocket synchronization stream | Token handshake |
 
 ## Production Deployment
 

@@ -58,8 +58,7 @@ describe.each(storageDescriptors)(
       const client = new TetherClient(
         dbName ?? `${name}-${Math.random().toString(36).substring(2, 8)}`,
         {
-          host: '127.0.0.1',
-          port: serverPort,
+          url: `ws://127.0.0.1:${serverPort}/tether`,
           webSocketClass: WebSocket,
           reconnectIntervalMs: 200,
         },

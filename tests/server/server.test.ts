@@ -190,9 +190,9 @@ describe.each(storageDescriptors)(
     });
 
     describe('TetherServerOptions (basePath & webSocketPath)', () => {
-      it('should default basePath to empty string and webSocketPath to /sync', async () => {
+      it('should default basePath to empty string and webSocketPath to /tether', async () => {
         expect(server.basePath).toBe('');
-        expect(server.webSocketPath).toBe('/sync');
+        expect(server.webSocketPath).toBe('/tether');
         const httpServer = await server.listen(0, '127.0.0.1');
         const addr = httpServer.address();
         const port = typeof addr === 'object' && addr ? addr.port : 8080;
@@ -217,7 +217,7 @@ describe.each(storageDescriptors)(
           storage: customCtx.storage,
         });
         expect(customServer.basePath).toBe('/api/v1');
-        expect(customServer.webSocketPath).toBe('/api/v1/sync');
+        expect(customServer.webSocketPath).toBe('/api/v1/tether');
 
         const httpServer = await customServer.listen(0, '127.0.0.1');
         const addr = httpServer.address();
@@ -231,76 +231,59 @@ describe.each(storageDescriptors)(
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                userName: 'pathuser',
-                password: 'pathpassword123',
+                userName: 'custom_path_user',
+                password: 'password123',
               }),
             },
           );
           expect(rootRes.status).toBe(404);
 
-          // Register user on custom base path
-          const regRes = await fetch(
+          // Register on prefixed path /api/v1/auth/register should succeed
+          const prefixedRes = await fetch(
             `http://127.0.0.1:${port}/api/v1/auth/register`,
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                userName: 'pathuser',
-                password: 'pathpassword123',
+                userName: 'custom_path_user',
+                password: 'password123',
               }),
             },
           );
-          expect(regRes.status).toBe(201);
-          const regData = (await regRes.json()) as {
-            userName: string;
-            token: string;
-          };
-          expect(regData.userName).toBe('pathuser');
-
-          // Login user on custom base path
-          const loginRes = await fetch(
-            `http://127.0.0.1:${port}/api/v1/auth/login`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                userName: 'pathuser',
-                password: 'pathpassword123',
-              }),
-            },
-          );
-          expect(loginRes.status).toBe(200);
+          expect(prefixedRes.status).toBe(201);
+          const data = (await prefixedRes.json()) as { userName: string };
+          expect(data.userName).toBe('custom_path_user');
         } finally {
           await customServer.close();
           await customCtx.cleanup();
         }
       });
 
-      it('should support explicit custom webSocketPath', () => {
+      it('should allow explicitly overriding webSocketPath', () => {
         const customWsServer = new TetherServer({
-          basePath: '/api',
+          basePath: '/api/v1',
           webSocketPath: '/custom-sync-channel',
         });
-        expect(customWsServer.basePath).toBe('/api');
+        expect(customWsServer.basePath).toBe('/api/v1');
         expect(customWsServer.webSocketPath).toBe('/custom-sync-channel');
       });
 
       it('should normalize paths with missing leading slash and trailing slashes', () => {
         const s1 = new TetherServer({ basePath: 'api' });
         expect(s1.basePath).toBe('/api');
-        expect(s1.webSocketPath).toBe('/api/sync');
+        expect(s1.webSocketPath).toBe('/api/tether');
 
         const s2 = new TetherServer({ basePath: '/api/' });
         expect(s2.basePath).toBe('/api');
-        expect(s2.webSocketPath).toBe('/api/sync');
+        expect(s2.webSocketPath).toBe('/api/tether');
 
         const s3 = new TetherServer({ basePath: '/' });
         expect(s3.basePath).toBe('');
-        expect(s3.webSocketPath).toBe('/sync');
+        expect(s3.webSocketPath).toBe('/tether');
 
         const s4 = new TetherServer({ basePath: '' });
         expect(s4.basePath).toBe('');
-        expect(s4.webSocketPath).toBe('/sync');
+        expect(s4.webSocketPath).toBe('/tether');
       });
     });
 

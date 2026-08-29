@@ -1,5 +1,5 @@
 /**
- * TetherDB — Offline-first IndexedDB client with real-time two-way WebSocket sync.
+ * TetherDB — Offline-first IndexedDB client with real-time two-way synchronization.
  *
  * @module tetherdb
  */

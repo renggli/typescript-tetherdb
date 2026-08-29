@@ -6,14 +6,9 @@
 
 export {
   OperationType,
-  Permission,
-  PROTOCOL_VERSION,
   type StoredRecord,
-  type TablePermissions,
-  type TableSettings,
 } from '../shared/types.js';
 export {
-  type AuthOptions,
   AuthStatus,
   DataMode,
   type LoginOptions,
@@ -36,8 +31,6 @@ export {
   IndexRange,
 } from './indexed.js';
 export {
-  type SyncMetadata,
-  type SyncOptions,
   SyncStatus,
   type WebSocketConstructor,
 } from './sync.js';

@@ -18,9 +18,7 @@ describe('handleServeCommand', () => {
     expect(
       testLogger.hasMessage('TetherDB server listening at: http://127.0.0.1:'),
     ).toBe(true);
-    expect(
-      testLogger.hasMessage('WebSocket sync endpoint: ws://127.0.0.1:'),
-    ).toBe(true);
+    expect(testLogger.hasMessage('Sync endpoint: ws://127.0.0.1:')).toBe(true);
     expect(
       testLogger.hasMessage('Storage backend: in-memory (ephemeral)'),
     ).toBe(true);

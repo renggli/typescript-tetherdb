@@ -34,7 +34,7 @@ export interface RateLimitOptions {
   windowMs?: number;
   /** Maximum duration in milliseconds to wait for authentication before terminating socket (defaults to 10,000ms). */
   authTimeoutMs?: number;
-  /** Maximum concurrent active WebSocket connections allowed per user channel (defaults to 20). */
+  /** Maximum concurrent active connections allowed per user channel (defaults to 20). */
   maxConcurrentConnectionsPerUser?: number;
   /** Consecutive failed attempts before progressive backoff begins (defaults to 5). */
   maxFailures?: number;
@@ -48,7 +48,7 @@ export interface RateLimitOptions {
   userLoginMaxRequests?: number;
   /** Maximum registration attempts per IP within the time window (defaults to 100). */
   ipRegisterMaxRequests?: number;
-  /** Maximum WebSocket connection handshakes per IP within the time window (defaults to 100). */
+  /** Maximum connection handshakes per IP within the time window (defaults to 100). */
   ipSyncMaxRequests?: number;
 }
 
@@ -94,7 +94,7 @@ export interface TetherServerOptions {
   storage?: Storage;
   /** Base path for HTTP REST endpoints (defaults to ''). */
   basePath?: string;
-  /** Path for WebSocket upgrade requests (defaults to '/sync'). */
+  /** Path for sync endpoint requests (defaults to basePath or '/'). */
   webSocketPath?: string;
   /** Whether user self-registration is allowed via `/auth/register` (defaults to true). */
   allowRegistration?: boolean;
@@ -111,22 +111,26 @@ export interface TetherServerOptions {
 }
 
 /**
- * Options for starting the standard server launcher.
+ * Options for launching a standalone server via `startServer()`.
  */
 export interface StartServerOptions extends TetherServerOptions {
-  /** Host interface to bind (defaults to '0.0.0.0'). */
-  host?: string;
-  /** Port number to bind (defaults to 8080 or PORT environment variable). */
+  /** Port number to listen on (defaults to 8080). Pass `0` for an ephemeral OS-assigned port. */
   port?: number;
+  /** Hostname or IP address to bind against (defaults to '0.0.0.0'). */
+  host?: string;
+  /** Filepath to write the server process lockfile to (defaults to `server.lock` in backend base directory). */
+  lockFile?: string;
+  /** Filepath to persist or read the server secret key (defaults to `.key` in backend base directory). */
+  keyFile?: string;
 }
 
 /**
- * Result returned when launching a server using `startServer()`.
+ * Active server handle returned by `startServer()`.
  */
 export interface RunningServer {
-  /** The TetherServer instance. */
+  /** The underlying TetherServer application instance. */
   server: TetherServer;
-  /** The running Node.js HTTP server instance. */
+  /** The active Node.js HTTP server instance. */
   httpServer: http.Server;
   /** Bound host address. */
   host: string;
@@ -134,12 +138,12 @@ export interface RunningServer {
   port: number;
   /** Root URL for the running server (e.g. 'http://127.0.0.1:8080'). */
   url: string;
-  /** Closes both HTTP and WebSocket server cleanly. */
+  /** Closes server listeners cleanly. */
   close(): Promise<void>;
 }
 
 /**
- * Starts a complete standalone HTTP & WebSocket synchronization server.
+ * Starts a complete standalone synchronization server.
  *
  * @param options - Start options including port, host, storage, and limits.
  * @returns Handle to the running server.
@@ -172,8 +176,8 @@ export async function startServer(
 }
 
 /**
- * Unified HTTP and WebSocket server handling authentication endpoints (`/auth/register`, `/auth/login`),
- * real-time streaming connections (`/sync`), and administration routes (`/admin/*`).
+ * Unified HTTP and WebSocket server handling authentication endpoints,
+ * real-time synchronization streams, and administration routes (`/admin/*`).
  */
 export class TetherServer {
   /** Underlying storage engine for users and tables. */
@@ -204,7 +208,9 @@ export class TetherServer {
   constructor(options: TetherServerOptions = {}) {
     this.storage = options.storage ?? new MemoryStorage();
     this.basePath = normalizeBasePath(options.basePath ?? '');
-    this.webSocketPath = options.webSocketPath ?? `${this.basePath}/sync`;
+    this.webSocketPath =
+      options.webSocketPath ??
+      (this.basePath === '' ? '/tether' : `${this.basePath}/tether`);
     this.allowRegistration = options.allowRegistration ?? true;
     this.trustProxy = options.trustProxy ?? false;
     this.adminSecret =
@@ -225,7 +231,11 @@ export class TetherServer {
       this.sync = new Sync(this.storage, {
         maxConcurrentConnectionsPerUser: 1_000,
         authTimeoutMs: 0,
+        allowRegistration: this.allowRegistration,
         rateLimiter: null,
+        ipLoginLimiter: null,
+        userLoginLimiter: null,
+        ipRegisterLimiter: null,
         logger: this.logger,
       });
     } else {
@@ -267,7 +277,11 @@ export class TetherServer {
         maxConcurrentConnectionsPerUser:
           opts.maxConcurrentConnectionsPerUser ?? 20,
         authTimeoutMs: opts.authTimeoutMs ?? 10_000,
+        allowRegistration: this.allowRegistration,
         rateLimiter: syncLimiter,
+        ipLoginLimiter: this.ipLoginLimiter,
+        userLoginLimiter: this.userLoginLimiter,
+        ipRegisterLimiter: this.ipRegisterLimiter,
         logger: this.logger,
       });
     }
@@ -357,11 +371,20 @@ export class TetherServer {
       });
     }
     server.on('upgrade', (req, socket, head) => {
+      const protocol = req.headers['sec-websocket-protocol'];
+      if (
+        typeof protocol === 'string' &&
+        (protocol === 'vite-hmr' || protocol.includes('vite-hmr'))
+      ) {
+        return;
+      }
       const url = new URL(
         req.url ?? '',
         `http://${req.headers.host ?? 'localhost'}`,
       );
-      if (url.pathname === this.webSocketPath) {
+      const pathname = url.pathname.replace(/\/$/, '') || '/';
+      const targetPath = this.webSocketPath.replace(/\/$/, '') || '/';
+      if (pathname === targetPath) {
         this._webSocketServer?.handleUpgrade(req, socket, head, (ws) => {
           this._webSocketServer?.emit('connection', ws, req);
         });

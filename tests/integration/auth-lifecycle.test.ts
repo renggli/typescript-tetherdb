@@ -47,8 +47,7 @@ describe.each(storageDescriptors)(
       const client = new TetherClient(
         `db-${Math.random().toString(36).substring(2, 8)}`,
         {
-          host: '127.0.0.1',
-          port: serverPort,
+          url: `ws://127.0.0.1:${serverPort}/tether`,
           webSocketClass: WebSocket,
         },
       );
@@ -65,8 +64,7 @@ describe.each(storageDescriptors)(
       const client = new TetherClient(
         `db-reg-${Math.random().toString(36).substring(2, 8)}`,
         {
-          host: '127.0.0.1',
-          port: serverPort,
+          url: `ws://127.0.0.1:${serverPort}/tether`,
           webSocketClass: WebSocket,
         },
       );
@@ -94,8 +92,7 @@ describe.each(storageDescriptors)(
       const client = new TetherClient(
         `db-local-${Math.random().toString(36).substring(2, 8)}`,
         {
-          host: '127.0.0.1',
-          port: serverPort,
+          url: `ws://127.0.0.1:${serverPort}/tether`,
           webSocketClass: WebSocket,
         },
       );
@@ -114,16 +111,17 @@ describe.each(storageDescriptors)(
       // Local item still exists
       expect(await todos.get('t1')).toEqual({ title: 'Local offline todo' });
 
-      const user = await server.server.storage.getUserByUserName('bobby');
-      expect(user).toBeDefined();
-      if (!user) return;
-
-      const table = await server.server.storage.getTable('todos');
       await waitForCondition(async () => {
+        const user = await server.server.storage.getUserByUserName('bobby');
+        if (!user) return false;
+        const table = await server.server.storage.getTable('todos');
         const rec = await table?.getRecord(user, 't1');
         return Boolean(rec);
       });
 
+      const user = await server.server.storage.getUserByUserName('bobby');
+      expect(user).toBeDefined();
+      const table = await server.server.storage.getTable('todos');
       const serverRecords = (await table?.getAllRecords(user)) ?? [];
       expect(serverRecords).toHaveLength(1);
       expect(serverRecords[0].data).toEqual({ title: 'Local offline todo' });
@@ -133,8 +131,7 @@ describe.each(storageDescriptors)(
       const client = new TetherClient(
         `db-clear-${Math.random().toString(36).substring(2, 8)}`,
         {
-          host: '127.0.0.1',
-          port: serverPort,
+          url: `ws://127.0.0.1:${serverPort}/tether`,
           webSocketClass: WebSocket,
         },
       );
@@ -159,8 +156,7 @@ describe.each(storageDescriptors)(
       const client = new TetherClient(
         `db-err-${Math.random().toString(36).substring(2, 8)}`,
         {
-          host: '127.0.0.1',
-          port: serverPort,
+          url: `ws://127.0.0.1:${serverPort}/tether`,
           webSocketClass: WebSocket,
         },
       );
@@ -176,8 +172,7 @@ describe.each(storageDescriptors)(
       const client2 = new TetherClient(
         `db-err2-${Math.random().toString(36).substring(2, 8)}`,
         {
-          host: '127.0.0.1',
-          port: serverPort,
+          url: `ws://127.0.0.1:${serverPort}/tether`,
           webSocketClass: WebSocket,
         },
       );
@@ -205,8 +200,7 @@ describe.each(storageDescriptors)(
       const clientA = new TetherClient(
         `db-a-${Math.random().toString(36).substring(2, 8)}`,
         {
-          host: '127.0.0.1',
-          port: serverPort,
+          url: `ws://127.0.0.1:${serverPort}/tether`,
           webSocketClass: WebSocket,
         },
       );
@@ -218,20 +212,19 @@ describe.each(storageDescriptors)(
       });
       const todosA = clientA.table<{ title: string }>('todos');
       await todosA.put('r1', { title: 'Remote Item 1' });
-      const userDiana = await server.server.storage.getUserByUserName('diana');
-      const table = await server.server.storage.getTable('todos');
-      if (userDiana) {
-        await waitForCondition(async () => {
-          return ((await table?.getAllRecords(userDiana)) ?? []).length === 1;
-        });
-      }
+      await waitForCondition(async () => {
+        const userDiana =
+          await server.server.storage.getUserByUserName('diana');
+        if (!userDiana) return false;
+        const table = await server.server.storage.getTable('todos');
+        return ((await table?.getAllRecords(userDiana)) ?? []).length === 1;
+      });
 
       // 2. Register Client B locally before login, add local items
       const clientB = new TetherClient(
         `db-b-${Math.random().toString(36).substring(2, 8)}`,
         {
-          host: '127.0.0.1',
-          port: serverPort,
+          url: `ws://127.0.0.1:${serverPort}/tether`,
           webSocketClass: WebSocket,
         },
       );
@@ -265,8 +258,7 @@ describe.each(storageDescriptors)(
       const clientA = new TetherClient(
         `db-ra-${Math.random().toString(36).substring(2, 8)}`,
         {
-          host: '127.0.0.1',
-          port: serverPort,
+          url: `ws://127.0.0.1:${serverPort}/tether`,
           webSocketClass: WebSocket,
         },
       );
@@ -278,21 +270,19 @@ describe.each(storageDescriptors)(
       });
       const todosA = clientA.table<{ title: string }>('todos');
       await todosA.put('r1', { title: 'Remote Item' });
-      const userEvelyn =
-        await server.server.storage.getUserByUserName('evelyn');
-      const table = await server.server.storage.getTable('todos');
-      if (userEvelyn) {
-        await waitForCondition(async () => {
-          return ((await table?.getAllRecords(userEvelyn)) ?? []).length === 1;
-        });
-      }
+      await waitForCondition(async () => {
+        const userEvelyn =
+          await server.server.storage.getUserByUserName('evelyn');
+        if (!userEvelyn) return false;
+        const table = await server.server.storage.getTable('todos');
+        return ((await table?.getAllRecords(userEvelyn)) ?? []).length === 1;
+      });
 
       // 2. Client B creates local item then logs in with DataMode.Remote
       const clientB = new TetherClient(
         `db-rb-${Math.random().toString(36).substring(2, 8)}`,
         {
-          host: '127.0.0.1',
-          port: serverPort,
+          url: `ws://127.0.0.1:${serverPort}/tether`,
           webSocketClass: WebSocket,
         },
       );
@@ -326,8 +316,7 @@ describe.each(storageDescriptors)(
 
       // Session 1: Register with remember: true
       const client1 = new TetherClient(dbName, {
-        host: '127.0.0.1',
-        port: serverPort,
+        url: `ws://127.0.0.1:${serverPort}/tether`,
         webSocketClass: WebSocket,
       });
       clientsToClose.push(client1);
@@ -347,8 +336,7 @@ describe.each(storageDescriptors)(
 
       // Session 2: Open same DB instance without credentials
       const client2 = new TetherClient(dbName, {
-        host: '127.0.0.1',
-        port: serverPort,
+        url: `ws://127.0.0.1:${serverPort}/tether`,
         webSocketClass: WebSocket,
       });
       clientsToClose.push(client2);
@@ -371,8 +359,7 @@ describe.each(storageDescriptors)(
     it('should handle logout with default DataMode.Clear wiping data and DataMode.Local preserving data', async () => {
       const dbName = `db-logout-${Math.random().toString(36).substring(2, 8)}`;
       const client = new TetherClient(dbName, {
-        host: '127.0.0.1',
-        port: serverPort,
+        url: `ws://127.0.0.1:${serverPort}/tether`,
         webSocketClass: WebSocket,
       });
       clientsToClose.push(client);
@@ -421,8 +408,7 @@ describe.each(storageDescriptors)(
       const client = new TetherClient(
         `db-reg-switch-${Math.random().toString(36).substring(2, 8)}`,
         {
-          host: '127.0.0.1',
-          port: serverPort,
+          url: `ws://127.0.0.1:${serverPort}/tether`,
           webSocketClass: WebSocket,
         },
       );
@@ -446,7 +432,10 @@ describe.each(storageDescriptors)(
         const table = await server.server.storage.getTable('todos');
         const records = (await table?.getAllRecords(user1)) ?? [];
         return records.length === 1;
-      });
+      }, 10000);
+      await waitForCondition(
+        async () => (await client.storage.getPendingOutbox()).length === 0,
+      );
       expect((await todos.getAll()).length).toBe(1);
 
       // Register User 2 while already SignedIn (defaults to clearing previous user data)
@@ -467,8 +456,7 @@ describe.each(storageDescriptors)(
     it('should automatically refresh sliding session token on sync connection', async () => {
       const dbName = `db-sliding-${Math.random().toString(36).substring(2, 8)}`;
       const client = new TetherClient(dbName, {
-        host: '127.0.0.1',
-        port: serverPort,
+        url: `ws://127.0.0.1:${serverPort}/tether`,
         webSocketClass: WebSocket,
       });
       clientsToClose.push(client);
@@ -510,8 +498,7 @@ describe.each(storageDescriptors)(
       await rawStorage.close();
 
       const client = new TetherClient(dbName, {
-        host: '127.0.0.1',
-        port: serverPort,
+        url: `ws://127.0.0.1:${serverPort}/tether`,
         webSocketClass: WebSocket,
       });
       clientsToClose.push(client);
@@ -534,8 +521,7 @@ describe.each(storageDescriptors)(
       const client = new TetherClient(
         `db-switch-${Math.random().toString(36).substring(2, 8)}`,
         {
-          host: '127.0.0.1',
-          port: serverPort,
+          url: `ws://127.0.0.1:${serverPort}/tether`,
           webSocketClass: WebSocket,
         },
       );
@@ -549,7 +535,16 @@ describe.each(storageDescriptors)(
 
       const todos = client.table<{ title: string }>('todos');
       await todos.put('a1', { title: 'User A Todo' });
-      await waitForCondition(() => client.syncStatus === SyncStatus.Connected);
+
+      await waitForCondition(async () => {
+        const userA = await server.server.storage.getUserByUserName('user_a');
+        if (!userA) return false;
+        const table = await server.server.storage.getTable('todos');
+        return ((await table?.getAllRecords(userA)) ?? []).length === 1;
+      });
+      await waitForCondition(
+        async () => (await client.storage.getPendingOutbox()).length === 0,
+      );
 
       expect((await todos.getAll()).map((t) => t.title)).toEqual([
         'User A Todo',

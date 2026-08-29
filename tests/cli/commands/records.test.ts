@@ -2,10 +2,10 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { LocalAdminTarget } from '../../../src/cli/admin.js';
 import { createBackend } from '../../../src/cli/backend.js';
 import { handleRecordsCommand } from '../../../src/cli/commands/records.js';
 import {
-  LocalAdminTarget,
   type Storage,
   TetherServerError,
   TetherServerErrorCode,

@@ -1,6 +1,6 @@
 import type { StoredRecord } from '../shared/types.js';
 import type { Storage } from './storage.js';
-import { getTableStorage, type Table } from './table.js';
+import type { Table } from './table.js';
 
 /**
  * Options for configuring an index on a table.
@@ -348,6 +348,6 @@ export class Index<T = unknown, K = IDBValidKey> {
   }
 
   private get storage(): Storage {
-    return getTableStorage(this.table);
+    return this.table.storage;
   }
 }

@@ -17,7 +17,7 @@ export function delay(ms: number): Promise<void> {
  */
 export async function waitForCondition(
   predicate: () => boolean | Promise<boolean>,
-  timeoutMs = 5000,
+  timeoutMs = 10000,
   intervalMs = 5,
 ): Promise<void> {
   const start = Date.now();

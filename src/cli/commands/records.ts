@@ -1,9 +1,9 @@
 import {
-  type AdminTarget,
   TetherServerError,
   TetherServerErrorCode,
 } from '../../server/index.js';
 import type { SnapshotRecord, StoredRecord } from '../../shared/types.js';
+import type { AdminTarget } from '../admin.js';
 
 /**
  * Handles the 'records' command family (list, put, rm).

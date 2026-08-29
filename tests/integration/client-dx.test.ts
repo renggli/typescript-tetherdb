@@ -8,6 +8,7 @@ import {
   TetherClient,
 } from '../../src/client/index.js';
 import { Storage } from '../../src/client/storage.js';
+import { Sync } from '../../src/client/sync.js';
 import { TetherServer } from '../../src/server/server.js';
 import { waitForCondition } from '../helpers.js';
 import {
@@ -93,9 +94,12 @@ describe.each(storageDescriptors)(
       const tempStorage = new Storage(
         `temp-auth-db-${Math.random().toString(36).substring(2, 8)}`,
       );
-      const auth = new Auth(tempStorage, {
-        baseUrl: `http://127.0.0.1:${serverPort}`,
+      const sync = new Sync(tempStorage, {
+        url: `ws://127.0.0.1:${serverPort}/tether`,
+        clientId: tempStorage.clientId,
+        webSocketClass: WebSocket,
       });
+      const auth = new Auth(tempStorage, sync);
 
       const regSuccess = await auth.register({
         userName: 'dxuser',
@@ -115,6 +119,7 @@ describe.each(storageDescriptors)(
       });
       expect(loginSuccess).toBe(true);
       expect(auth.status).toBe(AuthStatus.SignedIn);
+      sync.destroy();
       await tempStorage.close();
     });
 
@@ -122,8 +127,7 @@ describe.each(storageDescriptors)(
       // 1. User starts locally offline with zero configuration
       const dbName = `offline-onboard-${Math.random().toString(36).substring(2, 8)}`;
       const db = new TetherClient(dbName, {
-        host: '127.0.0.1',
-        port: serverPort,
+        url: `ws://127.0.0.1:${serverPort}/tether`,
         webSocketClass: WebSocket,
       });
       clientsToClose.push(db);
@@ -177,13 +181,12 @@ describe.each(storageDescriptors)(
       expect(serverRecords).toHaveLength(2);
     });
 
-    it('should infer host, port, and basePath when configured at TetherClient construction', async () => {
-      // Construct client with host, port, and WebSocketClass
+    it('should connect sync when url is configured at TetherClient construction', async () => {
+      // Construct client with url and WebSocketClass
       const db = new TetherClient(
         `inferred-config-${Math.random().toString(36).substring(2, 8)}`,
         {
-          host: '127.0.0.1',
-          port: serverPort,
+          url: `ws://127.0.0.1:${serverPort}/tether`,
           webSocketClass: WebSocket,
         },
       );
@@ -206,8 +209,7 @@ describe.each(storageDescriptors)(
 
       const dbName = `dynamic-db-${Math.random().toString(36).substring(2, 8)}`;
       const db = new TetherClient(dbName, {
-        host: '127.0.0.1',
-        port: serverPort,
+        url: `ws://127.0.0.1:${serverPort}/tether`,
         webSocketClass: WebSocket,
       });
       clientsToClose.push(db);

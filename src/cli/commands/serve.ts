@@ -30,7 +30,7 @@ export async function handleServeCommand(
     `TetherDB server listening at: http://${hostLabel}:${running.port}${running.server.basePath}`,
   );
   console.log(
-    `WebSocket sync endpoint: ws://${hostLabel}:${running.port}${running.server.webSocketPath}`,
+    `Sync endpoint: ws://${hostLabel}:${running.port}${running.server.webSocketPath}`,
   );
   console.log(`Storage backend: ${storageInfo}`);
 

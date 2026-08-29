@@ -5,11 +5,15 @@ import {
   type ChangeRecord,
   type ClientMessage,
   ClientMessageType,
+  type LoginClientMessage,
+  type LogoutClientMessage,
   PROTOCOL_VERSION,
+  type RegisterClientMessage,
   type ServerMessage,
   ServerMessageType,
   type SnapshotRecord,
 } from '../shared/types.js';
+import { verifyDummyPasswordHash } from './crypto.js';
 import { TetherServerError, TetherServerErrorCode } from './errors.js';
 import type { RateLimiter } from './rate-limiter.js';
 import type { TetherLogger } from './server.js';
@@ -20,28 +24,40 @@ import type { UserStorage } from './storage/user.js';
 import { calculateByteSize, validateIdentifier } from './validate.js';
 
 /**
- * Configuration options for the WebSocket synchronization coordinator.
+ * Configuration options for the synchronization coordinator.
  */
 export interface SyncOptions {
   /** Maximum number of concurrent active connections allowed per user channel (defaults to 20). */
   maxConcurrentConnectionsPerUser?: number;
   /** Maximum duration in milliseconds to wait for authentication before terminating socket (defaults to 10,000ms). */
   authTimeoutMs?: number;
+  /** Whether user self-registration is allowed (defaults to true). */
+  allowRegistration?: boolean;
   /** Optional rate limiter for connection handshakes and invalid token tracking. */
   rateLimiter?: RateLimiter | null;
+  /** Optional rate limiter for IP-based login requests. */
+  ipLoginLimiter?: RateLimiter | null;
+  /** Optional rate limiter for user-based login requests. */
+  userLoginLimiter?: RateLimiter | null;
+  /** Optional rate limiter for IP-based registration requests. */
+  ipRegisterLimiter?: RateLimiter | null;
   /** Optional logger instance (or null to suppress internal error logs). */
   logger?: TetherLogger | null;
 }
 
 /**
- * Real-time WebSocket synchronization coordinator managing authentication handshakes,
+ * Real-time synchronization coordinator managing authentication handshakes,
  * snapshot/diff delivery, change ingestion, acknowledgments, and peer broadcasts per table and user.
  */
 export class Sync {
   private readonly storage: Storage;
   private readonly maxConcurrentConnectionsPerUser: number;
   private readonly authTimeoutMs: number;
+  private readonly allowRegistration: boolean;
   private readonly rateLimiter: RateLimiter | null;
+  private readonly ipLoginLimiter: RateLimiter | null;
+  private readonly userLoginLimiter: RateLimiter | null;
+  private readonly ipRegisterLimiter: RateLimiter | null;
   private readonly logger: TetherLogger | null;
   private readonly clients = new Set<ActiveClient>();
   private readonly webSocketToClient = new Map<WebSocket, ActiveClient>();
@@ -59,7 +75,11 @@ export class Sync {
     this.maxConcurrentConnectionsPerUser =
       options.maxConcurrentConnectionsPerUser ?? 20;
     this.authTimeoutMs = options.authTimeoutMs ?? 10_000;
+    this.allowRegistration = options.allowRegistration ?? true;
     this.rateLimiter = options.rateLimiter ?? null;
+    this.ipLoginLimiter = options.ipLoginLimiter ?? null;
+    this.userLoginLimiter = options.userLoginLimiter ?? null;
+    this.ipRegisterLimiter = options.ipRegisterLimiter ?? null;
     this.logger = options.logger ?? null;
   }
 
@@ -166,6 +186,18 @@ export class Sync {
         await this.handleAuthMessage(webSocket, msg);
         break;
 
+      case ClientMessageType.Register:
+        await this.handleRegisterMessage(webSocket, msg);
+        break;
+
+      case ClientMessageType.Login:
+        await this.handleLoginMessage(webSocket, msg);
+        break;
+
+      case ClientMessageType.Logout:
+        await this.handleLogoutMessage(webSocket, msg);
+        break;
+
       case ClientMessageType.ChangeBatch:
         await this.handleChangeBatchMessage(webSocket, msg);
         break;
@@ -264,6 +296,252 @@ export class Sync {
 
     // Initial sync: snapshot or diff
     await this.performSync(client, msg.lastSyncSeq, msg.tables);
+  }
+
+  private async handleRegisterMessage(
+    webSocket: WebSocket,
+    msg: RegisterClientMessage,
+  ): Promise<void> {
+    const ip = this.webSocketToIp.get(webSocket) ?? '127.0.0.1';
+    this.clearPendingAuthTimer(webSocket);
+
+    if (!this.allowRegistration) {
+      this.send(webSocket, {
+        type: ServerMessageType.AuthError,
+        requestId: msg.requestId,
+        message: 'Registration is disabled on this server',
+      });
+      return;
+    }
+
+    if (!msg.userName || !msg.password) {
+      this.send(webSocket, {
+        type: ServerMessageType.AuthError,
+        requestId: msg.requestId,
+        message: 'Username and password are required',
+      });
+      return;
+    }
+
+    if (this.ipRegisterLimiter && !this.ipRegisterLimiter.consume(ip)) {
+      this.send(webSocket, {
+        type: ServerMessageType.AuthError,
+        requestId: msg.requestId,
+        message: 'Registration rate limit exceeded for this IP',
+      });
+      return;
+    }
+
+    let safeUserName: string;
+    try {
+      safeUserName = validateIdentifier(msg.userName, 'userName');
+    } catch {
+      this.send(webSocket, {
+        type: ServerMessageType.AuthError,
+        requestId: msg.requestId,
+        message: 'Invalid username format',
+      });
+      return;
+    }
+
+    const existingUser = await this.storage.getUserByUserName(safeUserName);
+    if (existingUser) {
+      this.send(webSocket, {
+        type: ServerMessageType.AuthError,
+        requestId: msg.requestId,
+        message: 'Username already taken',
+      });
+      return;
+    }
+
+    let user: UserStorage;
+    try {
+      user = await this.storage.createUser(safeUserName, msg.password);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Registration failed';
+      this.send(webSocket, {
+        type: ServerMessageType.AuthError,
+        requestId: msg.requestId,
+        message,
+      });
+      return;
+    }
+
+    let client = this.webSocketToClient.get(webSocket);
+    if (!client) {
+      const clientId = `client_${Math.random().toString(36).substring(2, 8)}`;
+      client = {
+        webSocket,
+        clientId,
+        user,
+      };
+      this.webSocketToClient.set(webSocket, client);
+      this.clients.add(client);
+    } else {
+      client.user = user;
+    }
+
+    const currentSeq = await this.storage.getCurrentSeq(user);
+    const token = await user.createToken();
+
+    this.send(webSocket, {
+      type: ServerMessageType.AuthSuccess,
+      requestId: msg.requestId,
+      protocolVersion: PROTOCOL_VERSION,
+      userName: user.userName,
+      currentSeq,
+      token,
+    });
+
+    await this.performSync(client, 0, client.tables);
+  }
+
+  private async handleLoginMessage(
+    webSocket: WebSocket,
+    msg: LoginClientMessage,
+  ): Promise<void> {
+    const ip = this.webSocketToIp.get(webSocket) ?? '127.0.0.1';
+    this.clearPendingAuthTimer(webSocket);
+
+    let user: UserStorage | undefined;
+
+    if (msg.userName !== undefined && msg.password !== undefined) {
+      if (!msg.userName || !msg.password) {
+        this.send(webSocket, {
+          type: ServerMessageType.AuthError,
+          requestId: msg.requestId,
+          message: 'Username and password cannot be empty',
+        });
+        return;
+      }
+
+      if (this.ipLoginLimiter && !this.ipLoginLimiter.consume(ip)) {
+        this.send(webSocket, {
+          type: ServerMessageType.AuthError,
+          requestId: msg.requestId,
+          message: 'Too many login attempts',
+        });
+        return;
+      }
+
+      const userKey = `${ip}:${msg.userName}`;
+      if (this.userLoginLimiter && !this.userLoginLimiter.consume(userKey)) {
+        this.send(webSocket, {
+          type: ServerMessageType.AuthError,
+          requestId: msg.requestId,
+          message: 'Too many login attempts for this account',
+        });
+        return;
+      }
+
+      const candidateUser = await this.storage.getUserByUserName(msg.userName);
+      const valid = candidateUser
+        ? await candidateUser.verifyPassword(msg.password)
+        : await verifyDummyPasswordHash(msg.password);
+
+      if (!valid || !candidateUser) {
+        this.ipLoginLimiter?.recordFailure(ip);
+        this.userLoginLimiter?.recordFailure(userKey);
+        this.send(webSocket, {
+          type: ServerMessageType.AuthError,
+          requestId: msg.requestId,
+          message: 'Invalid username or password',
+        });
+        return;
+      }
+
+      this.ipLoginLimiter?.reset(ip);
+      this.userLoginLimiter?.reset(userKey);
+      user = candidateUser;
+    } else if (msg.token) {
+      user = await this.storage.getUserByToken(msg.token);
+      if (!user) {
+        this.send(webSocket, {
+          type: ServerMessageType.AuthError,
+          requestId: msg.requestId,
+          message: 'Invalid or expired authentication token',
+        });
+        return;
+      }
+    } else {
+      this.send(webSocket, {
+        type: ServerMessageType.AuthError,
+        requestId: msg.requestId,
+        message: 'Missing login credentials or token',
+      });
+      return;
+    }
+
+    if (user) {
+      let userCount = 0;
+      for (const c of this.clients) {
+        if (c.user?.userId === user.userId && c.webSocket !== webSocket) {
+          userCount++;
+        }
+      }
+      if (userCount >= this.maxConcurrentConnectionsPerUser) {
+        this.send(webSocket, {
+          type: ServerMessageType.AuthError,
+          requestId: msg.requestId,
+          message: 'Maximum concurrent connections exceeded for this user',
+        });
+        return;
+      }
+    }
+
+    let client = this.webSocketToClient.get(webSocket);
+    if (!client) {
+      const clientId = `client_${Math.random().toString(36).substring(2, 8)}`;
+      client = {
+        webSocket,
+        clientId,
+        user,
+      };
+      this.webSocketToClient.set(webSocket, client);
+      this.clients.add(client);
+    } else {
+      client.user = user;
+    }
+
+    const currentSeq = await this.storage.getCurrentSeq(user);
+    const token = await user.createToken();
+
+    this.send(webSocket, {
+      type: ServerMessageType.AuthSuccess,
+      requestId: msg.requestId,
+      protocolVersion: PROTOCOL_VERSION,
+      userName: user.userName,
+      currentSeq,
+      token,
+    });
+
+    await this.performSync(client, 0, client.tables);
+  }
+
+  private async handleLogoutMessage(
+    webSocket: WebSocket,
+    msg: LogoutClientMessage,
+  ): Promise<void> {
+    const client = this.webSocketToClient.get(webSocket);
+    if (client) {
+      client.user = undefined;
+    }
+
+    const currentSeq = await this.storage.getCurrentSeq(undefined);
+
+    this.send(webSocket, {
+      type: ServerMessageType.AuthSuccess,
+      requestId: msg.requestId,
+      protocolVersion: PROTOCOL_VERSION,
+      userName: undefined,
+      currentSeq,
+      token: undefined,
+    });
+
+    if (client) {
+      await this.performSync(client, 0, client.tables);
+    }
   }
 
   private async handleChangeBatchMessage(

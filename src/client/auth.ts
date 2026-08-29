@@ -1,6 +1,7 @@
 import { TetherClientError, TetherClientErrorCode } from './errors.js';
 import { EventRegistry } from './shared/event.js';
 import type { Storage } from './storage.js';
+import type { Sync } from './sync.js';
 
 /**
  * Data reconciliation and persistence strategy for auth and session operations.
@@ -85,27 +86,15 @@ export interface StoredAuthSession {
 }
 
 /**
- * Options for configuring authentication client.
- */
-export interface AuthOptions {
-  /** Base URL for remote authentication REST API endpoints (defaults to ''). */
-  baseUrl?: string;
-  /** Optional custom fetch implementation for authentication requests. */
-  fetch?: typeof fetch;
-}
-
-/**
- * Authentication coordinator managing user sessions, HTTP requests,
+ * Authentication coordinator managing user sessions, network requests,
  * metadata persistence, and reconciliation state transitions.
  */
 export class Auth {
-  /** Base URL for remote authentication REST API endpoints. */
-  readonly baseUrl: string;
   /** Reactive event registry triggered whenever the authentication status changes. */
   readonly onStatusChange = new EventRegistry<AuthStatus>();
 
   private storage: Storage;
-  private fetchFn: typeof fetch;
+  private sync: Sync;
   private currentAuthStatus: AuthStatus = AuthStatus.SignedOut;
   private currentUserName?: string;
   private currentToken?: string;
@@ -115,27 +104,11 @@ export class Auth {
    * Creates a new Auth coordinator instance.
    *
    * @param storage - Local storage coordinator.
-   * @param options - Configuration options for authentication endpoints and networking.
+   * @param sync - Real-time sync and network coordinator.
    */
-  constructor(storage: Storage, options: AuthOptions = {}) {
-    this.baseUrl = options.baseUrl ?? '';
+  constructor(storage: Storage, sync: Sync) {
     this.storage = storage;
-
-    const rawFetch =
-      options.fetch ??
-      (typeof globalThis !== 'undefined' && globalThis.fetch
-        ? globalThis.fetch
-        : typeof fetch !== 'undefined'
-          ? fetch
-          : undefined);
-
-    if (!rawFetch) {
-      throw new TetherClientError(
-        TetherClientErrorCode.FetchUnavailable,
-        'No fetch implementation available',
-      );
-    }
-    this.fetchFn = rawFetch.bind(globalThis);
+    this.sync = sync;
     this.autoRestorePromise = this.restoreSession();
   }
 
@@ -197,23 +170,18 @@ export class Auth {
           : DataMode.Local;
       const dataMode = options.dataMode ?? defaultDataMode;
 
-      const data = await this.sendAuthRequest(
-        '/auth/register',
-        {
-          userName: options.userName,
-          password: options.password,
-        },
-        TetherClientErrorCode.RegistrationFailed,
-        'Registration failed',
-      );
+      const data = await this.sync.register(options.userName, options.password);
 
       this.currentUserName = data.userName;
       this.currentToken = data.token;
 
-      await this.applyDataMode(dataMode);
+      if (dataMode === DataMode.Clear) {
+        await this.applyDataMode(DataMode.Clear);
+      }
       await this.updateStoredAuth(options.remember ?? false, data);
 
       this.setStatus(AuthStatus.SignedIn);
+      this.sync.schedulePush(0);
       return true;
     } catch {
       this.setStatus(AuthStatus.Error);
@@ -233,21 +201,23 @@ export class Auth {
       let token = this.currentToken;
       let userName = this.currentUserName;
 
+      await this.applyDataMode(options.dataMode ?? DataMode.Remote);
+
       if (options.userName && options.password) {
-        const data = await this.sendAuthRequest(
-          '/auth/login',
-          {
-            userName: options.userName,
-            password: options.password,
-          },
-          TetherClientErrorCode.AuthenticationFailed,
-          'Authentication failed',
-        );
+        const data = await this.sync.login({
+          userName: options.userName,
+          password: options.password,
+        });
 
         token = data.token;
         userName = data.userName;
 
-        await this.updateStoredAuth(options.remember ?? false, data);
+        if (token && userName) {
+          await this.updateStoredAuth(options.remember ?? false, {
+            token,
+            userName,
+          });
+        }
       } else if (!token) {
         const stored = await this.storage.getMeta<StoredAuthSession>('auth');
         if (stored?.token) {
@@ -263,12 +233,15 @@ export class Auth {
         );
       }
 
+      if (!options.userName) {
+        await this.sync.login({ token });
+      }
+
       this.currentToken = token;
       this.currentUserName = userName;
 
-      await this.applyDataMode(options.dataMode ?? DataMode.Remote);
-
       this.setStatus(AuthStatus.SignedIn);
+      this.sync.schedulePush(0);
       return true;
     } catch {
       this.setStatus(AuthStatus.Error);
@@ -280,6 +253,11 @@ export class Auth {
    * Logs out of the current session, removes stored credentials, and applies data mode.
    */
   async logout(options: LogoutOptions = {}): Promise<boolean> {
+    try {
+      await this.sync.logout();
+    } catch {
+      // Ignored if offline
+    }
     this.currentUserName = undefined;
     this.currentToken = undefined;
 
@@ -319,31 +297,6 @@ export class Auth {
   }
 
   // -- Private Helpers ------------------------------------------------------
-
-  private async sendAuthRequest(
-    path: string,
-    credentials: {
-      userName?: string;
-      password?: string;
-    },
-    errorCode: TetherClientErrorCode,
-    defaultErrorMessage: string,
-  ): Promise<AuthResult> {
-    const res = await this.fetchFn(`${this.baseUrl}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(credentials),
-    });
-
-    const data = (await res.json()) as AuthResult & { error?: string };
-    if (!res.ok) {
-      throw new TetherClientError(errorCode, data.error ?? defaultErrorMessage);
-    }
-    return {
-      userName: data.userName,
-      token: data.token,
-    };
-  }
 
   private async applyDataMode(dataMode: DataMode): Promise<void> {
     if (dataMode === DataMode.Clear || dataMode === DataMode.Remote) {

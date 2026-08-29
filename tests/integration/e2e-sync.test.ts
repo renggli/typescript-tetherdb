@@ -59,8 +59,7 @@ describe.each(storageDescriptors)(
       const client = new TetherClient(
         `${name}-${Math.random().toString(36).substring(2, 8)}`,
         {
-          host: '127.0.0.1',
-          port,
+          url: `ws://127.0.0.1:${port}/tether`,
           webSocketClass: WebSocket,
           ...overrides,
         },
@@ -197,8 +196,7 @@ describe.each(storageDescriptors)(
       // Client B connects and gets initial sync
       const clientBName = `client-b-${Math.random().toString(36).substring(2, 8)}`;
       let clientB = new TetherClient(clientBName, {
-        host: '127.0.0.1',
-        port,
+        url: `ws://127.0.0.1:${port}/tether`,
         webSocketClass: WebSocket,
       });
       await clientB.login({ userName: 'testuser', password: 'password123' });
@@ -223,8 +221,7 @@ describe.each(storageDescriptors)(
 
       // Client B comes back online with the same IndexedDB database
       clientB = new TetherClient(clientBName, {
-        host: '127.0.0.1',
-        port,
+        url: `ws://127.0.0.1:${port}/tether`,
         webSocketClass: WebSocket,
       });
       await clientB.login({ userName: 'testuser', password: 'password123' });

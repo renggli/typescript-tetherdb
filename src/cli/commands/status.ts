@@ -1,8 +1,6 @@
-import type {
-  AdminTarget,
-  ServerLockInfo,
-  StorageStatus,
-} from '../../server/index.js';
+import type { StorageStatus } from '../../server/index.js';
+import type { ServerLockInfo } from '../../server/lock.js';
+import type { AdminTarget } from '../admin.js';
 
 /**
  * Handles the 'status' command to display storage backend statistics.

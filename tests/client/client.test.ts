@@ -63,124 +63,41 @@ describe('TetherClient', () => {
     });
   });
 
-  describe('URL & Host Resolution', () => {
-    it('should resolve Node.js host, port, basePath, and webSocketPath correctly', () => {
-      const client = new TetherClient(
-        `url-test-${Math.random().toString(36).substring(2, 8)}`,
-        {
-          host: 'api.example.com',
-          port: 8443,
-          secure: true,
-          basePath: '/api/v1/',
-          webSocketPath: '/custom/sync',
-        },
-      );
-      clientsToClose.push(client);
-
-      // @ts-expect-error - inspecting internal auth
-      expect(client.auth.baseUrl).toBe('https://api.example.com:8443/api/v1');
-      // @ts-expect-error - inspecting internal sync
-      expect(client.sync.url).toBe('wss://api.example.com:8443/custom/sync');
-    });
-
-    it('should handle host already containing port without duplicating port', () => {
-      const client = new TetherClient(
-        `port-test-${Math.random().toString(36).substring(2, 8)}`,
-        {
-          host: '127.0.0.1:9090',
-          port: 9090,
-        },
-      );
-      clientsToClose.push(client);
-
-      // @ts-expect-error - inspecting internal auth
-      expect(client.auth.baseUrl).toBe('http://127.0.0.1:9090');
-    });
-
-    it('should handle default local-only client when host is omitted', () => {
+  describe('URL & Endpoint Resolution', () => {
+    it('should handle default local-only client when url is omitted', () => {
       const client = new TetherClient(
         `local-only-${Math.random().toString(36).substring(2, 8)}`,
       );
       clientsToClose.push(client);
 
-      // @ts-expect-error - inspecting internal auth
-      expect(client.auth.baseUrl).toBe('');
       // @ts-expect-error - inspecting internal sync
       expect(client.sync.url).toBeUndefined();
     });
 
-    it('should parse http url and derive base and websocket URLs', () => {
-      const client = new TetherClient('test-http-url', {
-        url: 'http://localhost:8080',
+    it('should preserve options.url directly without modification', () => {
+      const client1 = new TetherClient('test-raw-url-1', {
+        url: 'wss://storage.mydomain.com/',
       });
-      clientsToClose.push(client);
+      clientsToClose.push(client1);
 
-      // @ts-expect-error - inspecting internal auth
-      expect(client.auth.baseUrl).toBe('http://localhost:8080');
       // @ts-expect-error - inspecting internal sync
-      expect(client.sync.url).toBe('ws://localhost:8080/sync');
-    });
+      expect(client1.sync.url).toBe('wss://storage.mydomain.com/');
 
-    it('should parse https url with path and derive companion websocket URL', () => {
-      const client = new TetherClient('test-https-url', {
-        url: 'https://api.example.com/db',
+      const client2 = new TetherClient('test-raw-url-2', {
+        url: 'ws://localhost:8080',
       });
-      clientsToClose.push(client);
+      clientsToClose.push(client2);
 
-      // @ts-expect-error - inspecting internal auth
-      expect(client.auth.baseUrl).toBe('https://api.example.com/db');
       // @ts-expect-error - inspecting internal sync
-      expect(client.sync.url).toBe('wss://api.example.com/db/sync');
-    });
+      expect(client2.sync.url).toBe('ws://localhost:8080');
 
-    it('should parse wss url and derive companion http base URL', () => {
-      const client = new TetherClient('test-wss-url', {
-        url: 'wss://api.example.com:8443/custom/sync',
+      const client3 = new TetherClient('test-raw-url-3', {
+        url: 'https://api.example.com/custom-db',
       });
-      clientsToClose.push(client);
+      clientsToClose.push(client3);
 
-      // @ts-expect-error - inspecting internal auth
-      expect(client.auth.baseUrl).toBe('https://api.example.com:8443/custom');
       // @ts-expect-error - inspecting internal sync
-      expect(client.sync.url).toBe('wss://api.example.com:8443/custom/sync');
-    });
-
-    it('should parse ws url with path and derive sync endpoint', () => {
-      const client = new TetherClient('test-ws-url', {
-        url: 'ws://127.0.0.1:5000/api',
-      });
-      clientsToClose.push(client);
-
-      // @ts-expect-error - inspecting internal auth
-      expect(client.auth.baseUrl).toBe('http://127.0.0.1:5000/api');
-      // @ts-expect-error - inspecting internal sync
-      expect(client.sync.url).toBe('ws://127.0.0.1:5000/api/sync');
-    });
-
-    it('should parse ws url ending in /sync directly', () => {
-      const client = new TetherClient('test-ws-sync-url', {
-        url: 'ws://127.0.0.1:8080/sync',
-      });
-      clientsToClose.push(client);
-
-      // @ts-expect-error - inspecting internal auth
-      expect(client.auth.baseUrl).toBe('http://127.0.0.1:8080');
-      // @ts-expect-error - inspecting internal sync
-      expect(client.sync.url).toBe('ws://127.0.0.1:8080/sync');
-    });
-
-    it('should allow explicit options to override properties extracted from url', () => {
-      const client = new TetherClient('test-override-url', {
-        url: 'http://localhost:8080/api',
-        port: 9000,
-        basePath: '/v2',
-      });
-      clientsToClose.push(client);
-
-      // @ts-expect-error - inspecting internal auth
-      expect(client.auth.baseUrl).toBe('http://localhost:9000/v2');
-      // @ts-expect-error - inspecting internal sync
-      expect(client.sync.url).toBe('ws://localhost:9000/v2/sync');
+      expect(client3.sync.url).toBe('https://api.example.com/custom-db');
     });
 
     it('should handle pushDebounceMs configuration option', () => {
@@ -193,16 +110,14 @@ describe('TetherClient', () => {
       expect(client.sync.options.pushDebounceMs).toBe(50);
     });
 
-    it('should safely ignore invalid url strings without crashing', () => {
-      const client = new TetherClient('test-invalid-url', {
-        url: 'not-a-valid-url',
+    it('should preserve custom url strings as provided', () => {
+      const client = new TetherClient('test-custom-url', {
+        url: 'custom-scheme://host:1234/path',
       });
       clientsToClose.push(client);
 
-      // @ts-expect-error - inspecting internal auth
-      expect(client.auth.baseUrl).toBe('');
       // @ts-expect-error - inspecting internal sync
-      expect(client.sync.url).toBeUndefined();
+      expect(client.sync.url).toBe('custom-scheme://host:1234/path');
     });
   });
 
@@ -253,21 +168,10 @@ describe('TetherClient', () => {
     });
 
     it('should publish auth status changes and connect/disconnect sync accordingly', async () => {
-      const mockFetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          userId: 'u1',
-          userName: 'alice',
-          token: 'token-123',
-        }),
-      });
-
       const client = new TetherClient(
         `auth-sync-test-${Math.random().toString(36).substring(2, 8)}`,
         {
-          host: '127.0.0.1',
-          port: 8080,
-          fetch: mockFetch as unknown as typeof fetch,
+          url: 'ws://127.0.0.1:8080',
           webSocketClass: MockWebSocket as unknown as WebSocketConstructor,
         },
       );
@@ -275,6 +179,13 @@ describe('TetherClient', () => {
 
       // @ts-expect-error - inspecting internal sync
       const connectSpy = vi.spyOn(client.sync, 'connect');
+      // @ts-expect-error - inspecting internal sync
+      vi.spyOn(client.sync, 'register').mockResolvedValue({
+        userName: 'alice',
+        token: 'token-123',
+      });
+      // @ts-expect-error - inspecting internal sync
+      vi.spyOn(client.sync, 'logout').mockResolvedValue();
 
       const authEvents: AuthStatus[] = [];
       client.onAuthStatusChange.register((s) => authEvents.push(s));
@@ -383,13 +294,14 @@ describe('TetherClient', () => {
   });
 
   describe('Browser location resolution and sync callbacks', () => {
-    it('should resolve host, port, and protocol from window.location if present', () => {
+    it('should resolve protocol and host from window.location if present', () => {
       // @ts-expect-error - simulating browser environment
       globalThis.window = {
         location: {
           hostname: 'app.mycompany.internal',
           port: '3000',
           protocol: 'https:',
+          href: 'https://app.mycompany.internal:3000',
         },
       };
 
@@ -397,15 +309,17 @@ describe('TetherClient', () => {
         const client = new TetherClient('browser-loc-test');
         clientsToClose.push(client);
 
-        // @ts-expect-error - inspecting internal auth
-        expect(client.auth.baseUrl).toBe('https://app.mycompany.internal:3000');
+        // @ts-expect-error - inspecting internal sync
+        expect(client.sync.url).toBe(
+          'wss://app.mycompany.internal:3000/tether',
+        );
       } finally {
         // @ts-expect-error - cleanup browser simulation
         delete globalThis.window;
       }
     });
 
-    it('should wire sync onTokenRefresh and onAuthError callbacks to auth coordinator', () => {
+    it('should wire sync onTokenRefresh and onError auth failures to auth coordinator', () => {
       const client = new TetherClient('callbacks-test');
       clientsToClose.push(client);
 
@@ -415,11 +329,16 @@ describe('TetherClient', () => {
       const authErrorSpy = vi.spyOn(client.auth, 'handleAuthError');
 
       // @ts-expect-error - inspecting internal sync
-      client.sync.options.onTokenRefresh?.('new-jwt');
+      client.sync.onTokenRefresh.publish('new-jwt');
       expect(refreshSpy).toHaveBeenCalledWith('new-jwt');
 
       // @ts-expect-error - inspecting internal sync
-      client.sync.options.onAuthError?.('Session revoked');
+      client.sync.onError.publish(
+        new TetherClientError(
+          TetherClientErrorCode.AuthenticationFailed,
+          'Session revoked',
+        ),
+      );
       expect(authErrorSpy).toHaveBeenCalledWith('Session revoked');
     });
 

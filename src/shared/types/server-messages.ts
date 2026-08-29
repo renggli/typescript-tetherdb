@@ -1,5 +1,5 @@
 /**
- * WebSocket server-to-client wire messages.
+ * Server-to-client wire messages.
  *
  * @module tetherdb/shared/types/server-messages
  */
@@ -7,7 +7,7 @@
 import type { ChangeRecord, SnapshotRecord } from './records.js';
 
 /**
- * Types of messages sent from the server to the client over the WebSocket sync connection.
+ * Types of messages sent from the server to the client over the sync connection.
  */
 export enum ServerMessageType {
   /** Heartbeat pong response. */
@@ -49,6 +49,8 @@ export interface ErrorServerMessage {
  */
 export interface AuthSuccessServerMessage {
   type: ServerMessageType.AuthSuccess;
+  /** Correlation identifier if in response to a register/login/logout request. */
+  requestId?: string;
   /** Wire protocol version number. */
   protocolVersion: number;
   /** Server capabilities supported by this server instance. */
@@ -66,6 +68,8 @@ export interface AuthSuccessServerMessage {
  */
 export interface AuthErrorServerMessage {
   type: ServerMessageType.AuthError;
+  /** Correlation identifier if in response to a register/login/logout request. */
+  requestId?: string;
   /** Error description message. */
   message: string;
 }

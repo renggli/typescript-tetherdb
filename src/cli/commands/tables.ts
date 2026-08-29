@@ -1,9 +1,9 @@
 import {
-  type AdminTarget,
   TetherServerError,
   TetherServerErrorCode,
 } from '../../server/index.js';
 import { Permission, type TableSettings } from '../../shared/types.js';
+import type { AdminTarget } from '../admin.js';
 
 /**
  * Handles the 'tables' command family (list, add, show, update, rm).

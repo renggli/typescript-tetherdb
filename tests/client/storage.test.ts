@@ -93,6 +93,42 @@ describe('Storage', () => {
     });
   });
 
+  describe('User Attribution & Storage Clearing', () => {
+    it('should set and get current user name via setCurrentUser and currentUserName getter', () => {
+      expect(storage.currentUserName).toBeUndefined();
+      storage.setCurrentUser('alice');
+      expect(storage.currentUserName).toBe('alice');
+      storage.setCurrentUser(undefined);
+      expect(storage.currentUserName).toBeUndefined();
+    });
+
+    it('should clear only table stores with clearTables while leaving metadata intact', async () => {
+      const todos = storage.table<{ title: string }>('todos');
+      await todos.put('t1', { title: 'Test Todo' });
+      await storage.setMeta('metaKey', 'metaVal');
+
+      expect(await todos.getAll()).toHaveLength(1);
+      expect(await storage.getMeta('metaKey')).toBe('metaVal');
+
+      await storage.clearTables(true);
+      expect(await todos.getAll()).toHaveLength(0);
+      expect(await storage.getMeta('metaKey')).toBe('metaVal');
+    });
+
+    it('should wipe all stores and metadata on clearAllData', async () => {
+      const todos = storage.table<{ title: string }>('todos');
+      await todos.put('t1', { title: 'Test Todo' });
+      await storage.setMeta('metaKey', 'metaVal');
+
+      expect(await todos.getAll()).toHaveLength(1);
+      expect(await storage.getMeta('metaKey')).toBe('metaVal');
+
+      await storage.clearAllData();
+      expect(await todos.getAll()).toHaveLength(0);
+      expect(await storage.getMeta('metaKey')).toBeUndefined();
+    });
+  });
+
   describe('Record Queries & CRUD', () => {
     it('should return undefined when getting a non-existent record', async () => {
       const rec = await storage.getRecord('notes', 'n1');

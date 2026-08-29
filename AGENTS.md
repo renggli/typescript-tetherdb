@@ -49,10 +49,10 @@ The codebase is organized into five decoupled layers with clear subpath exports:
   - Exported as `tetherdb/client`.
   - **TetherClient (`client.ts`)**: Main reactive facade client with local-first storage, multi-app support, auto-session, and auth helpers.
   - **Auth (`auth.ts`)**: Internal authentication coordinator managing sessions, metadata, and auth HTTP endpoints.
-  - **Storage (`storage.ts`)**: Atomic transaction coordinator managing user object stores alongside internal outbox and metadata stores.
+  - **Storage (`storage/`)**: Atomic transaction coordinator (`storage.ts`), IndexedDB connection & schema upgrades (`database.ts`), and IDB utilities (`utils.ts`).
   - **Tables (`table.ts`)**: Typed table wrappers providing local-first CRUD operations and reactive event subscriptions.
   - **Indexes (`indexed.ts`)**: First-class declarative `Index` definitions, query methods, and reactive subscription views.
-  - **Sync (`sync.ts`)**: Two-way WebSocket sync coordinator managing initial snapshot / diff downloads, outbox queue flushing, acknowledgments, and auto-reconnect backoff.
+  - **Sync (`sync/`)**: Two-way WebSocket sync coordinator (`sync.ts`) and connection manager with auto-reconnect backoff (`connection.ts`).
 - **Server Layer (`src/server/`)**:
   - Exported as `tetherdb/server`.
   - **Server (`server.ts`)**: Unified HTTP and WebSocket server (`TetherServer`, `startServer`) handling authentication endpoints, health/readiness/metrics, and real-time synchronization.

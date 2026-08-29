@@ -315,6 +315,8 @@ export class MemoryStorage extends BaseStorage {
       const table = this.tables.get(c.table);
       if (!table || !canRead(table, user)) return false;
       if (tableFilters && !tableFilters.includes(c.table)) return false;
+      const isPrivate = isPrivateTable(table);
+      if (isPrivate && (!user || c.userName !== user.userName)) return false;
       return true;
     });
 

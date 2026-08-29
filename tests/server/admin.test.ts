@@ -2,12 +2,8 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import {
-  AdminClient,
-  LocalAdminTarget,
-  SqliteStorage,
-  TetherServer,
-} from '../../src/server/index.js';
+import { AdminClient, LocalAdminTarget } from '../../src/server/admin.js';
+import { SqliteStorage, TetherServer } from '../../src/server/index.js';
 
 describe('AdminTarget (LocalAdminTarget & AdminClient)', () => {
   let tmpDir: string;

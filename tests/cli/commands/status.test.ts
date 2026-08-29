@@ -2,13 +2,11 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { LocalAdminTarget } from '../../../src/cli/admin.js';
 import { createBackend } from '../../../src/cli/backend.js';
 import { handleStatusCommand } from '../../../src/cli/commands/status.js';
-import {
-  LocalAdminTarget,
-  type ServerLockInfo,
-  type Storage,
-} from '../../../src/server/index.js';
+import type { Storage } from '../../../src/server/index.js';
+import type { ServerLockInfo } from '../../../src/server/lock.js';
 import { testLogger } from '../../logger.js';
 
 describe('handleStatusCommand', () => {
