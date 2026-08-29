@@ -329,23 +329,14 @@ export const postRows: TableRow[] = [
  * Initial forum vote rows.
  */
 export const voteRows: TableRow[] = [
-  // Votes for Welcome
-  {
-    id: 'vote_post_welcome_charlie',
-    userName: 'charlie',
-    data: {
-      targetId: 'post_welcome',
-      value: 1,
-      createdAt: now - 3600000 * 24,
-    },
-  },
+  // Votes for Welcome Thread
   {
     id: 'vote_post_welcome_alice',
     userName: 'alice',
     data: {
       targetId: 'post_welcome',
       value: 1,
-      createdAt: now - 3600000 * 23,
+      createdAt: now - 3600000 * 24,
     },
   },
   {
@@ -367,25 +358,43 @@ export const voteRows: TableRow[] = [
     },
   },
   {
-    id: 'vote_post_welcome_reply_1_alice',
-    userName: 'alice',
+    id: 'vote_post_welcome_reply_1_bob',
+    userName: 'bob',
     data: {
       targetId: 'post_welcome_reply_1',
       value: 1,
-      createdAt: now - 3600000 * 23,
+      createdAt: now - 3600000 * 22.5,
     },
   },
   {
-    id: 'vote_post_welcome_nested_1_charlie',
-    userName: 'charlie',
+    id: 'vote_post_welcome_nested_1_alice',
+    userName: 'alice',
     data: {
       targetId: 'post_welcome_nested_1',
       value: 1,
-      createdAt: now - 3600000 * 22,
+      createdAt: now - 3600000 * 21.5,
+    },
+  },
+  {
+    id: 'vote_post_welcome_nested_1_bob',
+    userName: 'bob',
+    data: {
+      targetId: 'post_welcome_nested_1',
+      value: 1,
+      createdAt: now - 3600000 * 21,
+    },
+  },
+  {
+    id: 'vote_post_welcome_reply_2_alice',
+    userName: 'alice',
+    data: {
+      targetId: 'post_welcome_reply_2',
+      value: 1,
+      createdAt: now - 3600000 * 20.5,
     },
   },
 
-  // Votes for Dark Mode
+  // Votes for Dark Mode Thread
   {
     id: 'vote_post_darkmode_alice',
     userName: 'alice',
@@ -393,15 +402,6 @@ export const voteRows: TableRow[] = [
       targetId: 'post_darkmode',
       value: 1,
       createdAt: now - 3600000 * 18,
-    },
-  },
-  {
-    id: 'vote_post_darkmode_bob',
-    userName: 'bob',
-    data: {
-      targetId: 'post_darkmode',
-      value: 1,
-      createdAt: now - 3600000 * 17,
     },
   },
   {
@@ -414,25 +414,61 @@ export const voteRows: TableRow[] = [
     },
   },
   {
-    id: 'vote_post_darkmode_reply_1_bob',
-    userName: 'bob',
+    id: 'vote_post_darkmode_reply_1_alice',
+    userName: 'alice',
     data: {
       targetId: 'post_darkmode_reply_1',
       value: 1,
-      createdAt: now - 3600000 * 17,
+      createdAt: now - 3600000 * 16.5,
     },
   },
   {
-    id: 'vote_post_darkmode_reply_1_alice',
-    userName: 'alice',
+    id: 'vote_post_darkmode_reply_1_charlie',
+    userName: 'charlie',
     data: {
       targetId: 'post_darkmode_reply_1',
       value: 1,
       createdAt: now - 3600000 * 16,
     },
   },
+  {
+    id: 'vote_post_darkmode_nested_1_bob',
+    userName: 'bob',
+    data: {
+      targetId: 'post_darkmode_nested_1',
+      value: 1,
+      createdAt: now - 3600000 * 15.5,
+    },
+  },
+  {
+    id: 'vote_post_darkmode_nested_2_bob',
+    userName: 'bob',
+    data: {
+      targetId: 'post_darkmode_nested_2',
+      value: 1,
+      createdAt: now - 3600000 * 14.8,
+    },
+  },
+  {
+    id: 'vote_post_darkmode_nested_2_charlie',
+    userName: 'charlie',
+    data: {
+      targetId: 'post_darkmode_nested_2',
+      value: 1,
+      createdAt: now - 3600000 * 14.5,
+    },
+  },
+  {
+    id: 'vote_post_darkmode_reply_2_alice',
+    userName: 'alice',
+    data: {
+      targetId: 'post_darkmode_reply_2',
+      value: 1,
+      createdAt: now - 3600000 * 13.5,
+    },
+  },
 
-  // Votes for SQLite Microservices
+  // Votes for SQLite Microservices Thread (Controversial)
   {
     id: 'vote_post_sqlite_bob',
     userName: 'bob',
@@ -456,30 +492,48 @@ export const voteRows: TableRow[] = [
     userName: 'charlie',
     data: {
       targetId: 'post_sqlite',
-      value: 1,
+      value: -1,
       createdAt: now - 3600000 * 8,
     },
   },
   {
-    id: 'vote_post_sqlite_reply_1_alice',
-    userName: 'alice',
+    id: 'vote_post_sqlite_reply_1_bob',
+    userName: 'bob',
     data: {
       targetId: 'post_sqlite_reply_1',
       value: 1,
-      createdAt: now - 3600000 * 9,
+      createdAt: now - 3600000 * 8.5,
     },
   },
   {
-    id: 'vote_post_sqlite_reply_2_charlie',
-    userName: 'charlie',
+    id: 'vote_post_sqlite_reply_2_alice',
+    userName: 'alice',
     data: {
       targetId: 'post_sqlite_reply_2',
       value: 1,
-      createdAt: now - 3600000 * 8,
+      createdAt: now - 3600000 * 7.5,
+    },
+  },
+  {
+    id: 'vote_post_sqlite_reply_3_bob',
+    userName: 'bob',
+    data: {
+      targetId: 'post_sqlite_reply_3',
+      value: 1,
+      createdAt: now - 3600000 * 6.8,
+    },
+  },
+  {
+    id: 'vote_post_sqlite_reply_3_charlie',
+    userName: 'charlie',
+    data: {
+      targetId: 'post_sqlite_reply_3',
+      value: 1,
+      createdAt: now - 3600000 * 6.5,
     },
   },
 
-  // Votes for Smart Toaster
+  // Votes for Smart Toaster Thread (Mixed / Polarized)
   {
     id: 'vote_post_toaster_charlie',
     userName: 'charlie',
@@ -490,25 +544,79 @@ export const voteRows: TableRow[] = [
     },
   },
   {
-    id: 'vote_post_toaster_alice',
-    userName: 'alice',
-    data: {
-      targetId: 'post_toaster',
-      value: 1,
-      createdAt: now - 3600000 * 4,
-    },
-  },
-  {
     id: 'vote_post_toaster_bob',
     userName: 'bob',
     data: {
       targetId: 'post_toaster',
       value: 1,
+      createdAt: now - 3600000 * 4.5,
+    },
+  },
+  {
+    id: 'vote_post_toaster_alice',
+    userName: 'alice',
+    data: {
+      targetId: 'post_toaster',
+      value: -1,
       createdAt: now - 3600000 * 4,
     },
   },
+  {
+    id: 'vote_post_toaster_reply_1_charlie',
+    userName: 'charlie',
+    data: {
+      targetId: 'post_toaster_reply_1',
+      value: 1,
+      createdAt: now - 3600000 * 3.8,
+    },
+  },
+  {
+    id: 'vote_post_toaster_nested_1_bob',
+    userName: 'bob',
+    data: {
+      targetId: 'post_toaster_nested_1',
+      value: 1,
+      createdAt: now - 3600000 * 3.4,
+    },
+  },
+  {
+    id: 'vote_post_toaster_reply_2_alice',
+    userName: 'alice',
+    data: {
+      targetId: 'post_toaster_reply_2',
+      value: 1,
+      createdAt: now - 3600000 * 2.8,
+    },
+  },
+  {
+    id: 'vote_post_toaster_reply_2_charlie',
+    userName: 'charlie',
+    data: {
+      targetId: 'post_toaster_reply_2',
+      value: 1,
+      createdAt: now - 3600000 * 2.7,
+    },
+  },
+  {
+    id: 'vote_post_toaster_nested_2_bob',
+    userName: 'bob',
+    data: {
+      targetId: 'post_toaster_nested_2',
+      value: 1,
+      createdAt: now - 3600000 * 2.3,
+    },
+  },
+  {
+    id: 'vote_post_toaster_nested_2_charlie',
+    userName: 'charlie',
+    data: {
+      targetId: 'post_toaster_nested_2',
+      value: 1,
+      createdAt: now - 3600000 * 2.2,
+    },
+  },
 
-  // Votes for Init Bug
+  // Votes for Init Bug Thread (Universally Upvoted)
   {
     id: 'vote_post_init_bug_alice',
     userName: 'alice',
@@ -537,12 +645,48 @@ export const voteRows: TableRow[] = [
     },
   },
   {
+    id: 'vote_post_init_reply_1_alice',
+    userName: 'alice',
+    data: {
+      targetId: 'post_init_reply_1',
+      value: 1,
+      createdAt: now - 3600000 * 1.4,
+    },
+  },
+  {
     id: 'vote_post_init_reply_1_bob',
     userName: 'bob',
     data: {
       targetId: 'post_init_reply_1',
       value: 1,
-      createdAt: now - 3600000 * 1.5,
+      createdAt: now - 3600000 * 1.3,
+    },
+  },
+  {
+    id: 'vote_post_init_reply_2_alice',
+    userName: 'alice',
+    data: {
+      targetId: 'post_init_reply_2',
+      value: 1,
+      createdAt: now - 3600000 * 0.9,
+    },
+  },
+  {
+    id: 'vote_post_init_reply_2_charlie',
+    userName: 'charlie',
+    data: {
+      targetId: 'post_init_reply_2',
+      value: 1,
+      createdAt: now - 3600000 * 0.8,
+    },
+  },
+  {
+    id: 'vote_post_init_nested_1_bob',
+    userName: 'bob',
+    data: {
+      targetId: 'post_init_nested_1',
+      value: 1,
+      createdAt: now - 3600000 * 0.4,
     },
   },
 ];

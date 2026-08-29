@@ -35,7 +35,7 @@ export interface TablePermissions {
 /**
  * User-private table permissions: data is isolated per-user, and each user only reads and mutates their own records.
  */
-export const USER_PRIVATE_PERMISSIONS: TablePermissions = {
+export const USER_PRIVATE_PERMISSIONS: Readonly<TablePermissions> = {
   create: Permission.Authenticated,
   read: Permission.Owner,
   update: Permission.Owner,
@@ -45,7 +45,7 @@ export const USER_PRIVATE_PERMISSIONS: TablePermissions = {
 /**
  * Public-read table permissions: readable by everyone (including guests), creatable by authenticated users, and updatable/deletable by record owners.
  */
-export const PUBLIC_READ_PERMISSIONS: TablePermissions = {
+export const PUBLIC_READ_PERMISSIONS: Readonly<TablePermissions> = {
   create: Permission.Authenticated,
   read: Permission.Everybody,
   update: Permission.Owner,
@@ -55,7 +55,7 @@ export const PUBLIC_READ_PERMISSIONS: TablePermissions = {
 /**
  * Public-read-write table permissions: open collaboration where all operations are permitted without authentication.
  */
-export const PUBLIC_READ_WRITE_PERMISSIONS: TablePermissions = {
+export const PUBLIC_READ_WRITE_PERMISSIONS: Readonly<TablePermissions> = {
   create: Permission.Everybody,
   read: Permission.Everybody,
   update: Permission.Everybody,
@@ -65,7 +65,7 @@ export const PUBLIC_READ_WRITE_PERMISSIONS: TablePermissions = {
 /**
  * Shared table permissions: readable and creatable by any authenticated user, while updates and deletes are restricted to the record author/owner.
  */
-export const SHARED_PERMISSIONS: TablePermissions = {
+export const SHARED_PERMISSIONS: Readonly<TablePermissions> = {
   create: Permission.Authenticated,
   read: Permission.Authenticated,
   update: Permission.Owner,
@@ -75,5 +75,4 @@ export const SHARED_PERMISSIONS: TablePermissions = {
 /**
  * Default table CRUD permissions when not explicitly configured (alias to `USER_PRIVATE_PERMISSIONS`).
  */
-export const DEFAULT_TABLE_PERMISSIONS: TablePermissions =
-  USER_PRIVATE_PERMISSIONS;
+export const DEFAULT_TABLE_PERMISSIONS = USER_PRIVATE_PERMISSIONS;

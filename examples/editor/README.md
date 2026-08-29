@@ -18,7 +18,7 @@ The collaborative editor defines two tables served with ephemeral in-memory stor
 - **`document`** ([`src/client.ts`](src/client.ts)): Stores each line of the collaborative document with its ordering and text content, seeded directly from this [`README.md`](README.md) in [`vite.config.ts`](vite.config.ts).
 - **`presence`** ([`src/client.ts`](src/client.ts)): Synchronizes active collaborator identities, assigned colors, cursor coordinates, and text selection ranges.
 
-Both tables are configured with `Permission.Everybody` in [`vite.config.ts`](vite.config.ts) for seamless guest collaboration without requiring authentication.
+Both tables are configured with `PUBLIC_READ_WRITE_PERMISSIONS` in [`vite.config.ts`](vite.config.ts) for seamless guest collaboration without requiring authentication.
 
 ## Vite Integration
 

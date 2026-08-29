@@ -1,5 +1,9 @@
 import fs from 'node:fs';
-import { MemoryStorage, Permission, type TableRow } from 'tetherdb/server';
+import {
+  MemoryStorage,
+  PUBLIC_READ_WRITE_PERMISSIONS,
+  type TableRow,
+} from 'tetherdb/server';
 import { tetherPlugin } from 'tetherdb/vite';
 import { defineConfig } from 'vite';
 
@@ -28,24 +32,14 @@ export default defineConfig({
         {
           name: 'document',
           settings: {
-            permissions: {
-              read: Permission.Everybody,
-              create: Permission.Everybody,
-              update: Permission.Everybody,
-              delete: Permission.Everybody,
-            },
+            permissions: PUBLIC_READ_WRITE_PERMISSIONS,
             rows: documentRows,
           },
         },
         {
           name: 'presence',
           settings: {
-            permissions: {
-              read: Permission.Everybody,
-              create: Permission.Everybody,
-              update: Permission.Everybody,
-              delete: Permission.Everybody,
-            },
+            permissions: PUBLIC_READ_WRITE_PERMISSIONS,
           },
         },
       ],

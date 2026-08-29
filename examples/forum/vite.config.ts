@@ -1,4 +1,8 @@
-import { FileStorage, Permission } from 'tetherdb/server';
+import {
+  FileStorage,
+  Permission,
+  PUBLIC_READ_PERMISSIONS,
+} from 'tetherdb/server';
 import { tetherPlugin } from 'tetherdb/vite';
 import { defineConfig } from 'vite';
 import { communityRows, forumUsers, postRows, voteRows } from './seed.js';
@@ -23,24 +27,14 @@ export default defineConfig({
         {
           name: 'posts',
           settings: {
-            permissions: {
-              read: Permission.Everybody,
-              create: Permission.Authenticated,
-              update: Permission.Owner,
-              delete: Permission.Owner,
-            },
+            permissions: PUBLIC_READ_PERMISSIONS,
             rows: postRows,
           },
         },
         {
           name: 'votes',
           settings: {
-            permissions: {
-              read: Permission.Everybody,
-              create: Permission.Authenticated,
-              update: Permission.Owner,
-              delete: Permission.Owner,
-            },
+            permissions: PUBLIC_READ_PERMISSIONS,
             rows: voteRows,
           },
         },

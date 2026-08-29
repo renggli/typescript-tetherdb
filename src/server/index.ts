@@ -5,9 +5,13 @@
  */
 export {
   Permission,
+  PUBLIC_READ_PERMISSIONS,
+  PUBLIC_READ_WRITE_PERMISSIONS,
+  SHARED_PERMISSIONS,
   type TablePermissions,
   type TableRow,
   type TableSettings,
+  USER_PRIVATE_PERMISSIONS,
 } from '../shared/types.js';
 export {
   TetherServerError,
