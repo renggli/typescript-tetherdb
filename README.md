@@ -354,17 +354,23 @@ server {
 
 ## Example Applications
 
-Check out the included example applications demonstrating TetherDB features:
+Check out the included example applications demonstrating TetherDB features across different server persistence engines:
 
-- **Collaborative Todo App** ([`examples/todo/`](examples/todo)): Real-time multi-client collaborative task manager with filters and status indexes.
+- **Collaborative Editor** ([`examples/editor/`](examples/editor)): Real-time collaborative markdown editor with multi-user presence, remote cursors, and line-based collaborative document sync powered by in-memory storage (`MemoryStorage`).
   ```bash
-  npm run example:todo
+  npm run example:editor
   ```
   Open `http://localhost:3000` to test.
 
-- **Community Forum ("TetherForum")** ([`examples/forum/`](examples/forum)): Reddit-style community discussion board with sub-communities (`c/tech`, `c/general`), multi-user upvoting/downvoting, threaded comments, and multi-persona switching.
+- **Discussion Forum** ([`examples/forum/`](examples/forum)): Reddit-style community discussion board with sub-communities, multi-user upvoting/downvoting, recursive threaded comments, server-enforced permissions, and persona switching backed by filesystem storage (`FileStorage`).
   ```bash
   npm run example:forum
+  ```
+  Open `http://localhost:3001` to test.
+
+- **Collaborative Todo** ([`examples/todo/`](examples/todo)): Local-first task manager with reactive secondary status indexes, active counts, live event stream, and user authentication backed by SQLite persistence (`SqliteStorage`).
+  ```bash
+  npm run example:todo
   ```
   Open `http://localhost:3002` to test.
 

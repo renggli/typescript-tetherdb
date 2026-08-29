@@ -1,4 +1,4 @@
-import { Permission, SqliteStorage } from 'tetherdb/server';
+import { FileStorage, Permission } from 'tetherdb/server';
 import { tetherPlugin } from 'tetherdb/vite';
 import { defineConfig } from 'vite';
 import { communityRows, forumUsers, postRows, voteRows } from './seed.js';
@@ -6,7 +6,7 @@ import { communityRows, forumUsers, postRows, voteRows } from './seed.js';
 export default defineConfig({
   plugins: [
     tetherPlugin({
-      storage: new SqliteStorage({ baseDir: './data' }),
+      storage: new FileStorage({ baseDir: './data' }),
       tables: [
         {
           name: 'communities',
@@ -49,6 +49,6 @@ export default defineConfig({
     }),
   ],
   server: {
-    port: 3002,
+    port: 3001,
   },
 });

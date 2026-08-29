@@ -103,13 +103,11 @@ export class Sync {
   /**
    * Initiates a connection to the sync endpoint and sends authentication.
    *
-   * @param token - Optional session token to connect with.
+   * @param token - Optional session token to connect with. Pass `undefined` to connect unauthenticated.
    * @param url - Optional URL override.
    */
   connect(token?: string, url?: string): void {
-    if (token !== undefined) {
-      this.token = token;
-    }
+    this.token = token;
     this.connection.connect(url);
   }
 
@@ -156,6 +154,7 @@ export class Sync {
    * Logs out of the current session.
    */
   async logout(): Promise<void> {
+    this.token = undefined;
     await this.sendRequest<Record<string, never>>((requestId) => ({
       type: ClientMessageType.Logout,
       requestId,

@@ -58,7 +58,7 @@
 
 body {
   font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     sans-serif;
   background-color: var(--bg);
   color: var(--text-primary);
@@ -91,6 +91,12 @@ body {
   justify-content: space-between;
 }
 
+.navbar-left {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -98,23 +104,27 @@ body {
   user-select: none;
 }
 
-.brand-icon {
-  width: 34px;
-  height: 34px;
+.brand-logo {
+  width: 32px;
+  height: 32px;
   border-radius: var(--radius-sm);
-  background: linear-gradient(135deg, #ff4500, #ff8c00);
+  background: linear-gradient(135deg, #0284c7, #6366f1);
   display: flex;
   align-items: center;
   justify-content: center;
   color: white;
-  font-size: 1.125rem;
-  box-shadow: 0 2px 4px rgb(255 69 0 / 0.3);
+  font-size: 1.15rem;
+  box-shadow: 0 2px 4px rgb(2 132 199 / 0.25);
+  flex-shrink: 0;
 }
 
-.brand-text h1 {
-  font-size: 1.25rem;
+.brand-title {
+  font-size: 1.15rem;
   font-weight: 700;
   letter-spacing: -0.02em;
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.2;
 }
 
 .navbar-right {
@@ -182,7 +192,7 @@ body {
   user-select: none;
 }
 
-.status-indicator {
+.status-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
@@ -190,21 +200,21 @@ body {
   transition: all var(--transition);
 }
 
-.status-connected .status-indicator {
+.status-connected .status-dot {
   background-color: var(--success);
   box-shadow: 0 0 6px var(--success);
 }
 
-.status-connecting .status-indicator {
+.status-connecting .status-dot {
   background-color: var(--warning);
   animation: pulse 1.5s infinite;
 }
 
-.status-disconnected .status-indicator {
+.status-disconnected .status-dot {
   background-color: var(--text-muted);
 }
 
-.status-error .status-indicator {
+.status-error .status-dot {
   background-color: var(--danger);
 }
 

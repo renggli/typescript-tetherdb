@@ -3,26 +3,31 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TetherForum — Real-Time Collaborative Discussion Board</title>
+  <title>TetherDB — Discussion Forum</title>
   <link rel="stylesheet" href="./style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+    rel="stylesheet"
+  />
 </head>
 <body>
   <!-- Top Navigation Header -->
   <header class="navbar">
     <div class="navbar-inner">
-      <div class="brand">
-        <div class="brand-icon">⚡</div>
-        <div class="brand-text">
-          <h1>TetherForum</h1>
+      <div class="navbar-left">
+        <div class="brand">
+          <span class="brand-logo">⚡</span>
+          <h1 class="brand-title">TetherDB Forum</h1>
+        </div>
+        <div id="statusPill" class="status-pill status-connecting">
+          <span class="status-dot"></span>
+          <span id="statusText">Connecting...</span>
         </div>
       </div>
 
       <div class="navbar-right">
-        <div id="statusPill" class="status-pill status-disconnected">
-          <span class="status-indicator"></span>
-          <span id="statusText">Connecting...</span>
-        </div>
-
         <div class="auth-nav-area">
           <button type="button" id="authButton" class="auth-btn">
             <span id="authButtonAvatar" class="auth-btn-avatar"><svg class="auth-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><title>User</title><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>

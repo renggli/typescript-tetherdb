@@ -398,9 +398,10 @@ describe.each(storageDescriptors)(
       await waitForCondition(() => client.syncStatus === SyncStatus.Connected);
       await waitForCondition(async () => (await todos.getAll()).length === 1);
 
-      // 3. Logout with default (DataMode.Clear) wipes local data
+      // 3. Logout with default (DataMode.Clear) wipes local data and remains empty
       await client.logout();
       expect(client.authStatus).toBe(AuthStatus.SignedOut);
+      await new Promise((resolve) => setTimeout(resolve, 100));
       expect(await todos.getAll()).toHaveLength(0);
     });
 

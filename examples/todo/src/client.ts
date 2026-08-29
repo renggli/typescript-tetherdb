@@ -151,7 +151,7 @@ function updateSyncStatusUI(status: SyncStatus): void {
   statusPill.className = `status-pill status-${SyncStatus[status].toLowerCase()}`;
   switch (status) {
     case SyncStatus.Connected:
-      statusText.textContent = 'Connected & Live';
+      statusText.textContent = 'Connected (Live Sync)';
       break;
     case SyncStatus.Connecting:
       statusText.textContent = 'Connecting...';
@@ -161,7 +161,9 @@ function updateSyncStatusUI(status: SyncStatus): void {
       break;
     case SyncStatus.Error:
       statusText.textContent =
-        db.authStatus === AuthStatus.SignedIn ? 'Sync Error' : 'Auth Required';
+        db.authStatus === AuthStatus.SignedIn
+          ? 'Sync Error'
+          : 'Offline (Local Only)';
       break;
   }
 }
@@ -397,24 +399,13 @@ async function init(): Promise<void> {
     );
   });
 
-  // 4. Initial UI rendering
+  // 4. Initialize client & restore any active session
+  await db.init();
+
+  // 5. Initial UI rendering
   updateUserUI();
   updateSyncStatusUI(db.syncStatus);
   await renderTodos();
-
-  // 5. Restore existing session or authenticate with the default demo account
-  if (db.authStatus !== AuthStatus.SignedIn) {
-    const restored = await db.login();
-    if (!restored) {
-      await db
-        .login({
-          userName: 'demo',
-          password: 'password123',
-          remember: true,
-        })
-        .catch(() => null);
-    }
-  }
 }
 
 init();

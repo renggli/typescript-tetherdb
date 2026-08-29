@@ -3,16 +3,22 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TetherDB — Real-time Collaborative Todo</title>
+  <title>TetherDB — Collaborative Todo</title>
   <link rel="stylesheet" href="./style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+    rel="stylesheet"
+  />
 </head>
 <body>
   <main class="app-container">
     <header>
       <div class="header-top">
         <div class="brand">
-          <div class="brand-icon">⚡</div>
-          <h1>TetherDB Todo</h1>
+          <span class="brand-logo">⚡</span>
+          <h1 class="brand-title">TetherDB Todo</h1>
         </div>
         <button type="button" id="userBadgeBtn" class="user-badge" title="Click to switch account">
           <span>👤</span>
@@ -21,9 +27,9 @@
       </div>
 
       <div class="status-bar">
-        <div id="statusPill" class="status-pill status-disconnected">
+        <div id="statusPill" class="status-pill status-connecting">
           <span class="status-dot"></span>
-          <span id="statusText">Offline (Local Only)</span>
+          <span id="statusText">Connecting...</span>
         </div>
         <span id="itemCount" class="text-muted">0 items</span>
       </div>
@@ -86,7 +92,7 @@
 
     <div id="sessionSection" style="display: none;">
       <div class="modal-user-info">
-        <span>Logged in as <strong id="modalUserName">demo</strong></span>
+        <span>Logged in as <strong id="modalUserName">User</strong></span>
         <button type="button" id="logoutBtn" class="btn btn-danger">Sign Out</button>
       </div>
       <hr class="modal-divider">
@@ -97,7 +103,6 @@
       <button type="button" id="tabLogin" class="modal-tab active">Login</button>
       <button type="button" id="tabRegister" class="modal-tab">Register</button>
     </div>
-
 
     <form id="authForm" class="modal-form">
       <div class="form-group">
@@ -116,6 +121,6 @@
     </form>
   </dialog>
 
-  <script type="module" src="/src/client.ts"></script>
+  <script type="module" src="./src/client.ts"></script>
 </body>
 </html>
