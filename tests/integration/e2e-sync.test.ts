@@ -196,8 +196,7 @@ describe.each(storageDescriptors)(
 
       // Client B connects and gets initial sync
       const clientBName = `client-b-${Math.random().toString(36).substring(2, 8)}`;
-      let clientB = new TetherClient({
-        name: clientBName,
+      let clientB = new TetherClient(clientBName, {
         host: '127.0.0.1',
         port,
         webSocketClass: WebSocket,
@@ -223,8 +222,7 @@ describe.each(storageDescriptors)(
       }
 
       // Client B comes back online with the same IndexedDB database
-      clientB = new TetherClient({
-        name: clientBName,
+      clientB = new TetherClient(clientBName, {
         host: '127.0.0.1',
         port,
         webSocketClass: WebSocket,

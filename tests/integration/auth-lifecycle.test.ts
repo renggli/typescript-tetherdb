@@ -325,8 +325,7 @@ describe.each(storageDescriptors)(
       const dbName = `db-rem-${Math.random().toString(36).substring(2, 8)}`;
 
       // Session 1: Register with remember: true
-      const client1 = new TetherClient({
-        name: dbName,
+      const client1 = new TetherClient(dbName, {
         host: '127.0.0.1',
         port: serverPort,
         webSocketClass: WebSocket,
@@ -347,8 +346,7 @@ describe.each(storageDescriptors)(
       await client1.close();
 
       // Session 2: Open same DB instance without credentials
-      const client2 = new TetherClient({
-        name: dbName,
+      const client2 = new TetherClient(dbName, {
         host: '127.0.0.1',
         port: serverPort,
         webSocketClass: WebSocket,
@@ -372,8 +370,7 @@ describe.each(storageDescriptors)(
 
     it('should handle logout with default DataMode.Clear wiping data and DataMode.Local preserving data', async () => {
       const dbName = `db-logout-${Math.random().toString(36).substring(2, 8)}`;
-      const client = new TetherClient({
-        name: dbName,
+      const client = new TetherClient(dbName, {
         host: '127.0.0.1',
         port: serverPort,
         webSocketClass: WebSocket,
@@ -469,8 +466,7 @@ describe.each(storageDescriptors)(
 
     it('should automatically refresh sliding session token on sync connection', async () => {
       const dbName = `db-sliding-${Math.random().toString(36).substring(2, 8)}`;
-      const client = new TetherClient({
-        name: dbName,
+      const client = new TetherClient(dbName, {
         host: '127.0.0.1',
         port: serverPort,
         webSocketClass: WebSocket,
@@ -513,8 +509,7 @@ describe.each(storageDescriptors)(
       });
       await rawStorage.close();
 
-      const client = new TetherClient({
-        name: dbName,
+      const client = new TetherClient(dbName, {
         host: '127.0.0.1',
         port: serverPort,
         webSocketClass: WebSocket,

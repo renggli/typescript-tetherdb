@@ -27,10 +27,9 @@ describe('Auth', () => {
   });
 
   it('should initialize with SignedOut status and undefined credentials', () => {
-    const auth = new Auth({
+    const auth = new Auth(storage, {
       baseUrl: 'http://127.0.0.1:8080',
-      storage,
-      fetchFn: mockFetch as unknown as typeof fetch,
+      fetch: mockFetch as unknown as typeof fetch,
     });
 
     expect(auth.baseUrl).toBe('http://127.0.0.1:8080');
@@ -47,15 +46,13 @@ describe('Auth', () => {
     try {
       expect(
         () =>
-          new Auth({
+          new Auth(storage, {
             baseUrl: 'http://localhost',
-            storage,
           }),
       ).toThrow(TetherClientError);
       try {
-        new Auth({
+        new Auth(storage, {
           baseUrl: 'http://localhost',
-          storage,
         });
       } catch (err) {
         expect((err as TetherClientError).code).toBe(
@@ -74,10 +71,9 @@ describe('Auth', () => {
         token: 'jwt-token-xyz',
       });
 
-      const auth = new Auth({
+      const auth = new Auth(storage, {
         baseUrl: 'http://127.0.0.1:8080',
-        storage,
-        fetchFn: mockFetch as unknown as typeof fetch,
+        fetch: mockFetch as unknown as typeof fetch,
       });
 
       await auth.restoreSession();
@@ -90,10 +86,9 @@ describe('Auth', () => {
     it('should remain SignedOut if stored session is missing token or userName', async () => {
       await storage.setMeta('auth', { userName: 'alice' }); // incomplete
 
-      const auth = new Auth({
+      const auth = new Auth(storage, {
         baseUrl: 'http://127.0.0.1:8080',
-        storage,
-        fetchFn: mockFetch as unknown as typeof fetch,
+        fetch: mockFetch as unknown as typeof fetch,
       });
 
       await auth.restoreSession();
@@ -106,10 +101,9 @@ describe('Auth', () => {
         new Error('DB failure'),
       );
 
-      const auth = new Auth({
+      const auth = new Auth(brokenStorage, {
         baseUrl: 'http://127.0.0.1:8080',
-        storage: brokenStorage,
-        fetchFn: mockFetch as unknown as typeof fetch,
+        fetch: mockFetch as unknown as typeof fetch,
       });
 
       await expect(auth.restoreSession()).resolves.toBeUndefined();
@@ -120,10 +114,9 @@ describe('Auth', () => {
 
   describe('register', () => {
     it('should throw error when username or password is missing', async () => {
-      const auth = new Auth({
+      const auth = new Auth(storage, {
         baseUrl: 'http://127.0.0.1:8080',
-        storage,
-        fetchFn: mockFetch as unknown as typeof fetch,
+        fetch: mockFetch as unknown as typeof fetch,
       });
 
       // @ts-expect-error - testing invalid args
@@ -143,10 +136,9 @@ describe('Auth', () => {
         }),
       });
 
-      const auth = new Auth({
+      const auth = new Auth(storage, {
         baseUrl: 'http://127.0.0.1:8080',
-        storage,
-        fetchFn: mockFetch as unknown as typeof fetch,
+        fetch: mockFetch as unknown as typeof fetch,
       });
 
       const statuses: AuthStatus[] = [];
@@ -184,10 +176,9 @@ describe('Auth', () => {
         }),
       });
 
-      const auth = new Auth({
+      const auth = new Auth(storage, {
         baseUrl: 'http://127.0.0.1:8080',
-        storage,
-        fetchFn: mockFetch as unknown as typeof fetch,
+        fetch: mockFetch as unknown as typeof fetch,
       });
 
       const success = await auth.register({
@@ -210,10 +201,9 @@ describe('Auth', () => {
         }),
       });
 
-      const auth = new Auth({
+      const auth = new Auth(storage, {
         baseUrl: 'http://127.0.0.1:8080',
-        storage,
-        fetchFn: mockFetch as unknown as typeof fetch,
+        fetch: mockFetch as unknown as typeof fetch,
       });
 
       expect(auth.status).toBe(AuthStatus.SignedOut);
@@ -241,10 +231,9 @@ describe('Auth', () => {
         token: 'token-old',
       });
 
-      const auth = new Auth({
+      const auth = new Auth(storage, {
         baseUrl: 'http://127.0.0.1:8080',
-        storage,
-        fetchFn: mockFetch as unknown as typeof fetch,
+        fetch: mockFetch as unknown as typeof fetch,
       });
 
       await auth.restoreSession();
@@ -269,10 +258,9 @@ describe('Auth', () => {
         }),
       });
 
-      const auth = new Auth({
+      const auth = new Auth(storage, {
         baseUrl: 'http://127.0.0.1:8080',
-        storage,
-        fetchFn: mockFetch as unknown as typeof fetch,
+        fetch: mockFetch as unknown as typeof fetch,
       });
 
       await auth.register({
@@ -290,10 +278,9 @@ describe('Auth', () => {
         json: async () => ({ error: 'Username already taken' }),
       });
 
-      const auth = new Auth({
+      const auth = new Auth(storage, {
         baseUrl: 'http://127.0.0.1:8080',
-        storage,
-        fetchFn: mockFetch as unknown as typeof fetch,
+        fetch: mockFetch as unknown as typeof fetch,
       });
 
       const clearSpy = vi.spyOn(storage, 'clearTables');
@@ -319,10 +306,9 @@ describe('Auth', () => {
         }),
       });
 
-      const auth = new Auth({
+      const auth = new Auth(storage, {
         baseUrl: 'http://127.0.0.1:8080',
-        storage,
-        fetchFn: mockFetch as unknown as typeof fetch,
+        fetch: mockFetch as unknown as typeof fetch,
       });
 
       const success = await auth.login({
@@ -346,10 +332,9 @@ describe('Auth', () => {
         token: 'token-grace',
       });
 
-      const auth = new Auth({
+      const auth = new Auth(storage, {
         baseUrl: 'http://127.0.0.1:8080',
-        storage,
-        fetchFn: mockFetch as unknown as typeof fetch,
+        fetch: mockFetch as unknown as typeof fetch,
       });
 
       const success = await auth.login();
@@ -361,10 +346,9 @@ describe('Auth', () => {
     });
 
     it('should fail login if no credentials and no saved session exist', async () => {
-      const auth = new Auth({
+      const auth = new Auth(storage, {
         baseUrl: 'http://127.0.0.1:8080',
-        storage,
-        fetchFn: mockFetch as unknown as typeof fetch,
+        fetch: mockFetch as unknown as typeof fetch,
       });
 
       const success = await auth.login({});
@@ -384,10 +368,9 @@ describe('Auth', () => {
         }),
       });
 
-      const auth = new Auth({
+      const auth = new Auth(storage, {
         baseUrl: 'http://127.0.0.1:8080',
-        storage,
-        fetchFn: mockFetch as unknown as typeof fetch,
+        fetch: mockFetch as unknown as typeof fetch,
       });
 
       await auth.login({ userName: 'u', password: 'p' });
@@ -407,10 +390,9 @@ describe('Auth', () => {
         }),
       });
 
-      const auth = new Auth({
+      const auth = new Auth(storage, {
         baseUrl: 'http://127.0.0.1:8080',
-        storage,
-        fetchFn: mockFetch as unknown as typeof fetch,
+        fetch: mockFetch as unknown as typeof fetch,
       });
 
       // DataMode.Clear
@@ -439,10 +421,9 @@ describe('Auth', () => {
         json: async () => ({ error: 'Invalid password' }),
       });
 
-      const auth = new Auth({
+      const auth = new Auth(storage, {
         baseUrl: 'http://127.0.0.1:8080',
-        storage,
-        fetchFn: mockFetch as unknown as typeof fetch,
+        fetch: mockFetch as unknown as typeof fetch,
       });
 
       const success = await auth.login({ userName: 'u', password: 'bad' });
@@ -458,10 +439,9 @@ describe('Auth', () => {
         userName: 'alice',
       });
 
-      const auth = new Auth({
+      const auth = new Auth(storage, {
         baseUrl: 'http://127.0.0.1:8080',
-        storage,
-        fetchFn: mockFetch as unknown as typeof fetch,
+        fetch: mockFetch as unknown as typeof fetch,
       });
 
       await auth.restoreSession();
@@ -483,10 +463,9 @@ describe('Auth', () => {
       const clearSpy = vi.spyOn(storage, 'clearTables');
       const setMetaSpy = vi.spyOn(storage, 'setMeta');
 
-      const auth = new Auth({
+      const auth = new Auth(storage, {
         baseUrl: 'http://127.0.0.1:8080',
-        storage,
-        fetchFn: mockFetch as unknown as typeof fetch,
+        fetch: mockFetch as unknown as typeof fetch,
       });
 
       await auth.logout();
@@ -497,10 +476,9 @@ describe('Auth', () => {
     it('should preserve tables on logout when DataMode.Local is requested', async () => {
       const clearSpy = vi.spyOn(storage, 'clearTables');
 
-      const auth = new Auth({
+      const auth = new Auth(storage, {
         baseUrl: 'http://127.0.0.1:8080',
-        storage,
-        fetchFn: mockFetch as unknown as typeof fetch,
+        fetch: mockFetch as unknown as typeof fetch,
       });
 
       await auth.logout({ dataMode: DataMode.Local });
@@ -515,10 +493,9 @@ describe('Auth', () => {
         userName: 'alice',
       });
 
-      const auth = new Auth({
+      const auth = new Auth(storage, {
         baseUrl: 'http://127.0.0.1:8080',
-        storage,
-        fetchFn: mockFetch as unknown as typeof fetch,
+        fetch: mockFetch as unknown as typeof fetch,
       });
 
       await auth.restoreSession();
@@ -532,10 +509,9 @@ describe('Auth', () => {
     });
 
     it('should handle token refresh in memory even if no session was stored in metadata', async () => {
-      const auth = new Auth({
+      const auth = new Auth(storage, {
         baseUrl: 'http://127.0.0.1:8080',
-        storage,
-        fetchFn: mockFetch as unknown as typeof fetch,
+        fetch: mockFetch as unknown as typeof fetch,
       });
 
       await auth.handleTokenRefresh('refreshed-token-only');
@@ -549,10 +525,9 @@ describe('Auth', () => {
         userName: 'alice',
       });
 
-      const auth = new Auth({
+      const auth = new Auth(storage, {
         baseUrl: 'http://127.0.0.1:8080',
-        storage,
-        fetchFn: mockFetch as unknown as typeof fetch,
+        fetch: mockFetch as unknown as typeof fetch,
       });
       await auth.restoreSession();
       expect(auth.status).toBe(AuthStatus.SignedIn);
@@ -571,10 +546,9 @@ describe('Auth', () => {
         userName: 'saved_user',
       });
 
-      const auth = new Auth({
+      const auth = new Auth(storage, {
         baseUrl: 'http://127.0.0.1:8080',
-        storage,
-        fetchFn: mockFetch as unknown as typeof fetch,
+        fetch: mockFetch as unknown as typeof fetch,
       });
 
       const result = await auth.login();
@@ -585,10 +559,9 @@ describe('Auth', () => {
     });
 
     it('should return false when login() is called without credentials or stored session', async () => {
-      const auth = new Auth({
+      const auth = new Auth(storage, {
         baseUrl: 'http://127.0.0.1:8080',
-        storage,
-        fetchFn: mockFetch as unknown as typeof fetch,
+        fetch: mockFetch as unknown as typeof fetch,
       });
 
       const result = await auth.login();
@@ -601,10 +574,9 @@ describe('Auth', () => {
         userName: 'no_token_user',
       });
 
-      const auth = new Auth({
+      const auth = new Auth(storage, {
         baseUrl: 'http://127.0.0.1:8080',
-        storage,
-        fetchFn: mockFetch as unknown as typeof fetch,
+        fetch: mockFetch as unknown as typeof fetch,
       });
 
       const result = await auth.login();

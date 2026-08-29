@@ -51,7 +51,7 @@ enum AuthMode {
 }
 
 // Database & Table State — zero-config defaults to current origin
-const db = new TetherClient({ name: 'todo-example' });
+const db = new TetherClient('todo-example');
 const todosTable: Table<TodoItem> = db.table<TodoItem>('todos');
 const statusIndex: Index<TodoItem, TodoStatus> =
   todosTable.index<TodoStatus>('status');

@@ -93,9 +93,8 @@ describe.each(storageDescriptors)(
       const tempStorage = new Storage(
         `temp-auth-db-${Math.random().toString(36).substring(2, 8)}`,
       );
-      const auth = new Auth({
+      const auth = new Auth(tempStorage, {
         baseUrl: `http://127.0.0.1:${serverPort}`,
-        storage: tempStorage,
       });
 
       const regSuccess = await auth.register({
@@ -122,8 +121,7 @@ describe.each(storageDescriptors)(
     it('should seamlessly transition from local-only offline storage to live sync upon registration', async () => {
       // 1. User starts locally offline with zero configuration
       const dbName = `offline-onboard-${Math.random().toString(36).substring(2, 8)}`;
-      const db = new TetherClient({
-        name: dbName,
+      const db = new TetherClient(dbName, {
         host: '127.0.0.1',
         port: serverPort,
         webSocketClass: WebSocket,
@@ -207,8 +205,7 @@ describe.each(storageDescriptors)(
       await server.storage.createUser('dynamic_user', 'password123');
 
       const dbName = `dynamic-db-${Math.random().toString(36).substring(2, 8)}`;
-      const db = new TetherClient({
-        name: dbName,
+      const db = new TetherClient(dbName, {
         host: '127.0.0.1',
         port: serverPort,
         webSocketClass: WebSocket,

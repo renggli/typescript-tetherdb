@@ -23,7 +23,7 @@ Open this page in a **second browser window or tab** to see real-time multi-curs
 
 \`\`\`typescript
 // Zero-config public table sync in TetherDB:
-const db = new TetherClient({ name: 'editor-example' });
+const db = new TetherClient('editor-example');
 const docTable = db.table('document');
 const presenceTable = db.table('presence');
 \`\`\``;

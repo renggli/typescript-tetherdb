@@ -114,7 +114,7 @@ function generateParticipant(): { id: string; name: string; color: string } {
 // -----------------------------------------------------------------------------
 
 const localUser = generateParticipant();
-const db = new TetherClient({ name: 'editor-example' });
+const db = new TetherClient('editor-example');
 const docTable: Table<DocumentLine> = db.table<DocumentLine>('document');
 const presenceTable: Table<ParticipantPresence> =
   db.table<ParticipantPresence>('presence');

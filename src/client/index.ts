@@ -13,6 +13,7 @@ export {
   type TableSettings,
 } from '../shared/types.js';
 export {
+  type AuthOptions,
   AuthStatus,
   DataMode,
   type LoginOptions,

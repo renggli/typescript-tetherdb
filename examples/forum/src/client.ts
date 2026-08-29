@@ -55,7 +55,7 @@ enum SortMode {
 // Database & State Management
 // -----------------------------------------------------------------------------
 
-const db = new TetherClient({ name: 'forum-example' });
+const db = new TetherClient('forum-example');
 
 const communitiesTable: Table<CommunityItem> =
   db.table<CommunityItem>('communities');

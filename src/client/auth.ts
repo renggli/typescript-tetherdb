@@ -85,12 +85,13 @@ export interface StoredAuthSession {
 }
 
 /**
- * Internal dependencies provided to Auth by TetherClient.
+ * Options for configuring authentication client.
  */
-export interface AuthDependencies {
-  baseUrl: string;
-  storage: Storage;
-  fetchFn?: typeof fetch;
+export interface AuthOptions {
+  /** Base URL for remote authentication REST API endpoints (defaults to ''). */
+  baseUrl?: string;
+  /** Optional custom fetch implementation for authentication requests. */
+  fetch?: typeof fetch;
 }
 
 /**
@@ -110,12 +111,18 @@ export class Auth {
   private currentToken?: string;
   private autoRestorePromise: Promise<void>;
 
-  constructor(dependencies: AuthDependencies) {
-    this.baseUrl = dependencies.baseUrl;
-    this.storage = dependencies.storage;
+  /**
+   * Creates a new Auth coordinator instance.
+   *
+   * @param storage - Local storage coordinator.
+   * @param options - Configuration options for authentication endpoints and networking.
+   */
+  constructor(storage: Storage, options: AuthOptions = {}) {
+    this.baseUrl = options.baseUrl ?? '';
+    this.storage = storage;
 
     const rawFetch =
-      dependencies.fetchFn ??
+      options.fetch ??
       (typeof globalThis !== 'undefined' && globalThis.fetch
         ? globalThis.fetch
         : typeof fetch !== 'undefined'

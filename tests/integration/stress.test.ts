@@ -183,8 +183,7 @@ describe.each(storageDescriptors)(
 
     it('should accumulate offline mutations (>1000 items) and sync on reconnection', async () => {
       const dbName = `offline-stresser-${Math.random().toString(36).substring(2, 8)}`;
-      const offlineClient = new TetherClient({
-        name: dbName,
+      const offlineClient = new TetherClient(dbName, {
         host: '127.0.0.1',
         port,
         webSocketClass: WebSocket,
