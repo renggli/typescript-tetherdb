@@ -68,7 +68,7 @@ export class MemoryStorage extends BaseStorage {
 
   async createTable(
     name: string,
-    settings: TableSettings = {},
+    settings: Partial<TableSettings> = {},
   ): Promise<TableStorage> {
     const safeName = validateTableName(name);
     if (this.tables.has(safeName)) {

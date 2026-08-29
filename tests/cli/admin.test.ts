@@ -57,4 +57,36 @@ describe('resolveAdminTarget', () => {
 
     await context.close();
   });
+
+  it('should resolve AdminClient when MemoryStorage server is running with baseDir', async () => {
+    server = new TetherServer({ baseDir: tmpDir });
+    await server.listen(0, '127.0.0.1');
+
+    const context = await resolveAdminTarget(tmpDir, BackendType.Memory);
+    expect(context.isRemote).toBe(true);
+    expect(context.lock).not.toBeNull();
+    expect(context.lock?.pid).toBe(process.pid);
+    expect(context.lock?.adminSecret).toBeDefined();
+
+    const status = await context.target.getStatus();
+    expect(status.backend).toBe('memory');
+
+    await context.close();
+  });
+
+  it('should resolve AdminClient when admin token is provided without filesystem lock', async () => {
+    server = new TetherServer(); // pure memory, no baseDir
+    await server.listen(0, '127.0.0.1');
+    const token = server.getAdminToken('127.0.0.1');
+
+    const context = await resolveAdminTarget(tmpDir, BackendType.Memory, token);
+    expect(context.isRemote).toBe(true);
+    expect(context.lock).not.toBeNull();
+    expect(context.lock?.backend).toBe('memory');
+
+    const status = await context.target.getStatus();
+    expect(status.backend).toBe('memory');
+
+    await context.close();
+  });
 });

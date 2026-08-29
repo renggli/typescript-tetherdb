@@ -56,6 +56,21 @@ describe('parseCliArgs', () => {
   it('should parse backend options (-b, --backend, --memory, --file, --sqlite)', () => {
     const memResult = parseCliArgs(['--memory']);
     expect(memResult.backend).toBe(BackendType.Memory);
+    expect(memResult.token).toBeUndefined();
+
+    const memTokenResult1 = parseCliArgs(['--memory=abc123token']);
+    expect(memTokenResult1.backend).toBe(BackendType.Memory);
+    expect(memTokenResult1.token).toBe('abc123token');
+
+    const memTokenResult2 = parseCliArgs(['--memory', 'xyz789token']);
+    expect(memTokenResult2.backend).toBe(BackendType.Memory);
+    expect(memTokenResult2.token).toBe('xyz789token');
+
+    const tokenResult1 = parseCliArgs(['--token=custom-token']);
+    expect(tokenResult1.token).toBe('custom-token');
+
+    const tokenResult2 = parseCliArgs(['-t', 'custom-token-2']);
+    expect(tokenResult2.token).toBe('custom-token-2');
 
     const bResult = parseCliArgs(['-b', 'sqlite', '-d', '/custom/path']);
     expect(bResult.backend).toBe(BackendType.Sqlite);
@@ -90,7 +105,7 @@ describe('parseCliArgs', () => {
     expect(sqliteResult3.dir).toBe('/db/space');
   });
 
-  it('should extract positional arguments, subcommands, and singular aliases', () => {
+  it('should extract positional arguments and subcommands', () => {
     const result1 = parseCliArgs([
       'tables',
       'add',
@@ -101,15 +116,15 @@ describe('parseCliArgs', () => {
     expect(result1.positionalArgs).toEqual(['tables', 'add', 'recipes']);
     expect(result1.backend).toBe(BackendType.Sqlite);
 
-    const result2 = parseCliArgs(['table', 'list']);
+    const result2 = parseCliArgs(['tables', 'list']);
     expect(result2.command).toBe('tables');
     expect(result2.positionalArgs).toEqual(['tables', 'list']);
 
-    const result3 = parseCliArgs(['user', 'list']);
+    const result3 = parseCliArgs(['users', 'list']);
     expect(result3.command).toBe('users');
     expect(result3.positionalArgs).toEqual(['users', 'list']);
 
-    const result4 = parseCliArgs(['record', 'list', 'recipes']);
+    const result4 = parseCliArgs(['records', 'list', 'recipes']);
     expect(result4.command).toBe('records');
     expect(result4.positionalArgs).toEqual(['records', 'list', 'recipes']);
   });

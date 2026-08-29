@@ -56,7 +56,7 @@ export function assertAdminAuth(
  * @param req - Incoming HTTP request.
  * @param res - Server HTTP response.
  * @param url - Parsed request URL.
- * @param basePath - Configured server base path.
+ * @param httpPath - Configured server HTTP path prefix.
  * @param ctx - Administrative context (storage, secret, shutdown callback).
  * @returns `true` if route was matched and handled, `false` otherwise.
  */
@@ -64,12 +64,12 @@ export async function handleAdminRequest(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   url: URL,
-  basePath: string,
+  httpPath: string,
   ctx: AdminRouteContext,
 ): Promise<boolean> {
   assertAdminAuth(req, ctx.adminSecret);
   const method = req.method?.toUpperCase();
-  const adminPath = url.pathname.slice(`${basePath}/admin`.length);
+  const adminPath = url.pathname.slice(`${httpPath}/admin`.length);
 
   // GET /admin/status
   if (method === 'GET' && adminPath === '/status') {

@@ -67,8 +67,21 @@ export function readServerLock(baseDir: string): ServerLockInfo | null {
     if (typeof info.pid === 'number' && isProcessAlive(info.pid)) {
       return info;
     }
+    // Stale lock from dead process - clean up immediately
+    try {
+      fs.unlinkSync(lockPath);
+    } catch {
+      // Ignore
+    }
     return null;
   } catch {
+    try {
+      if (fs.existsSync(lockPath)) {
+        fs.unlinkSync(lockPath);
+      }
+    } catch {
+      // Ignore
+    }
     return null;
   }
 }
@@ -147,6 +160,7 @@ export function acquireServerLock(
   const release = () => {
     if (isReleased) return;
     isReleased = true;
+    process.removeListener('exit', release);
     try {
       if (fs.existsSync(lockPath)) {
         const current = JSON.parse(
@@ -160,6 +174,8 @@ export function acquireServerLock(
       // Ignore cleanup error on shutdown
     }
   };
+
+  process.once('exit', release);
 
   return {
     info,

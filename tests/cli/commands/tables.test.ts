@@ -10,6 +10,7 @@ import {
   TetherServerError,
   TetherServerErrorCode,
 } from '../../../src/server/index.js';
+import { Permission } from '../../../src/shared/types.js';
 import { testLogger } from '../../logger.js';
 
 describe('handleTablesCommand', () => {
@@ -49,8 +50,8 @@ describe('handleTablesCommand', () => {
     testLogger.clear();
     await handleTablesCommand(target, ['tables', 'list']);
     expect(testLogger.hasMessage('Tables (2):')).toBe(true);
-    expect(testLogger.hasMessage('• recipes')).toBe(true);
-    expect(testLogger.hasMessage('• ingredients')).toBe(true);
+    expect(testLogger.hasMessage('• recipes (user-private)')).toBe(true);
+    expect(testLogger.hasMessage('• ingredients (user-private)')).toBe(true);
   });
 
   it('should add tables with custom settings', async () => {
@@ -86,10 +87,79 @@ describe('handleTablesCommand', () => {
       'recipes',
       '--max-records=2000',
     ]);
-    expect(testLogger.hasMessage('Updated table "recipes":')).toBe(true);
+    expect(testLogger.hasMessage('Updated table "recipes"')).toBe(true);
 
     const table = await storage.getTable('recipes');
     expect(table?.settings.maxRecords).toBe(2000);
+  });
+
+  it('should reset permissions and limits to defaults', async () => {
+    await storage.createTable('recipes', {
+      permissions: { read: Permission.Everybody },
+      maxRecords: 500,
+    });
+
+    // Reset single permission to default
+    await handleTablesCommand(target, [
+      'tables',
+      'update',
+      'recipes',
+      '--read=default',
+      '--max-records=default',
+    ]);
+
+    let table = await storage.getTable('recipes');
+    expect(table?.settings.permissions?.read).toBe('owner');
+    expect(table?.settings.maxRecords).toBeUndefined();
+
+    // Re-set and full --reset
+    await handleTablesCommand(target, [
+      'tables',
+      'update',
+      'recipes',
+      '--read=everybody',
+      '--max-records=1000',
+    ]);
+    table = await storage.getTable('recipes');
+    expect(table?.settings.permissions?.read).toBe('everybody');
+    expect(table?.settings.maxRecords).toBe(1000);
+
+    await handleTablesCommand(target, [
+      'tables',
+      'update',
+      'recipes',
+      '--reset',
+    ]);
+    table = await storage.getTable('recipes');
+    expect(table?.settings.permissions?.read).toBe('owner');
+    expect(table?.settings.permissions?.create).toBe('authenticated');
+    expect(table?.settings.maxRecords).toBeUndefined();
+  });
+
+  it('should support permission mode presets via --mode', async () => {
+    await handleTablesCommand(target, [
+      'tables',
+      'add',
+      'forum',
+      '--mode=public-read',
+    ]);
+    let table = await storage.getTable('forum');
+    expect(table?.settings.permissions?.read).toBe('everybody');
+    expect(table?.settings.permissions?.create).toBe('authenticated');
+    expect(table?.settings.permissions?.update).toBe('owner');
+    expect(table?.settings.permissions?.delete).toBe('owner');
+
+    await handleTablesCommand(target, [
+      'tables',
+      'update',
+      'forum',
+      '--mode=shared',
+    ]);
+    table = await storage.getTable('forum');
+    expect(table?.settings.permissions?.read).toBe('authenticated');
+    expect(table?.settings.permissions?.create).toBe('authenticated');
+    expect(table?.settings.permissions?.update).toBe('owner');
+    expect(table?.settings.permissions?.delete).toBe('owner');
   });
 
   it('should remove tables', async () => {
@@ -107,7 +177,7 @@ describe('handleTablesCommand', () => {
       'add',
       'complex',
       '--create=authenticated',
-      '--read=public',
+      '--read=everybody',
       '--update=owner',
       '--delete=nobody',
       '--max-records=5000',

@@ -2,7 +2,12 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { AdminClient, LocalAdminTarget } from '../../src/server/admin.js';
+import {
+  AdminClient,
+  decodeAdminToken,
+  encodeAdminToken,
+  LocalAdminTarget,
+} from '../../src/server/admin.js';
 import { SqliteStorage, TetherServer } from '../../src/server/index.js';
 
 describe('AdminTarget (LocalAdminTarget & AdminClient)', () => {
@@ -156,5 +161,23 @@ describe('AdminTarget (LocalAdminTarget & AdminClient)', () => {
     await remoteTarget.deleteUser(user.userId);
     await remoteTarget.deleteTable('remotetasks');
     expect(await remoteTarget.getTable('remotetasks')).toBeUndefined();
+  });
+
+  it('should encode and decode admin tokens correctly', () => {
+    const payload = {
+      host: '127.0.0.1',
+      port: 8080,
+      secret: 'super-secret-key-123',
+    };
+    const token = encodeAdminToken(payload);
+    expect(typeof token).toBe('string');
+
+    const decoded = decodeAdminToken(token);
+    expect(decoded).toEqual(payload);
+  });
+
+  it('should throw on invalid admin token', () => {
+    expect(() => decodeAdminToken('invalid-token')).toThrow();
+    expect(() => decodeAdminToken('')).toThrow();
   });
 });

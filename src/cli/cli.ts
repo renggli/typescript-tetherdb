@@ -31,14 +31,14 @@ export async function runCli(
   }
   let adminContext: ResolvedAdminContext | undefined;
   try {
-    const { command, positionalArgs, port, host, backend, dir } =
+    const { command, positionalArgs, port, host, backend, dir, token } =
       parseCliArgs(args);
     if (command === 'migrate') {
       await handleMigrateCommand(positionalArgs, backend, dir);
       return;
     }
     if (command === 'stop') {
-      await handleStopCommand(dir);
+      await handleStopCommand(dir, token);
       return;
     }
     if (command === 'serve') {
@@ -47,7 +47,7 @@ export async function runCli(
       return;
     }
 
-    adminContext = await resolveAdminTarget(dir, backend);
+    adminContext = await resolveAdminTarget(dir, backend, token);
     switch (command) {
       case 'status':
         await handleStatusCommand(

@@ -1,18 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeBasePath } from '../../src/shared/path.js';
+import { normalizeHttpPath } from '../../src/shared/path.js';
 
-describe('normalizeBasePath', () => {
-  it('should normalize empty string and slash to empty string', () => {
-    expect(normalizeBasePath('')).toBe('');
-    expect(normalizeBasePath('/')).toBe('');
+describe('normalizeHttpPath', () => {
+  it('should normalize empty and root paths to empty string', () => {
+    expect(normalizeHttpPath('')).toBe('');
+    expect(normalizeHttpPath('/')).toBe('');
   });
 
-  it('should prepend leading slash and trim trailing slash', () => {
-    expect(normalizeBasePath('api')).toBe('/api');
-    expect(normalizeBasePath('/api')).toBe('/api');
-    expect(normalizeBasePath('/api/')).toBe('/api');
-    expect(normalizeBasePath('api/v1/')).toBe('/api/v1');
-    expect(normalizeBasePath('/api/v1')).toBe('/api/v1');
-    expect(normalizeBasePath('/api/v1/')).toBe('/api/v1');
+  it('should ensure leading slash and remove trailing slashes', () => {
+    expect(normalizeHttpPath('api')).toBe('/api');
+    expect(normalizeHttpPath('/api')).toBe('/api');
+    expect(normalizeHttpPath('/api/')).toBe('/api');
+    expect(normalizeHttpPath('api/v1/')).toBe('/api/v1');
+    expect(normalizeHttpPath('/api/v1')).toBe('/api/v1');
+    expect(normalizeHttpPath('/api/v1/')).toBe('/api/v1');
   });
 });

@@ -1,6 +1,7 @@
 import {
   AdminClient,
   type AdminTarget,
+  decodeAdminToken,
   LocalAdminTarget,
   type ResolvedAdminContext,
 } from '../server/admin.js';
@@ -16,17 +17,37 @@ export {
 
 /**
  * Resolves the appropriate administration target for CLI operations.
- * If a server lock is detected with an active adminSecret, connects via HTTP (`AdminClient`);
+ * If a token is provided or a server lock is detected with an active adminSecret, connects via HTTP (`AdminClient`);
  * otherwise instantiates an offline `Storage` engine (`LocalAdminTarget`).
  *
  * @param dir - Data directory.
  * @param backend - Storage backend type if operating offline.
+ * @param token - Optional admin connection token.
  * @returns Resolved administrative context.
  */
 export async function resolveAdminTarget(
   dir = '.data',
   backend: BackendType = BackendType.Memory,
+  token?: string,
 ): Promise<ResolvedAdminContext> {
+  if (token) {
+    const { host, port, secret } = decodeAdminToken(token);
+    const client = new AdminClient(port, host, secret);
+    return {
+      target: client,
+      isRemote: true,
+      lock: {
+        pid: 0,
+        port,
+        host,
+        adminSecret: secret,
+        startedAt: Date.now(),
+        backend: BackendType.Memory,
+      },
+      close: async () => {},
+    };
+  }
+
   const lock = readServerLock(dir);
   if (lock?.adminSecret) {
     const client = new AdminClient(lock.port, lock.host, lock.adminSecret);

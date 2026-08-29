@@ -111,6 +111,7 @@
     "prepare": "npm run build",
     "prepublishOnly": "npm run typecheck && npm run lint && npm test && npm run build",
     "postpublish": "node scripts/tag-version.js",
+    "cli": "node bin/tetherdb.js",
     "example:editor": "npm --workspace=@tetherdb/example-editor run dev",
     "example:forum": "npm --workspace=@tetherdb/example-forum run dev",
     "example:todo": "npm --workspace=@tetherdb/example-todo run dev"

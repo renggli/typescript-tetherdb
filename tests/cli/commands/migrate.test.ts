@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { handleMigrateCommand } from '../../../src/cli/commands/migrate.js';
+import { handleMigrateCommand } from '../../../src/cli/commands/migrate/index.js';
 import {
   TetherServerError,
   TetherServerErrorCode,

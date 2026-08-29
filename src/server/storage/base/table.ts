@@ -1,5 +1,6 @@
 import {
   type ChangeRecord,
+  DEFAULT_TABLE_PERMISSIONS,
   OperationType,
   Permission,
   type SnapshotRecord,
@@ -13,13 +14,7 @@ import type { ApplyChangesOptions, TableStorage } from '../table.js';
 import type { UserStorage } from '../user.js';
 import type { BaseStorage } from './storage.js';
 
-/** Default table permission policy if not specified. */
-export const DEFAULT_TABLE_PERMISSIONS: Required<TablePermissions> = {
-  create: Permission.Authenticated,
-  read: Permission.Owner,
-  update: Permission.Owner,
-  delete: Permission.Owner,
-};
+export { DEFAULT_TABLE_PERMISSIONS };
 
 /**
  * Common abstract base class for TableStorage implementations.
@@ -34,7 +29,11 @@ export abstract class TableBaseStorage<
     permissions: { ...DEFAULT_TABLE_PERMISSIONS },
   };
 
-  constructor(name: string, storage: TStorage, settings: TableSettings = {}) {
+  constructor(
+    name: string,
+    storage: TStorage,
+    settings: Partial<TableSettings> = {},
+  ) {
     this.name = name;
     this.storage = storage;
     this.mergeSettings(settings);
@@ -133,14 +132,25 @@ export abstract class TableBaseStorage<
   // -- Private Helpers --------------------------------------------------------
 
   private mergeSettings(settings: Partial<TableSettings>): TableSettings {
-    this.settings = {
+    const permissions: TablePermissions = {
+      ...this.settings.permissions,
+      ...settings.permissions,
+    };
+    const updated: TableSettings = {
       ...this.settings,
       ...settings,
-      permissions: {
-        ...this.settings.permissions,
-        ...settings.permissions,
-      },
+      permissions,
     };
+    if (settings.maxRecords === 0) {
+      delete updated.maxRecords;
+    }
+    if (settings.maxRecordSizeBytes === 0) {
+      delete updated.maxRecordSizeBytes;
+    }
+    if (settings.maxHistoryEntries === 0) {
+      delete updated.maxHistoryEntries;
+    }
+    this.settings = updated;
     return this.settings;
   }
 }
@@ -152,8 +162,7 @@ export abstract class TableBaseStorage<
  * @returns `true` if table read permissions are restricted to owner.
  */
 export function isPrivateTable(table: TableStorage): boolean {
-  const readPerm = table.settings.permissions?.read ?? Permission.Owner;
-  return readPerm === Permission.Owner;
+  return table.settings.permissions.read === Permission.Owner;
 }
 
 /**
@@ -273,10 +282,7 @@ export function assertCanMutate(
   change: ChangeRecord,
   existing?: StoredRecord,
 ): void {
-  const perms = {
-    ...DEFAULT_TABLE_PERMISSIONS,
-    ...table.settings.permissions,
-  };
+  const perms = table.settings.permissions;
 
   if (change.op === OperationType.Delete) {
     const perm = perms.delete;
@@ -325,8 +331,7 @@ export function assertCanMutate(
  * @returns `true` if readable.
  */
 export function canRead(table: TableStorage, user?: UserStorage): boolean {
-  const readPerm = table.settings.permissions?.read ?? Permission.Owner;
-  return isPermissionAllowed(readPerm, user, undefined);
+  return isPermissionAllowed(table.settings.permissions.read, user, undefined);
 }
 
 /**
@@ -343,7 +348,7 @@ export function canReadRecord(
   record?: StoredRecord,
 ): boolean {
   if (!record || record.deleted) return false;
-  const readPerm = table.settings.permissions?.read ?? Permission.Owner;
+  const readPerm = table.settings.permissions.read;
   const userId =
     (record as { userId?: string }).userId ??
     (readPerm === Permission.Owner ? '' : undefined);

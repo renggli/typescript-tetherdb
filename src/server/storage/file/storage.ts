@@ -44,7 +44,7 @@ export interface FileUserData {
 
 export interface FileTableData {
   name: string;
-  settings?: TableSettings;
+  settings?: Partial<TableSettings>;
   createdAt: number;
 }
 
@@ -71,7 +71,7 @@ export class FileStorage extends BaseStorage {
 
   async createTable(
     name: string,
-    settings: TableSettings = {},
+    settings: Partial<TableSettings> = {},
   ): Promise<TableStorage> {
     assertNoActiveServerLock(this.baseDir);
     const safeName = validateTableName(name);

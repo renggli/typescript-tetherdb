@@ -26,7 +26,7 @@ export class TableSqliteStorage extends TableBaseStorage<SqliteStorage> {
   constructor(
     name: string,
     storage: SqliteStorage,
-    settings: TableSettings = {},
+    settings: Partial<TableSettings> = {},
   ) {
     super(name, storage, settings);
   }

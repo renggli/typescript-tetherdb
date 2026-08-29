@@ -1,8 +1,9 @@
 import * as crypto from 'node:crypto';
 import * as http from 'node:http';
 import { WebSocketServer } from 'ws';
-import { normalizeBasePath } from '../shared/path.js';
+import { normalizeHttpPath } from '../shared/path.js';
 import type { TableRow, TableSettings } from '../shared/types.js';
+import { encodeAdminToken } from './admin.js';
 import {
   type CorsOptions,
   getHttpStatusForError,
@@ -66,24 +67,26 @@ export interface TetherLogger {
  * Configuration options for the TetherServer.
  */
 export interface TetherServerOptions {
-  /** Custom storage instance. Defaults to MemoryStorage if not defined. */
+  /** Custom storage instance (defaults to in-memory `MemoryStorage`). */
   storage?: Storage;
-  /** Base path for HTTP REST endpoints (defaults to ''). */
-  basePath?: string;
-  /** Path for sync endpoint requests (defaults to basePath or '/tether'). */
+  /** Storage base directory for disk persistence, lockfile, and server metadata. */
+  baseDir?: string;
+  /** Base URL path prefix for HTTP REST endpoints (defaults to `''`, e.g. `'/api'`). */
+  httpPath?: string;
+  /** Path for sync endpoint requests (defaults to `${httpPath}/tether` or `'/tether'`). */
   webSocketPath?: string;
+  /** Secret bearer token required for accessing local admin endpoints. */
+  adminSecret?: string;
   /** Whether user self-registration is allowed via WebSocket (defaults to true). */
   allowRegistration?: boolean;
+  /** CORS options for HTTP endpoints, `false` to disable CORS headers, or `true` for default permissive CORS (defaults to true). */
+  cors?: boolean | CorsOptions;
   /** Rate limiting options for WebSocket handshakes and auth, or `false` to disable rate limiting (defaults to true). */
   rateLimiting?: boolean | RateLimitOptions;
   /** Whether to trust the `X-Forwarded-For` header for resolving client IP addresses (defaults to false). */
   trustProxy?: boolean;
-  /** CORS options for HTTP endpoints, `false` to disable CORS headers, or `true` for default permissive CORS (defaults to true). */
-  cors?: boolean | CorsOptions;
   /** Optional custom logger instance, or `false` to silence internal server logs (defaults to `console`). */
   logger?: TetherLogger | false;
-  /** Optional secret token required for accessing local admin endpoints. */
-  adminSecret?: string;
 }
 
 /**
@@ -114,6 +117,8 @@ export interface RunningServer {
   readonly port: number;
   /** Root URL for the running server (e.g. 'http://127.0.0.1:8080'). */
   readonly url: string;
+  /** Self-contained admin connection token. */
+  readonly adminToken: string;
   /** Closes server listeners cleanly. */
   close(): Promise<void>;
 }
@@ -137,7 +142,8 @@ export async function startServer(
   const addr = httpServer.address();
   const boundPort = typeof addr === 'object' && addr ? addr.port : port;
   const hostLabel = host === '0.0.0.0' ? '127.0.0.1' : host;
-  const url = `http://${hostLabel}:${boundPort}${server.basePath}`;
+  const url = `http://${hostLabel}:${boundPort}${server.httpPath}`;
+  const adminToken = server.getAdminToken(hostLabel);
 
   return {
     server,
@@ -145,6 +151,7 @@ export async function startServer(
     port: boundPort,
     host,
     url,
+    adminToken,
     close: async () => {
       await server.close();
     },
@@ -158,18 +165,19 @@ export async function startServer(
 export class TetherServer {
   /** Underlying storage engine for users and tables. */
   readonly storage: Storage;
-  /** Real-time synchronization connection and broadcast coordinator. */
-  readonly sync: Sync;
-  /** Base path for HTTP REST endpoints. */
-  readonly basePath: string;
+  /** Base URL path prefix for HTTP REST endpoints. */
+  readonly httpPath: string;
   /** Path for WebSocket upgrade requests. */
   readonly webSocketPath: string;
+  /** Real-time synchronization connection and broadcast coordinator. */
+  readonly sync: Sync;
   /** Whether X-Forwarded-For is trusted for resolving client IPs. */
   readonly trustProxy: boolean;
 
   private readonly corsConfig: CorsOptions | null;
   private readonly logger: TetherLogger | null;
   private readonly adminSecret: string;
+  private readonly baseDir?: string;
 
   private _httpServer: http.Server | null = null;
   private _webSocketServer: WebSocketServer | null = null;
@@ -182,10 +190,11 @@ export class TetherServer {
    */
   constructor(options: TetherServerOptions = {}) {
     this.storage = options.storage ?? new MemoryStorage();
-    this.basePath = normalizeBasePath(options.basePath ?? '');
+    this.baseDir = options.baseDir;
+    this.httpPath = normalizeHttpPath(options.httpPath ?? '');
     this.webSocketPath =
       options.webSocketPath ??
-      (this.basePath === '' ? '/tether' : `${this.basePath}/tether`);
+      (this.httpPath === '' ? '/tether' : `${this.httpPath}/tether`);
     const allowRegistration = options.allowRegistration ?? true;
     this.trustProxy = options.trustProxy ?? false;
     this.adminSecret =
@@ -274,6 +283,37 @@ export class TetherServer {
   }
 
   /**
+   * Generates a self-contained base64url admin connection token.
+   *
+   * @param host - Optional host override (e.g. '127.0.0.1').
+   * @returns Base64url-encoded admin token string.
+   */
+  getAdminToken(host?: string): string {
+    let boundHost = host ?? '127.0.0.1';
+    let boundPort = 8080;
+    if (this._httpServer) {
+      const addr = this._httpServer.address();
+      if (typeof addr === 'object' && addr) {
+        boundPort = addr.port;
+        if (!host) {
+          boundHost =
+            addr.address === '0.0.0.0' || addr.address === '::'
+              ? '127.0.0.1'
+              : addr.address;
+        }
+      }
+    }
+    if (boundHost === '0.0.0.0' || boundHost === '::') {
+      boundHost = '127.0.0.1';
+    }
+    return encodeAdminToken({
+      host: boundHost,
+      port: boundPort,
+      secret: this.adminSecret,
+    });
+  }
+
+  /**
    * Starts the HTTP and WebSocket server listening on the specified port and host.
    *
    * @param port - Port number to bind (defaults to 8080).
@@ -281,7 +321,7 @@ export class TetherServer {
    * @returns The active Node.js HTTP server instance.
    */
   async listen(port = 8080, host = '0.0.0.0'): Promise<http.Server> {
-    this.acquireLockIfPersistent(port, host);
+    this.acquireLock(port, host);
 
     return new Promise<http.Server>((resolve, reject) => {
       this._httpServer = http.createServer(async (req, res) => {
@@ -297,7 +337,7 @@ export class TetherServer {
           const actualPort =
             typeof addr === 'object' && addr ? addr.port : port;
           if (actualPort !== port) {
-            this.acquireLockIfPersistent(actualPort, host);
+            this.acquireLock(actualPort, host);
           }
           resolve(this._httpServer);
         }
@@ -403,7 +443,7 @@ export class TetherServer {
         typeof addr === 'object' && addr && 'address' in addr
           ? (addr.address as string)
           : '127.0.0.1';
-      this.acquireLockIfPersistent(port, host);
+      this.acquireLock(port, host);
     };
 
     if (server.listening) {
@@ -473,17 +513,17 @@ export class TetherServer {
     }
 
     try {
-      if (method === 'GET' && url.pathname === `${this.basePath}/health`) {
+      if (method === 'GET' && url.pathname === `${this.httpPath}/health`) {
         handleHealth(req, res, this.corsConfig);
         return true;
       }
 
-      if (method === 'GET' && url.pathname === `${this.basePath}/ready`) {
+      if (method === 'GET' && url.pathname === `${this.httpPath}/ready`) {
         await handleReady(req, res, this.storage, this.corsConfig, this.logger);
         return true;
       }
 
-      if (method === 'GET' && url.pathname === `${this.basePath}/metrics`) {
+      if (method === 'GET' && url.pathname === `${this.httpPath}/metrics`) {
         await handleMetrics(
           req,
           res,
@@ -494,8 +534,8 @@ export class TetherServer {
         return true;
       }
 
-      if (url.pathname.startsWith(`${this.basePath}/admin`)) {
-        return await handleAdminRequest(req, res, url, this.basePath, {
+      if (url.pathname.startsWith(`${this.httpPath}/admin`)) {
+        return await handleAdminRequest(req, res, url, this.httpPath, {
           storage: this.storage,
           adminSecret: this.adminSecret,
           corsConfig: this.corsConfig,
@@ -528,7 +568,7 @@ export class TetherServer {
    */
   async declareTable(
     name: string,
-    settings?: TableSettings,
+    settings?: Partial<TableSettings>,
     rows?: TableRow[],
   ): Promise<TableStorage> {
     const safeName = validateTableName(name);
@@ -578,15 +618,15 @@ export class TetherServer {
     return req.socket.remoteAddress ?? '127.0.0.1';
   }
 
-  private acquireLockIfPersistent(port: number, host: string): void {
-    const storageBaseDir = (
-      this.storage as { baseDir?: string; inMemory?: boolean }
-    ).baseDir;
+  private acquireLock(port: number, host: string): void {
     const isMemory =
       (this.storage as { inMemory?: boolean }).inMemory ??
       this.storage instanceof MemoryStorage;
+    const lockDir =
+      this.baseDir ??
+      (!isMemory ? (this.storage as { baseDir?: string }).baseDir : undefined);
 
-    if (storageBaseDir && !isMemory) {
+    if (lockDir) {
       if (
         this.lockHandle &&
         this.lockHandle.info.port === port &&
@@ -598,7 +638,7 @@ export class TetherServer {
         this.lockHandle.release();
         this.lockHandle = null;
       }
-      this.lockHandle = acquireServerLock(storageBaseDir, {
+      this.lockHandle = acquireServerLock(lockDir, {
         port,
         host,
         backend: this.storage.backend,

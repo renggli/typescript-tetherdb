@@ -81,7 +81,10 @@ export interface Storage {
    * @returns Created TableStorage handle.
    * @throws Error if the table already exists.
    */
-  createTable(name: string, settings?: TableSettings): Promise<TableStorage>;
+  createTable(
+    name: string,
+    settings?: Partial<TableSettings>,
+  ): Promise<TableStorage>;
 
   /**
    * Retrieves a table handle if it exists.

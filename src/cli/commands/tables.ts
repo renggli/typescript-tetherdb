@@ -2,7 +2,16 @@ import {
   TetherServerError,
   TetherServerErrorCode,
 } from '../../server/index.js';
-import { Permission, type TableSettings } from '../../shared/types.js';
+import {
+  DEFAULT_TABLE_PERMISSIONS,
+  Permission,
+  PUBLIC_READ_PERMISSIONS,
+  PUBLIC_READ_WRITE_PERMISSIONS,
+  SHARED_PERMISSIONS,
+  type TablePermissions,
+  type TableSettings,
+  USER_PRIVATE_PERMISSIONS,
+} from '../../shared/types.js';
 import type { AdminTarget } from '../admin.js';
 
 /**
@@ -23,7 +32,7 @@ export async function handleTablesCommand(
     return;
   }
 
-  if (action === 'add' || action === 'create') {
+  if (action === 'add') {
     const tableName = args[2];
     if (!tableName) {
       throw new TetherServerError(
@@ -37,7 +46,7 @@ export async function handleTablesCommand(
     return;
   }
 
-  if (action === 'show' || action === 'get') {
+  if (action === 'show') {
     const tableName = args[2];
     if (!tableName) {
       throw new TetherServerError(
@@ -66,11 +75,12 @@ export async function handleTablesCommand(
     }
     const settings = parseTableOptions(args.slice(3));
     const res = await target.updateTable(tableName, settings);
-    console.log(`Updated table "${tableName}":`, res.settings);
+    console.log(`Updated table "${tableName}"`);
+    printTableDetails(res);
     return;
   }
 
-  if (action === 'rm' || action === 'delete') {
+  if (action === 'rm') {
     const tableName = args[2];
     if (!tableName) {
       throw new TetherServerError(
@@ -89,50 +99,119 @@ export async function handleTablesCommand(
   );
 }
 
-function parsePermission(val: string): Permission {
+// -- Private Helpers --------------------------------------------------------
+
+const PERMISSION_MODES: ReadonlyMap<string, TablePermissions> = new Map([
+  ['user-private', USER_PRIVATE_PERMISSIONS],
+  ['public-read', PUBLIC_READ_PERMISSIONS],
+  ['public-read-write', PUBLIC_READ_WRITE_PERMISSIONS],
+  ['shared', SHARED_PERMISSIONS],
+]);
+
+function parsePermissionMode(val: string): TablePermissions {
   const normalized = val.toLowerCase();
-  if (normalized === 'everybody' || normalized === 'public')
-    return Permission.Everybody;
-  if (normalized === 'authenticated' || normalized === 'auth')
-    return Permission.Authenticated;
-  if (normalized === 'owner') return Permission.Owner;
-  if (normalized === 'nobody' || normalized === 'none')
-    return Permission.Nobody;
+  if (normalized === 'default') return DEFAULT_TABLE_PERMISSIONS;
+  if (normalized === 'public') return PUBLIC_READ_WRITE_PERMISSIONS;
+  const mode = PERMISSION_MODES.get(normalized);
+  if (mode) return mode;
+  const validModes = Array.from(PERMISSION_MODES.keys())
+    .map((k) => `"${k}"`)
+    .join(', ');
   throw new TetherServerError(
     TetherServerErrorCode.InvalidInput,
-    `Invalid permission value: "${val}". Expected "everybody", "authenticated", "owner", or "nobody"`,
+    `Invalid permission mode: "${val}". Expected one of ${validModes}, or "default"`,
   );
 }
 
-function parseTableOptions(args: string[]): TableSettings {
-  const settings: TableSettings = {};
+function getPermissionMode(permissions?: TablePermissions): string {
+  const perms = permissions ?? DEFAULT_TABLE_PERMISSIONS;
+  for (const [mode, preset] of PERMISSION_MODES) {
+    if (
+      perms.create === preset.create &&
+      perms.read === preset.read &&
+      perms.update === preset.update &&
+      perms.delete === preset.delete
+    ) {
+      return mode;
+    }
+  }
+  return 'custom';
+}
+
+function parsePermission(
+  val: string,
+  action: keyof TablePermissions,
+): Permission {
+  const normalized = val.toLowerCase();
+  if (normalized === 'default') return DEFAULT_TABLE_PERMISSIONS[action];
+  if (normalized === 'everybody') return Permission.Everybody;
+  if (normalized === 'authenticated') return Permission.Authenticated;
+  if (normalized === 'owner') return Permission.Owner;
+  if (normalized === 'nobody') return Permission.Nobody;
+  throw new TetherServerError(
+    TetherServerErrorCode.InvalidInput,
+    `Invalid permission value: "${val}". Expected "everybody", "authenticated", "owner", "nobody", or "default"`,
+  );
+}
+
+function parseNumericLimit(val: string): number {
+  const normalized = val.toLowerCase();
+  if (normalized === 'default' || normalized === 'none' || normalized === '0') {
+    return 0;
+  }
+  const num = Number.parseInt(val, 10);
+  if (Number.isNaN(num) || num < 0) {
+    throw new TetherServerError(
+      TetherServerErrorCode.InvalidInput,
+      `Invalid numeric limit: "${val}". Expected a positive integer, "0", or "default"`,
+    );
+  }
+  return num;
+}
+
+function parseTableOptions(args: string[]): Partial<TableSettings> {
+  const settings: Partial<TableSettings> = {};
   for (const arg of args) {
-    if (arg.startsWith('--create=')) {
+    if (arg === '--reset' || arg === '--defaults') {
+      settings.permissions = { ...DEFAULT_TABLE_PERMISSIONS };
+      settings.maxRecords = 0;
+      settings.maxRecordSizeBytes = 0;
+      settings.maxHistoryEntries = 0;
+    } else if (arg.startsWith('--mode=')) {
       settings.permissions = {
         ...settings.permissions,
-        create: parsePermission(arg.slice(9)),
+        ...parsePermissionMode(arg.slice(7)),
+      };
+    } else if (arg.startsWith('--create=')) {
+      settings.permissions = {
+        ...DEFAULT_TABLE_PERMISSIONS,
+        ...settings.permissions,
+        create: parsePermission(arg.slice(9), 'create'),
       };
     } else if (arg.startsWith('--read=')) {
       settings.permissions = {
+        ...DEFAULT_TABLE_PERMISSIONS,
         ...settings.permissions,
-        read: parsePermission(arg.slice(7)),
+        read: parsePermission(arg.slice(7), 'read'),
       };
     } else if (arg.startsWith('--update=')) {
       settings.permissions = {
+        ...DEFAULT_TABLE_PERMISSIONS,
         ...settings.permissions,
-        update: parsePermission(arg.slice(9)),
+        update: parsePermission(arg.slice(9), 'update'),
       };
     } else if (arg.startsWith('--delete=')) {
       settings.permissions = {
+        ...DEFAULT_TABLE_PERMISSIONS,
         ...settings.permissions,
-        delete: parsePermission(arg.slice(9)),
+        delete: parsePermission(arg.slice(9), 'delete'),
       };
     } else if (arg.startsWith('--max-records=')) {
-      settings.maxRecords = Number.parseInt(arg.slice(14), 10);
+      settings.maxRecords = parseNumericLimit(arg.slice(14));
     } else if (arg.startsWith('--max-size=')) {
-      settings.maxRecordSizeBytes = Number.parseInt(arg.slice(11), 10);
+      settings.maxRecordSizeBytes = parseNumericLimit(arg.slice(11));
     } else if (arg.startsWith('--max-history=')) {
-      settings.maxHistoryEntries = Number.parseInt(arg.slice(14), 10);
+      settings.maxHistoryEntries = parseNumericLimit(arg.slice(14));
     }
   }
   return settings;
@@ -147,8 +226,8 @@ function printTables(
   }
   console.log(`Tables (${tables.length}):`);
   for (const t of tables) {
-    const read = t.settings?.permissions?.read ?? Permission.Owner;
-    console.log(`  • ${t.name} (read: ${read})`);
+    const mode = getPermissionMode(t.settings?.permissions);
+    console.log(`  • ${t.name} (${mode})`);
   }
 }
 
@@ -157,9 +236,11 @@ function printTableDetails(table: {
   settings?: TableSettings;
 }): void {
   console.log(`Table "${table.name}":`);
-  const perms = table.settings?.permissions;
+  const perms = table.settings?.permissions ?? DEFAULT_TABLE_PERMISSIONS;
+  const mode = getPermissionMode(perms);
+  console.log(`  Mode:         ${mode}`);
   console.log(
-    `  Permissions:  create=${perms?.create ?? Permission.Authenticated}, read=${perms?.read ?? Permission.Owner}, update=${perms?.update ?? Permission.Owner}, delete=${perms?.delete ?? Permission.Owner}`,
+    `  Permissions:  create=${perms.create}, read=${perms.read}, update=${perms.update}, delete=${perms.delete}`,
   );
   if (table.settings?.maxRecords) {
     console.log(`  Max Records:  ${table.settings.maxRecords}`);

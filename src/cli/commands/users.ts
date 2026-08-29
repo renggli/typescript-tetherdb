@@ -20,7 +20,7 @@ export async function handleUsersCommand(
     return;
   }
 
-  if (action === 'add' || action === 'create') {
+  if (action === 'add') {
     if (!arg1) {
       throw new TetherServerError(
         TetherServerErrorCode.ConfigurationError,
@@ -38,7 +38,7 @@ export async function handleUsersCommand(
     return;
   }
 
-  if (action === 'rm' || action === 'delete') {
+  if (action === 'rm') {
     if (!arg1) {
       throw new TetherServerError(
         TetherServerErrorCode.ConfigurationError,

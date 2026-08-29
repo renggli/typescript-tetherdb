@@ -19,7 +19,7 @@ export class TableMemoryStorage extends TableBaseStorage<MemoryStorage> {
   constructor(
     name: string,
     storage: MemoryStorage,
-    settings: TableSettings = {},
+    settings: Partial<TableSettings> = {},
   ) {
     super(name, storage, settings);
   }

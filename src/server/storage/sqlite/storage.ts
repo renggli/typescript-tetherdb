@@ -118,7 +118,7 @@ export class SqliteStorage extends BaseStorage {
 
   async createTable(
     name: string,
-    settings: TableSettings = {},
+    settings: Partial<TableSettings> = {},
   ): Promise<TableStorage> {
     const safeName = validateTableName(name);
     const dbHandle = this.getTablesDb();
@@ -151,7 +151,7 @@ export class SqliteStorage extends BaseStorage {
       | undefined;
     if (!row) return undefined;
 
-    let parsedSettings: TableSettings = {};
+    let parsedSettings: Partial<TableSettings> = {};
     if (row.settings) {
       try {
         parsedSettings = JSON.parse(row.settings);
@@ -174,7 +174,7 @@ export class SqliteStorage extends BaseStorage {
 
     const tables: TableStorage[] = [];
     for (const r of rows) {
-      let parsedSettings: TableSettings = {};
+      let parsedSettings: Partial<TableSettings> = {};
       if (r.settings) {
         try {
           parsedSettings = JSON.parse(r.settings);

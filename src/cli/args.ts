@@ -11,6 +11,7 @@ export interface ParsedCliArgs {
   dir: string;
   host: string;
   port: number;
+  token?: string;
 }
 
 /**
@@ -25,6 +26,7 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
   let host = process.env.HOST ?? '0.0.0.0';
   let backend: BackendType = BackendType.Memory;
   let dir = '.data';
+  let token: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -44,8 +46,18 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
       backend = parseBackend(arg.slice(10));
     } else if (arg === '-b' || arg === '--backend') {
       backend = parseBackend(args[++i] ?? '');
+    } else if (arg.startsWith('--memory=')) {
+      backend = BackendType.Memory;
+      token = arg.slice(9);
     } else if (arg === '--memory') {
       backend = BackendType.Memory;
+      if (args[i + 1] && !args[i + 1].startsWith('-')) {
+        token = args[++i];
+      }
+    } else if (arg.startsWith('--token=')) {
+      token = arg.slice(8);
+    } else if (arg === '-t' || arg === '--token') {
+      token = args[++i];
     } else if (arg.startsWith('--file=')) {
       backend = BackendType.File;
       dir = arg.slice(7);
@@ -63,6 +75,9 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
         dir = args[++i];
       }
     } else if (
+      arg.startsWith('--mode=') ||
+      arg === '--reset' ||
+      arg === '--defaults' ||
       arg.startsWith('--create=') ||
       arg.startsWith('--read=') ||
       arg.startsWith('--update=') ||
@@ -70,7 +85,8 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
       arg.startsWith('--max-records=') ||
       arg.startsWith('--max-size=') ||
       arg.startsWith('--max-history=') ||
-      arg.startsWith('--user=')
+      arg.startsWith('--user=') ||
+      arg.startsWith('--app=')
     ) {
       positionalArgs.push(arg);
     } else if (arg.startsWith('-')) {
@@ -83,14 +99,7 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
     }
   }
 
-  let command = positionalArgs[0] ?? 'serve';
-  if (command === 'table') command = 'tables';
-  else if (command === 'user') command = 'users';
-  else if (command === 'record') command = 'records';
-
-  if (positionalArgs.length > 0) {
-    positionalArgs[0] = command;
-  }
+  const command = positionalArgs[0] ?? 'serve';
 
   return {
     command,
@@ -99,6 +108,7 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
     dir,
     host,
     port,
+    token,
   };
 }
 

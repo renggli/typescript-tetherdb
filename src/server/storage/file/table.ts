@@ -20,7 +20,7 @@ export class TableFileStorage extends TableBaseStorage<FileStorage> {
   constructor(
     name: string,
     storage: FileStorage,
-    settings: TableSettings = {},
+    settings: Partial<TableSettings> = {},
   ) {
     super(name, storage, settings);
   }

@@ -13,6 +13,60 @@ import type {
 } from './storage/storage.js';
 
 /**
+ * Connection details encoded in an admin connection token.
+ */
+export interface AdminTokenPayload {
+  /** Host address where the server is reachable. */
+  host: string;
+  /** Port number where the server is listening. */
+  port: number;
+  /** Secret authentication key for administrative HTTP routes. */
+  secret: string;
+}
+
+/**
+ * Encodes server connection details into a compact base64url admin token.
+ *
+ * @param payload - Admin connection details (host, port, secret).
+ * @returns Encoded token string.
+ */
+export function encodeAdminToken(payload: AdminTokenPayload): string {
+  return Buffer.from(JSON.stringify(payload)).toString('base64url');
+}
+
+/**
+ * Decodes an admin token back into connection details.
+ *
+ * @param token - Base64url-encoded admin token.
+ * @returns Decoded connection details.
+ * @throws TetherServerError if token is invalid or malformed.
+ */
+export function decodeAdminToken(token: string): AdminTokenPayload {
+  try {
+    const json = Buffer.from(token, 'base64url').toString('utf8');
+    const parsed = JSON.parse(json);
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      typeof parsed.port === 'number' &&
+      typeof parsed.secret === 'string'
+    ) {
+      return {
+        host: typeof parsed.host === 'string' ? parsed.host : '127.0.0.1',
+        port: parsed.port,
+        secret: parsed.secret,
+      };
+    }
+  } catch {
+    // fallthrough
+  }
+  throw new TetherServerError(
+    TetherServerErrorCode.InvalidInput,
+    `Invalid admin token: "${token}"`,
+  );
+}
+
+/**
  * Common administrative interface for inspecting and managing a TetherDB database,
  * whether connected to a running remote server over HTTP or operating directly on local offline storage.
  */
@@ -21,24 +75,24 @@ export interface AdminTarget {
   getStatus(): Promise<StorageStatus>;
 
   /** Retrieves all table definitions. */
-  getTables(): Promise<Array<{ name: string; settings?: TableSettings }>>;
+  getTables(): Promise<Array<{ name: string; settings: TableSettings }>>;
 
   /** Retrieves a specific table definition if it exists. */
   getTable(
     name: string,
-  ): Promise<{ name: string; settings?: TableSettings } | undefined>;
+  ): Promise<{ name: string; settings: TableSettings } | undefined>;
 
   /** Creates a new table with optional settings. */
   createTable(
     name: string,
-    settings?: TableSettings,
-  ): Promise<{ name: string; settings?: TableSettings }>;
+    settings?: Partial<TableSettings>,
+  ): Promise<{ name: string; settings: TableSettings }>;
 
   /** Updates settings on an existing table. */
   updateTable(
     name: string,
     settings: Partial<TableSettings>,
-  ): Promise<{ name: string; settings?: TableSettings }>;
+  ): Promise<{ name: string; settings: TableSettings }>;
 
   /** Deletes a table and all its stored records. */
   deleteTable(name: string): Promise<{ deleted: boolean }>;
@@ -126,15 +180,13 @@ export class AdminClient implements AdminTarget {
     return this.request('GET', '/admin/status');
   }
 
-  async getTables(): Promise<
-    Array<{ name: string; settings?: TableSettings }>
-  > {
+  async getTables(): Promise<Array<{ name: string; settings: TableSettings }>> {
     return this.request('GET', '/admin/tables');
   }
 
   async getTable(
     name: string,
-  ): Promise<{ name: string; settings?: TableSettings } | undefined> {
+  ): Promise<{ name: string; settings: TableSettings } | undefined> {
     try {
       return await this.request(
         'GET',
@@ -147,15 +199,15 @@ export class AdminClient implements AdminTarget {
 
   async createTable(
     name: string,
-    settings?: TableSettings,
-  ): Promise<{ name: string; settings?: TableSettings }> {
+    settings?: Partial<TableSettings>,
+  ): Promise<{ name: string; settings: TableSettings }> {
     return this.request('POST', '/admin/tables', { name, settings });
   }
 
   async updateTable(
     name: string,
     settings: Partial<TableSettings>,
-  ): Promise<{ name: string; settings?: TableSettings }> {
+  ): Promise<{ name: string; settings: TableSettings }> {
     return this.request('PATCH', `/admin/tables/${encodeURIComponent(name)}`, {
       settings,
     });
@@ -320,24 +372,22 @@ export class LocalAdminTarget implements AdminTarget {
     return this.storage.getStatus();
   }
 
-  async getTables(): Promise<
-    Array<{ name: string; settings?: TableSettings }>
-  > {
+  async getTables(): Promise<Array<{ name: string; settings: TableSettings }>> {
     const tables = await this.storage.getTables();
     return tables.map((t) => ({ name: t.name, settings: t.settings }));
   }
 
   async getTable(
     name: string,
-  ): Promise<{ name: string; settings?: TableSettings } | undefined> {
+  ): Promise<{ name: string; settings: TableSettings } | undefined> {
     const table = await this.storage.getTable(name);
     return table ? { name: table.name, settings: table.settings } : undefined;
   }
 
   async createTable(
     name: string,
-    settings?: TableSettings,
-  ): Promise<{ name: string; settings?: TableSettings }> {
+    settings?: Partial<TableSettings>,
+  ): Promise<{ name: string; settings: TableSettings }> {
     const table = await this.storage.createTable(name, settings);
     return { name: table.name, settings: table.settings };
   }
@@ -345,7 +395,7 @@ export class LocalAdminTarget implements AdminTarget {
   async updateTable(
     name: string,
     settings: Partial<TableSettings>,
-  ): Promise<{ name: string; settings?: TableSettings }> {
+  ): Promise<{ name: string; settings: TableSettings }> {
     const table = await this.storage.getTable(name);
     if (!table) {
       throw new TetherServerError(

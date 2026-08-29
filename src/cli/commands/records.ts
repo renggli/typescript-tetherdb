@@ -33,7 +33,7 @@ export async function handleRecordsCommand(
     return;
   }
 
-  if (action === 'put' || action === 'set') {
+  if (action === 'put') {
     const recordId = args[3];
     const rawData = args[4];
     if (!recordId) {
@@ -57,7 +57,7 @@ export async function handleRecordsCommand(
     return;
   }
 
-  if (action === 'rm' || action === 'delete') {
+  if (action === 'rm') {
     const recordId = args[3];
     if (!recordId) {
       throw new TetherServerError(

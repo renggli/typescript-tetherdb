@@ -131,9 +131,9 @@ describe.each(storageDescriptors)(
       });
     });
 
-    describe('TetherServerOptions (basePath & webSocketPath)', () => {
-      it('should default basePath to empty string and webSocketPath to /tether', async () => {
-        expect(server.basePath).toBe('');
+    describe('TetherServerOptions (httpPath & webSocketPath)', () => {
+      it('should default httpPath to empty string and webSocketPath to /tether', async () => {
+        expect(server.httpPath).toBe('');
         expect(server.webSocketPath).toBe('/tether');
         const httpServer = await server.listen(0, '127.0.0.1');
         const addr = httpServer.address();
@@ -143,13 +143,13 @@ describe.each(storageDescriptors)(
         expect(res.status).toBe(200);
       });
 
-      it('should prefix all REST endpoints and default WebSocket path when basePath is configured', async () => {
+      it('should prefix all REST endpoints and default WebSocket path when httpPath is configured', async () => {
         const customCtx = await createBackend();
         const customServer = new TetherServer({
-          basePath: '/api/v1',
+          httpPath: '/api/v1',
           storage: customCtx.storage,
         });
-        expect(customServer.basePath).toBe('/api/v1');
+        expect(customServer.httpPath).toBe('/api/v1');
         expect(customServer.webSocketPath).toBe('/api/v1/tether');
 
         const httpServer = await customServer.listen(0, '127.0.0.1');
@@ -157,7 +157,7 @@ describe.each(storageDescriptors)(
         const port = typeof addr === 'object' && addr ? addr.port : 8080;
 
         try {
-          // Health on root path should return 404 when basePath is /api/v1
+          // Health on root path should return 404 when httpPath is /api/v1
           const rootRes = await fetch(`http://127.0.0.1:${port}/health`);
           expect(rootRes.status).toBe(404);
 
@@ -174,28 +174,28 @@ describe.each(storageDescriptors)(
 
       it('should allow explicitly overriding webSocketPath', () => {
         const customWsServer = new TetherServer({
-          basePath: '/api/v1',
+          httpPath: '/api/v1',
           webSocketPath: '/custom-sync-channel',
         });
-        expect(customWsServer.basePath).toBe('/api/v1');
+        expect(customWsServer.httpPath).toBe('/api/v1');
         expect(customWsServer.webSocketPath).toBe('/custom-sync-channel');
       });
 
       it('should normalize paths with missing leading slash and trailing slashes', () => {
-        const s1 = new TetherServer({ basePath: 'api' });
-        expect(s1.basePath).toBe('/api');
+        const s1 = new TetherServer({ httpPath: 'api' });
+        expect(s1.httpPath).toBe('/api');
         expect(s1.webSocketPath).toBe('/api/tether');
 
-        const s2 = new TetherServer({ basePath: '/api/' });
-        expect(s2.basePath).toBe('/api');
+        const s2 = new TetherServer({ httpPath: '/api/' });
+        expect(s2.httpPath).toBe('/api');
         expect(s2.webSocketPath).toBe('/api/tether');
 
-        const s3 = new TetherServer({ basePath: '/' });
-        expect(s3.basePath).toBe('');
+        const s3 = new TetherServer({ httpPath: '/' });
+        expect(s3.httpPath).toBe('');
         expect(s3.webSocketPath).toBe('/tether');
 
-        const s4 = new TetherServer({ basePath: '' });
-        expect(s4.basePath).toBe('');
+        const s4 = new TetherServer({ httpPath: '' });
+        expect(s4.httpPath).toBe('');
         expect(s4.webSocketPath).toBe('/tether');
       });
     });

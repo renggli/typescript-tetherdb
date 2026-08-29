@@ -65,7 +65,7 @@ The codebase is organized into five decoupled layers with clear subpath exports:
   - **CLI Runner (`cli.ts`)**: Main dispatch entry point for command line execution.
   - **Argument Parsing (`args.ts`)**: Command line option parsing and validation.
   - **Backend Factory (`backend.ts`)**: Storage engine instantiation for memory, file, and sqlite targets.
-  - **Commands (`commands/`)**: Modular subcommand handlers (`serve.ts`, `status.ts`, `maintenance.ts`, `apps.ts`, `tables.ts`, `users.ts`, `help.ts`).
+  - **Commands (`commands/`)**: Modular subcommand handlers (`serve.ts`, `status.ts`, `stop.ts`, `migrate/`, `maintenance.ts`, `tables.ts`, `records.ts`, `users.ts`, `help.ts`).
 - **Vite Layer (`src/vite/`)**:
   - Exported as `tetherdb/vite`.
   - **Vite Plugin (`index.ts`)**: Zero-config local development integration (`tetherPlugin`) running embedded WebSocket sync and REST auth directly within Vite dev and preview servers.

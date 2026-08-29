@@ -23,7 +23,7 @@ export interface TableRow<T = unknown> {
  */
 export interface TableSettings {
   /** Table CRUD permissions. */
-  permissions?: TablePermissions;
+  permissions: TablePermissions;
   /** Initial rows to populate declaratively on table creation/startup. */
   rows?: TableRow[];
   /** Maximum number of active records per partition or shared table. */

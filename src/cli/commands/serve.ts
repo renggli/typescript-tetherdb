@@ -1,6 +1,14 @@
 import * as path from 'node:path';
 import { type RunningServer, startServer } from '../../server/server.js';
 import { BackendType, type Storage } from '../../server/storage/index.js';
+import {
+  ANSI_BOLD,
+  ANSI_COLOR_1,
+  ANSI_CYAN,
+  ANSI_DIM,
+  ANSI_RESET,
+  getBanner,
+} from '../banner.js';
 
 /**
  * Handles the 'serve' command to launch the HTTP and WebSocket synchronization server.
@@ -19,20 +27,32 @@ export async function handleServeCommand(
   port: number,
   host: string,
 ): Promise<RunningServer> {
-  const running = await startServer({ port, host, storage });
+  const baseDir = backend === BackendType.Memory ? undefined : dir;
+  const running = await startServer({ port, host, storage, baseDir });
   const hostLabel = running.host === '0.0.0.0' ? 'localhost' : running.host;
   const storageInfo =
     backend === BackendType.Memory
       ? 'in-memory (ephemeral)'
       : `${backend} (${path.resolve(dir)})`;
+  const httpUrl = `http://${hostLabel}:${running.port}${running.server.httpPath}`;
+  const wsUrl = `ws://${hostLabel}:${running.port}${running.server.webSocketPath}`;
 
+  console.log(`\n${getBanner()}\n`);
   console.log(
-    `TetherDB server listening at: http://${hostLabel}:${running.port}${running.server.basePath}`,
+    `  ${ANSI_COLOR_1}➜${ANSI_RESET}  ${ANSI_BOLD}HTTP API:${ANSI_RESET}     ${ANSI_CYAN}${httpUrl}${ANSI_RESET}`,
   );
   console.log(
-    `Sync endpoint: ws://${hostLabel}:${running.port}${running.server.webSocketPath}`,
+    `  ${ANSI_COLOR_1}➜${ANSI_RESET}  ${ANSI_BOLD}WebSocket:${ANSI_RESET}    ${ANSI_CYAN}${wsUrl}${ANSI_RESET}`,
   );
-  console.log(`Storage backend: ${storageInfo}`);
+  console.log(
+    `  ${ANSI_COLOR_1}➜${ANSI_RESET}  ${ANSI_BOLD}Storage:${ANSI_RESET}      ${storageInfo}`,
+  );
+  if (backend === BackendType.Memory) {
+    console.log(
+      `  ${ANSI_COLOR_1}➜${ANSI_RESET}  ${ANSI_BOLD}Admin Token:${ANSI_RESET}  ${ANSI_DIM}${running.adminToken}${ANSI_RESET}`,
+    );
+  }
+  console.log('');
 
   const shutdown = async () => {
     console.log('Stopping TetherDB server...');

@@ -119,7 +119,7 @@ export async function buildTableSummaries(
     const records = await table.getAllRecords();
     summaries.push({
       name: table.name,
-      read: table.settings.permissions?.read ?? 'owner',
+      read: table.settings.permissions.read,
       recordsCount: records.length,
     });
   }
