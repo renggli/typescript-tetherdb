@@ -351,7 +351,7 @@ function runStorageTestSuite(createStorage: () => Storage) {
     const isSqlite = (await storage.getStatus()).type === 'sqlite';
 
     if (isSqlite) {
-      const checkpointRes = await storage.checkpoint('todos');
+      const checkpointRes = await storage.checkpoint();
       expect(checkpointRes.action).toBe('checkpoint');
       expect(checkpointRes.affectedCount).toBeGreaterThan(0);
 
@@ -384,7 +384,7 @@ function runStorageTestSuite(createStorage: () => Storage) {
     }
 
     // Prune keeping 2
-    const pruneRes = await storage.prune(2, 'todos');
+    const pruneRes = await storage.prune(2);
     expect(pruneRes.action).toBe('prune');
     expect(pruneRes.affectedCount).toBeGreaterThanOrEqual(3);
   });
@@ -438,7 +438,7 @@ function runStorageTestSuite(createStorage: () => Storage) {
       ]);
     }
 
-    await storage.prune(2, 'todos');
+    await storage.prune(2);
 
     // Request from sequence 1 (which was pruned)
     const res = await storage.getChangesSince(user, 1);

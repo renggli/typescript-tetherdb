@@ -17,9 +17,9 @@ Commands:
   serve (default)                              Start HTTP and WebSocket synchronization server
   status                                       Display storage and database statistics
   stop                                         Stop the running TetherDB server
-  maintenance checkpoint [table]               Truncate WAL files for SQLite databases
+  maintenance checkpoint                       Truncate WAL files for SQLite databases
   maintenance vacuum                           Reclaim disk space and defragment database files
-  maintenance prune [table] [keepCount]        Prune changelogs older than retention threshold
+  maintenance prune [keepCount]                Prune changelogs older than retention threshold
   migrate [--app=<appId>]                      Migrate offline database from v1 (multi-app) to v2 format
   tables [list]                                List all tables
   tables add <table_name> [options]            Create a table (--mode=..., --read=..., --max-records=...)

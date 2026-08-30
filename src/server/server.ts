@@ -13,7 +13,7 @@ import { acquireServerLock, type ServerLockHandle } from './shared/lock.js';
 import { RateLimiter } from './shared/rate-limiter.js';
 import { validateTableName } from './shared/validate.js';
 import { MemoryStorage } from './storage/memory.js';
-import type { Storage } from './storage/storage.js';
+import { type Storage, StorageType } from './storage/storage.js';
 import type { Table } from './storage/table.js';
 import type { User } from './storage/user.js';
 import { Sync } from './sync.js';
@@ -96,10 +96,6 @@ export interface StartServerOptions extends TetherServerOptions {
   port?: number;
   /** Hostname or IP address to bind against (defaults to '0.0.0.0'). */
   host?: string;
-  /** Filepath to write the server process lockfile to (defaults to `server.lock` in backend base directory). */
-  lockFile?: string;
-  /** Filepath to persist or read the server secret key (defaults to `.secret` in backend base directory). */
-  keyFile?: string;
 }
 
 /**
@@ -627,12 +623,11 @@ export class TetherServer {
   }
 
   private acquireLock(port: number, host: string): void {
-    const isMemory =
-      (this.storage as { inMemory?: boolean }).inMemory ??
-      this.storage instanceof MemoryStorage;
     const lockDir =
       this.baseDir ??
-      (!isMemory ? (this.storage as { baseDir?: string }).baseDir : undefined);
+      (this.storage.type !== StorageType.Memory
+        ? this.storage.baseDir
+        : undefined);
 
     if (lockDir) {
       if (

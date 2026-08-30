@@ -208,12 +208,12 @@ describe('SqliteStorage', () => {
     }
 
     // Prune keeping 3
-    const pruneRes = await context.backend.prune(3, 'history');
+    const pruneRes = await context.backend.prune(3);
     expect(pruneRes.action).toBe('prune');
     expect(pruneRes.affectedCount).toBe(7);
 
     // Pruning again with same limit should prune 0 entries
-    const pruneRes2 = await context.backend.prune(3, 'history');
+    const pruneRes2 = await context.backend.prune(3);
     expect(pruneRes2.affectedCount).toBe(0);
   });
 

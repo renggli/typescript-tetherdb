@@ -83,15 +83,14 @@ export async function handleAdminRequest(
     const body = (await readJsonBody(req)) as {
       action: 'checkpoint' | 'vacuum' | 'prune';
       keepCount?: number;
-      tableName?: string;
     };
     let result: MaintenanceResult;
     if (body.action === 'checkpoint') {
-      result = await ctx.storage.checkpoint(body.tableName);
+      result = await ctx.storage.checkpoint();
     } else if (body.action === 'vacuum') {
       result = await ctx.storage.vacuum();
     } else if (body.action === 'prune') {
-      result = await ctx.storage.prune(body.keepCount, body.tableName);
+      result = await ctx.storage.prune(body.keepCount);
     } else {
       throw new TetherServerError(
         TetherServerErrorCode.InvalidInput,

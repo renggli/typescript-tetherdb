@@ -51,6 +51,7 @@ export interface MemoryStorageOptions extends StorageOptions {}
  */
 export class MemoryStorage extends Storage {
   readonly type = StorageType.Memory;
+  readonly baseDir = undefined;
   readonly secret: string;
   override readonly options: MemoryStorageOptions;
   private globalSeq = 0;
@@ -439,7 +440,7 @@ export class MemoryStorage extends Storage {
     return this.globalSeq;
   }
 
-  async checkpoint(_tableName?: string): Promise<MaintenanceResult> {
+  async checkpoint(): Promise<MaintenanceResult> {
     throw new TetherServerError(
       TetherServerErrorCode.NotSupported,
       'Checkpoint operation is not supported by memory storage',
@@ -453,58 +454,28 @@ export class MemoryStorage extends Storage {
     );
   }
 
-  async prune(
-    keepCount?: number,
-    tableName?: string,
-  ): Promise<MaintenanceResult> {
+  async prune(keepCount?: number): Promise<MaintenanceResult> {
     const limit = keepCount ?? this.options.maxHistoryEntries ?? 1000;
     let pruned = 0;
 
-    if (!tableName) {
-      if (this.sharedState.changelog.length > limit) {
-        pruned += this.sharedState.changelog.length - limit;
-        this.sharedState.changelog = this.sharedState.changelog.slice(-limit);
-        if (this.sharedState.changelog.length > 0) {
-          this.sharedState.minSeq = this.sharedState.changelog[0].seq;
-        }
-      }
-      for (const state of this.userStates.values()) {
-        if (state.changelog.length > limit) {
-          pruned += state.changelog.length - limit;
-          state.changelog = state.changelog.slice(-limit);
-          if (state.changelog.length > 0) {
-            state.minSeq = state.changelog[0].seq;
-          }
-        }
-      }
-    } else {
-      const filterChangelog = (log: InternalChangeRecord[]) => {
-        const matching = log.filter((c) => c.table === tableName);
-        if (matching.length > limit) {
-          const toRemove = matching.slice(0, matching.length - limit);
-          const removeSet = new Set(toRemove);
-          pruned += toRemove.length;
-          return log.filter((c) => !removeSet.has(c));
-        }
-        return log;
-      };
-
-      this.sharedState.changelog = filterChangelog(this.sharedState.changelog);
-      if (this.sharedState.changelog.length > 0) {
-        this.sharedState.minSeq = this.sharedState.changelog[0].seq;
-      }
-      for (const state of this.userStates.values()) {
-        state.changelog = filterChangelog(state.changelog);
+    const pruneLog = (state: StatePartition) => {
+      if (state.changelog.length > limit) {
+        pruned += state.changelog.length - limit;
+        state.changelog = state.changelog.slice(-limit);
         if (state.changelog.length > 0) {
           state.minSeq = state.changelog[0].seq;
         }
       }
+    };
+
+    pruneLog(this.sharedState);
+    for (const state of this.userStates.values()) {
+      pruneLog(state);
     }
 
     return {
       action: 'prune',
       type: this.type,
-      tableName,
       affectedCount: pruned,
       message: `Pruned ${pruned} changelog entries in memory`,
     };

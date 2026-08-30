@@ -1,5 +1,3 @@
-import type { ChangeRecord, StoredRecord } from './types/records.js';
-
 /**
  * Determines whether an incoming mutation should overwrite an existing stored record
  * using Last-Write-Wins (LWW) conflict resolution.
@@ -15,13 +13,8 @@ import type { ChangeRecord, StoredRecord } from './types/records.js';
  * @returns `true` if the incoming change wins the conflict and should overwrite the existing record; otherwise `false`.
  */
 export function shouldOverwrite(
-  incoming: Pick<ChangeRecord, 'timestamp'> & {
-    clientId?: string;
-    version?: number;
-  },
-  existing?: Pick<StoredRecord, 'timestamp' | 'version'> & {
-    clientId?: string;
-  },
+  incoming: { timestamp: number; clientId?: string },
+  existing?: { timestamp: number; clientId?: string },
 ): boolean {
   if (!existing) return true;
 

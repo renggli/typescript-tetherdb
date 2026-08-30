@@ -484,10 +484,10 @@ export class FileStorage extends Storage {
     return maxSeq;
   }
 
-  async checkpoint(tableName?: string): Promise<MaintenanceResult> {
+  async checkpoint(): Promise<MaintenanceResult> {
     throw new TetherServerError(
       TetherServerErrorCode.NotSupported,
-      `Checkpoint operation is not supported by file storage${tableName ? ` (table: ${tableName})` : ''}`,
+      'Checkpoint operation is not supported by file storage',
     );
   }
 
@@ -498,10 +498,7 @@ export class FileStorage extends Storage {
     );
   }
 
-  async prune(
-    keepCount?: number,
-    tableName?: string,
-  ): Promise<MaintenanceResult> {
+  async prune(keepCount?: number): Promise<MaintenanceResult> {
     const keep = keepCount ?? this.options.maxHistoryEntries ?? 1000;
     const users = await this.getUsers();
     const partitions = ['__shared__', ...users.map((u) => u.userId)];
@@ -518,7 +515,6 @@ export class FileStorage extends Storage {
     return {
       action: 'prune',
       type: StorageType.File,
-      tableName,
       affectedCount: totalPruned,
       message: `Prune completed successfully. Removed ${totalPruned} changelog record(s)`,
     };
@@ -526,10 +522,6 @@ export class FileStorage extends Storage {
 
   async close(): Promise<void> {
     this.locks.clear();
-  }
-
-  protected override getBaseDir(): string | undefined {
-    return this.baseDir;
   }
 
   // -- Internal File Helpers --------------------------------------------------

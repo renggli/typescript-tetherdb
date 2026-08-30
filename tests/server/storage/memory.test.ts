@@ -129,7 +129,7 @@ describe('MemoryStorage', () => {
       expect(status.type).toBe('memory');
       expect(status.tablesCount).toBe(1);
 
-      const pruneRes = await backend.prune(2, 'records');
+      const pruneRes = await backend.prune(2);
       expect(pruneRes.action).toBe('prune');
       expect(pruneRes.affectedCount).toBe(4);
 

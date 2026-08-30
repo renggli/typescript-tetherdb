@@ -260,7 +260,7 @@ describe('FileStorage', () => {
   });
 
   it('should reject checkpoint and vacuum with NotSupported code', async () => {
-    await expect(context.backend.checkpoint('t1')).rejects.toThrow(
+    await expect(context.backend.checkpoint()).rejects.toThrow(
       /not supported/i,
     );
     await expect(context.backend.vacuum()).rejects.toThrow(/not supported/i);
@@ -290,7 +290,7 @@ describe('FileStorage', () => {
       ]);
     }
 
-    const pruneRes = await context.backend.prune(3, 'records');
+    const pruneRes = await context.backend.prune(3);
     expect(pruneRes.action).toBe('prune');
     expect(pruneRes.type).toBe('file');
     expect(pruneRes.affectedCount).toBe(5);

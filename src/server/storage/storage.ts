@@ -67,8 +67,6 @@ export interface MaintenanceResult {
   action: 'checkpoint' | 'vacuum' | 'prune';
   /** Target storage engine type. */
   type: StorageType;
-  /** Optional target table name. */
-  tableName?: string;
   /** Number of entries or database files affected, if applicable. */
   affectedCount?: number;
   /** Human-readable status message. */
@@ -92,6 +90,9 @@ export abstract class Storage {
 
   /** Storage persistence engine type. */
   abstract readonly type: StorageType;
+
+  /** Storage base directory if disk-backed. */
+  abstract readonly baseDir?: string;
 
   /** Secret key used for signing session tokens. */
   abstract readonly secret: string;
@@ -337,9 +338,8 @@ export abstract class Storage {
       usersCount: users.length,
       tablesCount: tables.length,
     };
-    const baseDir = this.getBaseDir();
-    if (baseDir !== undefined) {
-      status.baseDir = baseDir;
+    if (this.baseDir !== undefined) {
+      status.baseDir = this.baseDir;
     }
     return status;
   }
@@ -347,10 +347,9 @@ export abstract class Storage {
   /**
    * Performs a WAL checkpoint on SQLite databases to truncate WAL files.
    *
-   * @param tableName - Optional target table name.
    * @returns MaintenanceResult describing checkpoint outcome.
    */
-  abstract checkpoint(tableName?: string): Promise<MaintenanceResult>;
+  abstract checkpoint(): Promise<MaintenanceResult>;
 
   /**
    * Performs database vacuuming to reclaim disk space and defragment storage.
@@ -363,25 +362,14 @@ export abstract class Storage {
    * Prunes changelog history entries older than the retention threshold.
    *
    * @param keepCount - Optional maximum entries to retain.
-   * @param tableName - Optional target table name.
    * @returns MaintenanceResult describing prune outcome.
    */
-  abstract prune(
-    keepCount?: number,
-    tableName?: string,
-  ): Promise<MaintenanceResult>;
+  abstract prune(keepCount?: number): Promise<MaintenanceResult>;
 
   /**
    * Optional cleanup callback invoked when shutting down the storage engine.
    */
   close?(): Promise<void>;
-
-  // -- Protected Helpers ----------------------------------------------------
-
-  /** Optional storage base directory if disk-backed. */
-  protected getBaseDir(): string | undefined {
-    return undefined;
-  }
 }
 
 // -- Utility Functions ------------------------------------------------------

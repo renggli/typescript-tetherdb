@@ -84,7 +84,7 @@ export interface SqliteStorageOptions extends StorageOptions {
  */
 export class SqliteStorage extends Storage {
   readonly type = StorageType.Sqlite;
-  readonly baseDir: string;
+  readonly baseDir?: string;
   readonly inMemory: boolean;
   readonly secret: string;
   override readonly options: SqliteStorageOptions;
@@ -100,14 +100,16 @@ export class SqliteStorage extends Storage {
         options.baseDir === ':memory:' ||
         (!options.baseDir && options.inMemory),
     );
-    this.baseDir = path.resolve(options.baseDir ?? '.data');
+    this.baseDir = this.inMemory
+      ? undefined
+      : path.resolve(options.baseDir ?? '.data');
     this.secret =
       options.secret ??
-      (this.inMemory
-        ? crypto.randomBytes(32).toString('hex')
-        : getOrCreateKeyfileSecret(this.baseDir));
+      (this.baseDir
+        ? getOrCreateKeyfileSecret(this.baseDir)
+        : crypto.randomBytes(32).toString('hex'));
 
-    if (!this.inMemory) {
+    if (this.baseDir) {
       try {
         fs.mkdirSync(this.baseDir, { recursive: true });
       } catch {
@@ -120,7 +122,7 @@ export class SqliteStorage extends Storage {
     name: string,
     settings: Partial<TableSettings> = {},
   ): Promise<Table> {
-    if (!this.inMemory) assertNoActiveServerLock(this.baseDir, 'sqlite');
+    if (this.baseDir) assertNoActiveServerLock(this.baseDir, 'sqlite');
     const safeName = validateTableName(name);
     const dbHandle = this.getTablesDb();
     const existing = dbHandle.stmtFindTable.get(safeName);
@@ -171,7 +173,7 @@ export class SqliteStorage extends Storage {
   }
 
   updateTableSettings(name: string, settings: TableSettings): void {
-    if (!this.inMemory) assertNoActiveServerLock(this.baseDir, 'sqlite');
+    if (this.baseDir) assertNoActiveServerLock(this.baseDir, 'sqlite');
     const safeName = validateTableName(name);
     const dbHandle = this.getTablesDb();
     dbHandle.stmtUpdateTableSettings.run(JSON.stringify(settings), safeName);
@@ -210,7 +212,7 @@ export class SqliteStorage extends Storage {
   }
 
   async createUser(userName: string, password: string): Promise<User> {
-    if (!this.inMemory) assertNoActiveServerLock(this.baseDir, 'sqlite');
+    if (this.baseDir) assertNoActiveServerLock(this.baseDir, 'sqlite');
     const safeUserName = validateUserName(userName);
     const validPassword = validatePassword(password);
     const usersDb = this.getUsersDb();
@@ -646,7 +648,7 @@ export class SqliteStorage extends Storage {
     return metaRow?.current_seq ?? 0;
   }
 
-  async checkpoint(_tableName?: string): Promise<MaintenanceResult> {
+  async checkpoint(): Promise<MaintenanceResult> {
     this.getUsersDb().db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
     this.getTablesDb().db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
 
@@ -670,10 +672,7 @@ export class SqliteStorage extends Storage {
     };
   }
 
-  async prune(
-    keepCount?: number,
-    tableName?: string,
-  ): Promise<MaintenanceResult> {
+  async prune(keepCount?: number): Promise<MaintenanceResult> {
     const keep = keepCount ?? this.options.maxHistoryEntries ?? 1000;
     const dbHandle = this.getTablesDb();
     const metaRow = dbHandle.stmtGetMeta.get() as
@@ -695,7 +694,6 @@ export class SqliteStorage extends Storage {
     return {
       action: 'prune',
       type: StorageType.Sqlite,
-      tableName,
       affectedCount: totalPruned,
       message: `Prune completed successfully. Removed ${totalPruned} changelog record(s)`,
     };
@@ -719,10 +717,6 @@ export class SqliteStorage extends Storage {
       this.tablesHandle = null;
     }
     this.tableInstances.clear();
-  }
-
-  protected override getBaseDir(): string | undefined {
-    return this.inMemory ? ':memory:' : this.baseDir;
   }
 
   getUsersDb(): UsersDbHandle {
@@ -837,13 +831,13 @@ export class SqliteStorage extends Storage {
   }
 
   updateUserData(userId: string, passwordHash: string): void {
-    if (!this.inMemory) assertNoActiveServerLock(this.baseDir, 'sqlite');
+    if (this.baseDir) assertNoActiveServerLock(this.baseDir, 'sqlite');
     const usersDb = this.getUsersDb();
     usersDb.stmtUpdatePassword.run(passwordHash, userId);
   }
 
   deleteTable(name: string): boolean {
-    if (!this.inMemory) assertNoActiveServerLock(this.baseDir, 'sqlite');
+    if (this.baseDir) assertNoActiveServerLock(this.baseDir, 'sqlite');
     const safeName = validateTableName(name);
     const dbHandle = this.getTablesDb();
     const res = dbHandle.stmtDeleteTable.run(safeName) as {
@@ -858,7 +852,7 @@ export class SqliteStorage extends Storage {
   }
 
   deleteUser(userId: string): boolean {
-    if (!this.inMemory) assertNoActiveServerLock(this.baseDir, 'sqlite');
+    if (this.baseDir) assertNoActiveServerLock(this.baseDir, 'sqlite');
     const safeUserId = validateUserId(userId);
     const usersDb = this.getUsersDb();
     const res = usersDb.stmtDeleteUser.run(safeUserId) as {
@@ -953,7 +947,7 @@ function initTablesSchema(db: DatabaseSync): void {
 }
 
 function createDatabase(
-  baseDir: string,
+  baseDir: string | undefined,
   filename: string,
   inMemory: boolean,
 ): DatabaseSync {
@@ -962,12 +956,13 @@ function createDatabase(
     DatabaseSync: new (path: string) => DatabaseSync;
   };
 
-  const dbPath = inMemory ? ':memory:' : path.join(baseDir, filename);
+  const dbPath =
+    inMemory || !baseDir ? ':memory:' : path.join(baseDir, filename);
   const db = new DatabaseSync(dbPath);
 
   db.exec('PRAGMA busy_timeout = 5000;');
   db.exec('PRAGMA foreign_keys = ON;');
-  if (!inMemory) {
+  if (!inMemory && baseDir) {
     db.exec('PRAGMA journal_mode = WAL;');
     db.exec('PRAGMA synchronous = NORMAL;');
   }

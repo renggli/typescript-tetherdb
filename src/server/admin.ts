@@ -134,13 +134,13 @@ export interface AdminTarget {
   deleteRecord(tableName: string, id: string, userId?: string): Promise<void>;
 
   /** Truncates WAL log files for SQLite databases. */
-  checkpoint(tableName?: string): Promise<MaintenanceResult>;
+  checkpoint(): Promise<MaintenanceResult>;
 
   /** Reclaims unused disk space and defragments storage files. */
   vacuum(): Promise<MaintenanceResult>;
 
   /** Prunes changelog entries older than the retention threshold. */
-  prune(keepCount?: number, tableName?: string): Promise<MaintenanceResult>;
+  prune(keepCount?: number): Promise<MaintenanceResult>;
 
   /** Requests the running server to gracefully shut down. */
   stop?(): Promise<{ message: string }>;
@@ -292,10 +292,9 @@ export class AdminClient implements AdminTarget {
     });
   }
 
-  async checkpoint(tableName?: string): Promise<MaintenanceResult> {
+  async checkpoint(): Promise<MaintenanceResult> {
     return this.request('POST', '/admin/maintenance', {
       action: 'checkpoint',
-      tableName,
     });
   }
 
@@ -303,14 +302,10 @@ export class AdminClient implements AdminTarget {
     return this.request('POST', '/admin/maintenance', { action: 'vacuum' });
   }
 
-  async prune(
-    keepCount?: number,
-    tableName?: string,
-  ): Promise<MaintenanceResult> {
+  async prune(keepCount?: number): Promise<MaintenanceResult> {
     return this.request('POST', '/admin/maintenance', {
       action: 'prune',
       keepCount,
-      tableName,
     });
   }
 
@@ -510,19 +505,16 @@ export class LocalAdminTarget implements AdminTarget {
     );
   }
 
-  async checkpoint(tableName?: string): Promise<MaintenanceResult> {
-    return this.storage.checkpoint(tableName);
+  async checkpoint(): Promise<MaintenanceResult> {
+    return this.storage.checkpoint();
   }
 
   async vacuum(): Promise<MaintenanceResult> {
     return this.storage.vacuum();
   }
 
-  async prune(
-    keepCount?: number,
-    tableName?: string,
-  ): Promise<MaintenanceResult> {
-    return this.storage.prune(keepCount, tableName);
+  async prune(keepCount?: number): Promise<MaintenanceResult> {
+    return this.storage.prune(keepCount);
   }
 
   async close(): Promise<void> {

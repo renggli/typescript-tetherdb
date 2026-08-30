@@ -762,7 +762,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       }
 
       // Prune to keep only last 2 changes
-      await storage.prune(2, 'todos');
+      await storage.prune(2);
 
       const ws = new MockServerWebSocket();
       sync.handleConnection(ws as unknown as WebSocket);

@@ -15,7 +15,6 @@ export async function handleMaintenanceCommand(
   positionalArgs: string[],
 ): Promise<void> {
   const action = positionalArgs[1];
-  const targetTable = positionalArgs[2];
 
   if (!action) {
     throw new TetherServerError(
@@ -26,7 +25,7 @@ export async function handleMaintenanceCommand(
 
   switch (action) {
     case 'checkpoint': {
-      const result = await target.checkpoint(targetTable);
+      const result = await target.checkpoint();
       console.log(result.message);
       break;
     }
@@ -38,9 +37,9 @@ export async function handleMaintenanceCommand(
     }
 
     case 'prune': {
-      const keepStr = positionalArgs[3];
+      const keepStr = positionalArgs[2];
       const keepCount = keepStr ? Number.parseInt(keepStr, 10) : undefined;
-      const result = await target.prune(keepCount, targetTable);
+      const result = await target.prune(keepCount);
       console.log(result.message);
       break;
     }
