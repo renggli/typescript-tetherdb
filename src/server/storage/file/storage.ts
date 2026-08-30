@@ -326,35 +326,37 @@ export class FileStorage extends BaseStorage {
     const allChanges: (ChangeRecord & { seq: number })[] = [];
 
     for (const partitionId of partitions) {
-      const partitionDir = this.resolvePartitionDir(partitionId);
-      const metaFile = path.join(partitionDir, 'meta.json');
-      const syncFile = path.join(partitionDir, 'sync.jsonl');
+      await this.withLock(partitionId, async () => {
+        const partitionDir = this.resolvePartitionDir(partitionId);
+        const metaFile = path.join(partitionDir, 'meta.json');
+        const syncFile = path.join(partitionDir, 'sync.jsonl');
 
-      try {
-        const metaContent = await fs.readFile(metaFile, 'utf-8');
-        const meta = JSON.parse(metaContent) as {
-          currentSeq: number;
-          minSeq: number;
-        };
-        maxCurrentSeq = Math.max(maxCurrentSeq, meta.currentSeq);
-        minSeq = Math.max(minSeq, meta.minSeq);
-      } catch {
-        continue;
-      }
-
-      try {
-        const content = await fs.readFile(syncFile, 'utf-8');
-        const lines = content
-          .split('\n')
-          .map((l) => l.trim())
-          .filter(Boolean);
-        for (const line of lines) {
-          const rec = JSON.parse(line) as ChangeRecord & { seq: number };
-          if (rec.seq > fromSeq) {
-            allChanges.push(rec);
-          }
+        try {
+          const metaContent = await fs.readFile(metaFile, 'utf-8');
+          const meta = JSON.parse(metaContent) as {
+            currentSeq: number;
+            minSeq: number;
+          };
+          maxCurrentSeq = Math.max(maxCurrentSeq, meta.currentSeq);
+          minSeq = Math.max(minSeq, meta.minSeq);
+        } catch {
+          return;
         }
-      } catch {}
+
+        try {
+          const content = await fs.readFile(syncFile, 'utf-8');
+          const lines = content
+            .split('\n')
+            .map((l) => l.trim())
+            .filter(Boolean);
+          for (const line of lines) {
+            const rec = JSON.parse(line) as ChangeRecord & { seq: number };
+            if (rec.seq > fromSeq) {
+              allChanges.push(rec);
+            }
+          }
+        } catch {}
+      });
     }
 
     if (isSnapshotRequired(fromSeq, minSeq, maxCurrentSeq)) {

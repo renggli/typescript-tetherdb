@@ -423,4 +423,27 @@ function runStorageTestSuite(createStorage: () => Storage) {
       /Invalid change operation/,
     );
   });
+
+  it('should require snapshot if requested sequence is older than minSeq after pruning', async () => {
+    const user = await storage.createUser('snap_user', 'password');
+    for (let i = 1; i <= 6; i++) {
+      await storage.applyChanges(user, [
+        {
+          table: 'todos',
+          id: `task_${i}`,
+          op: OperationType.Put,
+          data: { title: `Task ${i}` },
+          timestamp: 1000 + i,
+          clientId: 'c1',
+        },
+      ]);
+    }
+
+    await storage.prune(2, 'todos');
+
+    // Request from sequence 1 (which was pruned)
+    const res = await storage.getChangesSince(user, 1);
+    expect(res.requiresSnapshot).toBe(true);
+    expect(res.changes).toHaveLength(0);
+  });
 }

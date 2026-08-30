@@ -491,19 +491,9 @@ export class SqliteStorage extends BaseStorage {
     requiresSnapshot?: boolean;
   }> {
     const dbHandle = this.getTablesDb();
-    const metaRow = dbHandle.stmtGetMeta.get() as
-      | { current_seq: number; min_seq: number }
-      | undefined;
-    const currentSeq = metaRow?.current_seq ?? 0;
-    const minSeq = metaRow?.min_seq ?? 0;
-
-    if (isSnapshotRequired(fromSeq, minSeq, currentSeq)) {
-      return { changes: [], currentSeq, requiresSnapshot: true };
-    }
-
-    const rows = dbHandle.stmtGetChangelogSince.all(
-      fromSeq,
-    ) as unknown as Array<{
+    let currentSeq = 0;
+    let minSeq = 0;
+    let rows: Array<{
       seq: number;
       table_name: string;
       partition: string;
@@ -515,7 +505,31 @@ export class SqliteStorage extends BaseStorage {
       deleted: number;
       data: string | null;
       user_id?: string | null;
-    }>;
+    }> = [];
+
+    try {
+      dbHandle.db.exec('BEGIN DEFERRED;');
+      const metaRow = dbHandle.stmtGetMeta.get() as
+        | { current_seq: number; min_seq: number }
+        | undefined;
+      currentSeq = metaRow?.current_seq ?? 0;
+      minSeq = metaRow?.min_seq ?? 0;
+
+      if (isSnapshotRequired(fromSeq, minSeq, currentSeq)) {
+        dbHandle.db.exec('COMMIT;');
+        return { changes: [], currentSeq, requiresSnapshot: true };
+      }
+
+      rows = dbHandle.stmtGetChangelogSince.all(
+        fromSeq,
+      ) as unknown as typeof rows;
+      dbHandle.db.exec('COMMIT;');
+    } catch (err) {
+      try {
+        dbHandle.db.exec('ROLLBACK;');
+      } catch {}
+      throw err;
+    }
 
     const changes: ChangeRecord[] = [];
     for (const r of rows) {
