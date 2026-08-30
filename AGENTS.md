@@ -47,16 +47,16 @@ The codebase is organized into five decoupled layers with clear subpath exports:
   - Pure TypeScript with zero runtime dependencies.
 - **Client Layer (`src/client/`)**:
   - Exported as `tetherdb/client`.
-  - **TetherClient (`client.ts`)**: Main reactive facade client with local-first storage, multi-app support, auto-session, and auth helpers.
-  - **Auth (`auth.ts`)**: Internal authentication coordinator managing sessions, metadata, and auth HTTP endpoints.
+  - **TetherClient (`client.ts`)**: Main reactive facade client with local-first storage, auto-session, and auth helpers.
+  - **Auth (`auth.ts`)**: Internal authentication coordinator managing sessions, metadata, and WebSocket auth protocol.
   - **Storage (`storage/`)**: Atomic transaction coordinator (`storage.ts`), IndexedDB connection & schema upgrades (`database.ts`), and IDB utilities (`utils.ts`).
   - **Tables (`table.ts`)**: Typed table wrappers providing local-first CRUD operations and reactive event subscriptions.
   - **Indexes (`indexed.ts`)**: First-class declarative `Index` definitions, query methods, and reactive subscription views.
   - **Sync (`sync/`)**: Two-way WebSocket sync coordinator (`sync.ts`) and connection manager with auto-reconnect backoff (`connection.ts`).
 - **Server Layer (`src/server/`)**:
   - Exported as `tetherdb/server`.
-  - **Server (`server.ts`)**: Unified HTTP and WebSocket server (`TetherServer`, `startServer`) handling authentication endpoints, health/readiness/metrics, and real-time synchronization.
-  - **Storage (`storage/`)**: Storage abstraction (`storage.ts`), common base (`base.ts`), with implementations for in-memory testing (`memory.ts`), per-user filesystem directories (`file.ts`), and SQLite (`sqlite.ts`), unified table (`table.ts`) and user (`user.ts`).
+  - **Server (`server.ts`)**: Unified HTTP and WebSocket server (`TetherServer`, `startServer`) handling health/readiness/metrics, admin REST endpoints, and real-time synchronization with WebSocket authentication.
+  - **Storage (`storage/`)**: Storage abstraction (`storage.ts`), with implementations for in-memory testing (`memory.ts`), per-user filesystem directories (`file.ts`), and SQLite (`sqlite.ts`), unified table (`table.ts`) and user (`user.ts`).
   - **Security (`security/`)**: Centralized authorization and response fattening pipeline (`filter.ts`), caching user resolver (`resolver.ts`), and internal schemas (`types.ts`).
   - **Locking (`shared/lock.ts`)**: Exclusive server process lockfile management (`server.lock`) and stale PID crash recovery.
   - **Authentication (`shared/crypto.ts`)**: Internal token signing, password hashing, and persistent keyfile management.
@@ -69,13 +69,13 @@ The codebase is organized into five decoupled layers with clear subpath exports:
   - **Commands (`commands/`)**: Modular subcommand handlers (`serve.ts`, `status.ts`, `stop.ts`, `migrate/`, `maintenance.ts`, `tables.ts`, `records.ts`, `users.ts`, `help.ts`).
 - **Vite Layer (`src/vite/`)**:
   - Exported as `tetherdb/vite`.
-  - **Vite Plugin (`index.ts`)**: Zero-config local development integration (`tetherPlugin`) running embedded WebSocket sync and REST auth directly within Vite dev and preview servers.
+  - **Vite Plugin (`index.ts`)**: Zero-config local development integration (`tetherPlugin`) running embedded WebSocket sync and auth directly within Vite dev and preview servers.
 
 ## 🔑 Key TypeScript & Design Conventions
 
 1. **Strict Type Safety**: Never use `any` unless strictly necessary for generic boundaries. Leverage generics (`<T = unknown>`) and discriminated unions for message types.
 2. **Explicit Enums & Discriminated Unions**: Use discriminated union types for message protocols (`ClientMessage`, `ServerMessage`) and explicit enum/literal types for operational states (`SyncStatus`, `OperationType`).
-3. **Pluggable & Extensible Abstractions**: Components requiring alternative backend implementations (such as storage persistence or WebSocket transports) must adhere to clear TypeScript interfaces (e.g. `Storage`, `AppStorage`, `TableStorage`, `UserStorage`).
+3. **Pluggable & Extensible Abstractions**: Components requiring alternative backend implementations (such as storage persistence or WebSocket transports) must adhere to clear TypeScript interfaces (e.g. `Storage`, `Table`, `User`).
 4. **Local-First Consistency**:
    - Write operations must complete locally in IndexedDB first.
    - Outbox logs and data mutations must execute atomically within the same IndexedDB transaction.

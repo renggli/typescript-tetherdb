@@ -232,7 +232,7 @@ Bind any TetherDB table to component state with automatic real-time updates:
 
 ```typescript
 import { useEffect, useState } from 'react';
-import type { Table } from 'tetherdb/client';
+import type { Index, IndexQueryOptions, Table } from 'tetherdb/client';
 
 export function useTable<T>(table: Table<T>): T[] {
   const [items, setItems] = useState<T[]>([]);
@@ -312,7 +312,7 @@ npx tetherdb tables add posts --mode=public-read --sqlite=./data
 npx tetherdb tables add comments --mode=shared --sqlite=./data
 
 # Create a table with quota limits
-npx tetherdb tables add logs --max-records=50000 --max-record-bytes=10240 --sqlite=./data
+npx tetherdb tables add logs --max-records=50000 --max-size=10240 --sqlite=./data
 
 # Show table schema, settings, and permissions
 npx tetherdb tables show todos --sqlite=./data
@@ -367,7 +367,6 @@ npx tetherdb maintenance vacuum --sqlite=./data
 
 # Prune historical changelogs older than the specified retention threshold
 npx tetherdb maintenance prune 1000 --sqlite=./data
-npx tetherdb maintenance prune todos 500 --sqlite=./data
 
 # Migrate legacy multi-app database to the unified storage schema
 npx tetherdb migrate --sqlite=./data
