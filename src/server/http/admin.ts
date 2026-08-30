@@ -239,7 +239,7 @@ export async function handleAdminRequest(
     return true;
   }
 
-  // DELETE /admin/users/:userId
+  // DELETE/PATCH /admin/users/:userId
   if (adminPath.startsWith('/users/')) {
     const userId = decodeURIComponent(adminPath.slice('/users/'.length));
     if (method === 'DELETE') {
@@ -252,6 +252,28 @@ export async function handleAdminRequest(
       }
       await user.delete();
       sendJson(res, 200, { deleted: true }, ctx.corsConfig, req);
+      return true;
+    }
+    if (method === 'PATCH') {
+      const body = (await readJsonBody(req)) as { userName?: string };
+      if (!body.userName) {
+        throw new TetherServerError(
+          TetherServerErrorCode.InvalidInput,
+          'New username is required',
+        );
+      }
+      const renamed = await ctx.storage.renameUser(userId, body.userName);
+      sendJson(
+        res,
+        200,
+        {
+          userId: renamed.userId,
+          userName: renamed.userName,
+          createdAt: renamed.createdAt,
+        },
+        ctx.corsConfig,
+        req,
+      );
       return true;
     }
   }

@@ -213,6 +213,15 @@ export abstract class Storage {
    */
   abstract deleteUser(userId: string): boolean | Promise<boolean>;
 
+  /**
+   * Renames a user account without changing their ID or any associated data.
+   *
+   * @param userId - Unique user identifier.
+   * @param newUserName - New username to assign.
+   * @returns Updated User handle.
+   */
+  abstract renameUser(userId: string, newUserName: string): Promise<User>;
+
   // -- Password & Authentication --------------------------------------------
 
   /**

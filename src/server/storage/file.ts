@@ -663,6 +663,35 @@ export class FileStorage extends Storage {
     });
   }
 
+  async renameUser(userId: string, newUserName: string): Promise<User> {
+    assertNoActiveServerLock(this.baseDir);
+    const safeUserId = validateUserId(userId);
+    const safeNewName = validateUserName(newUserName);
+    return this.withLock('__users__', async () => {
+      const users = await this.readUsersFile();
+      const existing = users.get(safeUserId);
+      if (!existing) {
+        throw new TetherServerError(
+          TetherServerErrorCode.NotFound,
+          `User "${safeUserId}" not found`,
+        );
+      }
+      if (existing.userName !== safeNewName) {
+        for (const u of users.values()) {
+          if (u.userName.toLowerCase() === safeNewName.toLowerCase()) {
+            throw new TetherServerError(
+              TetherServerErrorCode.AlreadyExists,
+              'Username is already registered',
+            );
+          }
+        }
+      }
+      users.set(safeUserId, { ...existing, userName: safeNewName });
+      await this.writeUsersFile(users);
+      return new User(safeUserId, safeNewName, existing.createdAt, this);
+    });
+  }
+
   // -- Private Helpers --------------------------------------------------------
 
   private get usersFile(): string {

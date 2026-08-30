@@ -119,6 +119,12 @@ export interface AdminTarget {
   /** Deletes a user account and associated partitions. */
   deleteUser(userId: string): Promise<{ deleted: boolean }>;
 
+  /** Renames a user account, preserving their ID and all data. */
+  renameUser(
+    userId: string,
+    newUserName: string,
+  ): Promise<{ userId: string; userName: string; createdAt: number }>;
+
   /** Retrieves records from a table partition. */
   getRecords(tableName: string, userId?: string): Promise<SnapshotRecord[]>;
 
@@ -243,6 +249,15 @@ export class AdminClient implements AdminTarget {
 
   async deleteUser(userId: string): Promise<{ deleted: boolean }> {
     return this.request('DELETE', `/admin/users/${encodeURIComponent(userId)}`);
+  }
+
+  async renameUser(
+    userId: string,
+    newUserName: string,
+  ): Promise<{ userId: string; userName: string; createdAt: number }> {
+    return this.request('PATCH', `/admin/users/${encodeURIComponent(userId)}`, {
+      userName: newUserName,
+    });
   }
 
   async getRecords(
@@ -455,6 +470,18 @@ export class LocalAdminTarget implements AdminTarget {
     }
     await user.delete();
     return { deleted: true };
+  }
+
+  async renameUser(
+    userId: string,
+    newUserName: string,
+  ): Promise<{ userId: string; userName: string; createdAt: number }> {
+    const user = await this.storage.renameUser(userId, newUserName);
+    return {
+      userId: user.userId,
+      userName: user.userName,
+      createdAt: user.createdAt,
+    };
   }
 
   async getRecords(

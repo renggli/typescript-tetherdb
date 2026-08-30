@@ -48,6 +48,7 @@ export interface UsersDbHandle {
   stmtFindByUserName: StatementSync;
   stmtInsertUser: StatementSync;
   stmtUpdatePassword: StatementSync;
+  stmtRenameUser: StatementSync;
   stmtDeleteUser: StatementSync;
   stmtListUsers: StatementSync;
 }
@@ -744,6 +745,7 @@ export class SqliteStorage extends Storage {
       stmtUpdatePassword: db.prepare(
         'UPDATE users SET password_hash = ? WHERE id = ?',
       ),
+      stmtRenameUser: db.prepare('UPDATE users SET user_name = ? WHERE id = ?'),
       stmtDeleteUser: db.prepare('DELETE FROM users WHERE id = ?'),
       stmtListUsers: db.prepare(
         'SELECT id, user_name, password_hash, created_at FROM users ORDER BY created_at ASC',
@@ -875,6 +877,32 @@ export class SqliteStorage extends Storage {
     }
     return true;
   }
+
+  async renameUser(userId: string, newUserName: string): Promise<User> {
+    if (this.baseDir) assertNoActiveServerLock(this.baseDir, 'sqlite');
+    const safeUserId = validateUserId(userId);
+    const safeNewName = validateUserName(newUserName);
+    const usersDb = this.getUsersDb();
+
+    const existing = this.findUserDataById(safeUserId);
+    if (!existing) {
+      throw new TetherServerError(
+        TetherServerErrorCode.NotFound,
+        `User "${safeUserId}" not found`,
+      );
+    }
+    if (existing.userName !== safeNewName) {
+      const conflict = usersDb.stmtFindByUserName.get(safeNewName);
+      if (conflict) {
+        throw new TetherServerError(
+          TetherServerErrorCode.AlreadyExists,
+          'Username is already registered',
+        );
+      }
+    }
+    usersDb.stmtRenameUser.run(safeNewName, safeUserId);
+    return new User(safeUserId, safeNewName, existing.createdAt, this);
+  }
 }
 
 // -- Private Schema Helpers -------------------------------------------------
@@ -889,16 +917,25 @@ function parseJsonData(raw: string | null): unknown {
 }
 
 function initUsersSchema(db: DatabaseSync): void {
-  db.exec(`
-    PRAGMA user_version = 1;
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      user_name TEXT UNIQUE NOT NULL,
-      password_hash TEXT,
-      created_at INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_users_user_name ON users (user_name);
-  `);
+  const { user_version } = db.prepare('PRAGMA user_version').get() as {
+    user_version: number;
+  };
+  if (user_version < 2) {
+    // Version 0: fresh database, or version 1: old schema with different column
+    // names. Drop and recreate — no backward compatibility required.
+    db.exec(`
+      DROP INDEX IF EXISTS idx_users_user_name;
+      DROP TABLE IF EXISTS users;
+      CREATE TABLE users (
+        id TEXT PRIMARY KEY,
+        user_name TEXT UNIQUE NOT NULL,
+        password_hash TEXT,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX idx_users_user_name ON users (user_name);
+      PRAGMA user_version = 2;
+    `);
+  }
 }
 
 function initTablesSchema(db: DatabaseSync): void {

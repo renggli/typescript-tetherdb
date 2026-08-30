@@ -60,18 +60,42 @@ describe('handleUsersCommand', () => {
     expect(user).toBeDefined();
   });
 
-  it('should remove user and report not found when appropriate', async () => {
+  it('should remove user by username', async () => {
     const user = await storage.createUser('charlie', 'password123');
 
-    // Delete existing user
+    // Delete by username
+    await handleUsersCommand(target, ['users', 'rm', 'charlie']);
+    expect(testLogger.hasMessage('Deleted user: charlie')).toBe(true);
+    expect(await storage.getUser(user.userId)).toBeUndefined();
+  });
+
+  it('should remove user by userId', async () => {
+    const user = await storage.createUser('diana', 'password123');
+
     await handleUsersCommand(target, ['users', 'rm', user.userId]);
     expect(testLogger.hasMessage(`Deleted user: ${user.userId}`)).toBe(true);
     expect(await storage.getUser(user.userId)).toBeUndefined();
+  });
 
-    // Delete non-existent user
+  it('should throw when removing a non-existent user', async () => {
     await expect(
-      handleUsersCommand(target, ['users', 'rm', 'nonexistent_id']),
+      handleUsersCommand(target, ['users', 'rm', 'nonexistent_user']),
     ).rejects.toThrow(TetherServerError);
+  });
+
+  it('should rename a user with mv', async () => {
+    const user = await storage.createUser('eve', 'password123');
+
+    await handleUsersCommand(target, ['users', 'mv', 'eve', 'evelyn']);
+    expect(testLogger.hasMessage('evelyn')).toBe(true);
+
+    // ID is preserved
+    const renamed = await storage.getUser(user.userId);
+    expect(renamed?.userName).toBe('evelyn');
+    expect(renamed?.userId).toBe(user.userId);
+
+    // Old name is gone
+    expect(await storage.getUserByUserName('eve')).toBeUndefined();
   });
 
   it('should throw error for missing arguments or invalid action', async () => {
@@ -85,10 +109,20 @@ describe('handleUsersCommand', () => {
       handleUsersCommand(target, ['users', 'add', 'dave']),
     ).rejects.toThrow(TetherServerError);
 
-    // Missing user ID on rm
+    // Missing user on rm
     await expect(handleUsersCommand(target, ['users', 'rm'])).rejects.toThrow(
       TetherServerError,
     );
+
+    // Missing user on mv
+    await expect(handleUsersCommand(target, ['users', 'mv'])).rejects.toThrow(
+      TetherServerError,
+    );
+
+    // Missing new name on mv
+    await expect(
+      handleUsersCommand(target, ['users', 'mv', 'frank']),
+    ).rejects.toThrow(TetherServerError);
 
     // Unknown action
     await expect(

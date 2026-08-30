@@ -19,7 +19,7 @@ Commands:
   stop                                         Stop the running TetherDB server
   maintenance checkpoint                       Truncate WAL files for SQLite databases
   maintenance vacuum                           Reclaim disk space and defragment database files
-  maintenance prune [keepCount]                Prune changelogs older than retention threshold
+  maintenance prune [keep_count]               Prune changelogs older than retention threshold
   migrate [--app=<appId>]                      Migrate offline database from v1 (multi-app) to v2 format
   tables [list]                                List all tables
   tables add <table_name> [options]            Create a table (--mode=..., --read=..., --max-records=...)
@@ -30,8 +30,9 @@ Commands:
   records put <table_name> <id> <data>         Put/update a record in a table
   records rm <table_name> <id>                 Delete a record from a table
   users [list]                                 List all registered user accounts
-  users add <username> <password>              Register a new user account
-  users rm <userid>                            Delete a user account and associated data
+  users add <user_name> <password>             Register a new user account
+  users rm <user_name>                         Delete a user account and associated data
+  users mv <user_name> <new_user_name>         Rename a user account (ID and data unchanged)
 
 Server Options (for 'serve'):
   -p, --port <number>                          Port number to bind (default: 8080 or PORT env)

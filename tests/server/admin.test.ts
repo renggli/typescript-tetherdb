@@ -58,6 +58,10 @@ describe('AdminTarget (LocalAdminTarget & AdminClient)', () => {
     const users = await localTarget.getUsers();
     expect(users.map((u) => u.userName)).toContain('alice');
 
+    const renamed = await localTarget.renameUser(user.userId, 'alicia');
+    expect(renamed.userId).toBe(user.userId);
+    expect(renamed.userName).toBe('alicia');
+
     // 3. Record CRUD
     await localTarget.putRecord(
       'tasks',
@@ -123,6 +127,10 @@ describe('AdminTarget (LocalAdminTarget & AdminClient)', () => {
     expect(user.userName).toBe('bobby');
     const users = await remoteTarget.getUsers();
     expect(users.map((u) => u.userName)).toContain('bobby');
+
+    const renamedUser = await remoteTarget.renameUser(user.userId, 'roberto');
+    expect(renamedUser.userId).toBe(user.userId);
+    expect(renamedUser.userName).toBe('roberto');
 
     // 3. Record CRUD
     await remoteTarget.putRecord(

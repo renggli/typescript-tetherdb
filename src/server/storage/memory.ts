@@ -168,6 +168,31 @@ export class MemoryStorage extends Storage {
     return true;
   }
 
+  async renameUser(userId: string, newUserName: string): Promise<User> {
+    const safeUserId = validateUserId(userId);
+    const safeNewName = validateUserName(newUserName);
+    const data = this.users.get(safeUserId);
+    if (!data) {
+      throw new TetherServerError(
+        TetherServerErrorCode.NotFound,
+        `User "${safeUserId}" not found`,
+      );
+    }
+    if (
+      this.usersByUserName.has(safeNewName) &&
+      data.userName !== safeNewName
+    ) {
+      throw new TetherServerError(
+        TetherServerErrorCode.AlreadyExists,
+        'Username is already registered',
+      );
+    }
+    this.usersByUserName.delete(data.userName);
+    data.userName = safeNewName;
+    this.usersByUserName.set(safeNewName, safeUserId);
+    return new User(data.userId, data.userName, data.createdAt, this);
+  }
+
   async getUserPasswordHash(
     userId: string,
   ): Promise<string | null | undefined> {
