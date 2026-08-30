@@ -116,6 +116,11 @@ export class SqliteStorage extends Storage {
         // Ignore directory creation error
       }
     }
+
+    // Eagerly initialize both databases so schema is set up at startup
+    // and any schema errors surface immediately rather than on first request.
+    this.getUsersDb();
+    this.getTablesDb();
   }
 
   async createTable(

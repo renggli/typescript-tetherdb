@@ -335,7 +335,7 @@ npx tetherdb users --sqlite=./data
 npx tetherdb users add alice securepassword123 --sqlite=./data
 
 # Delete a user account and purge user data partitions
-npx tetherdb users rm usr_alice123 --sqlite=./data
+npx tetherdb users rm alice --sqlite=./data
 ```
 
 ### Record Inspection & Mutations
