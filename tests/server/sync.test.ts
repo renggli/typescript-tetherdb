@@ -933,5 +933,50 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       expect(client).toBeDefined();
       expect(client?.clientId).toMatch(/^client_[0-9a-f]{8}$/);
     });
+
+    it('enforces IP rate limiting and failure tracking on invalid token login attempts', async () => {
+      const ipLimiter = new RateLimiter({
+        windowMs: 60_000,
+        maxRequests: 2,
+        maxFailures: 2,
+      });
+
+      const limitedSync = new Sync(storage, {
+        ipLoginLimiter: ipLimiter,
+      });
+
+      const ws = new MockServerWebSocket();
+      limitedSync.handleConnection(ws as unknown as WebSocket, '192.168.1.50');
+
+      // Attempt 1: Invalid token
+      ws.emitClientMessage({
+        type: ClientMessageType.Login,
+        token: 'invalid.token.attempt1',
+      });
+      await ws.waitForMessages(1);
+      const msg1 = ws.getParsedMessages()[0];
+      expect(msg1.type).toBe(ServerMessageType.AuthError);
+      expect(msg1.message).toMatch(/Invalid or expired authentication token/);
+
+      // Attempt 2: Invalid token (reaches maxRequests and maxFailures)
+      ws.emitClientMessage({
+        type: ClientMessageType.Login,
+        token: 'invalid.token.attempt2',
+      });
+      await ws.waitForMessages(2);
+      const msg2 = ws.getParsedMessages()[1];
+      expect(msg2.type).toBe(ServerMessageType.AuthError);
+      expect(msg2.message).toMatch(/Invalid or expired authentication token/);
+
+      // Attempt 3: Exceeds rate limit
+      ws.emitClientMessage({
+        type: ClientMessageType.Login,
+        token: 'invalid.token.attempt3',
+      });
+      await ws.waitForMessages(3);
+      const msg3 = ws.getParsedMessages()[2];
+      expect(msg3.type).toBe(ServerMessageType.AuthError);
+      expect(msg3.message).toMatch(/Too many login attempts/);
+    });
   });
 });

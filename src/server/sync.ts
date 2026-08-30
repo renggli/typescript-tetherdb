@@ -435,8 +435,19 @@ export class Sync {
       this.userLoginLimiter?.reset(userKey);
       user = candidateUser;
     } else if (msg.token) {
+      if (this.ipLoginLimiter && !this.ipLoginLimiter.consume(ip)) {
+        this.send(webSocket, {
+          type: ServerMessageType.AuthError,
+          requestId: msg.requestId,
+          message: 'Too many login attempts',
+        });
+        return;
+      }
+
       user = await this.storage.getUserByToken(msg.token);
       if (!user) {
+        this.ipLoginLimiter?.recordFailure(ip);
+        this.rateLimiter?.recordFailure(ip);
         this.send(webSocket, {
           type: ServerMessageType.AuthError,
           requestId: msg.requestId,
@@ -444,6 +455,9 @@ export class Sync {
         });
         return;
       }
+
+      this.ipLoginLimiter?.reset(ip);
+      this.rateLimiter?.reset(ip);
     } else {
       this.send(webSocket, {
         type: ServerMessageType.AuthError,
