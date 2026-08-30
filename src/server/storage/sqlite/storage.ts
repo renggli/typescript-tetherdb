@@ -140,7 +140,7 @@ export class SqliteStorage extends BaseStorage {
     return table;
   }
 
-  async getTable(name: string): Promise<TableStorage | undefined> {
+  getTableSync(name: string): TableSqliteStorage | undefined {
     const safeName = validateTableName(name);
     const existingInstance = this.tableInstances.get(safeName);
     if (existingInstance) return existingInstance;
@@ -163,6 +163,10 @@ export class SqliteStorage extends BaseStorage {
     const table = new TableSqliteStorage(safeName, this, parsedSettings);
     this.tableInstances.set(safeName, table);
     return table;
+  }
+
+  async getTable(name: string): Promise<TableStorage | undefined> {
+    return this.getTableSync(name);
   }
 
   async getTables(): Promise<TableStorage[]> {
@@ -307,7 +311,7 @@ export class SqliteStorage extends BaseStorage {
       for (const change of changes) {
         const tableName = validateTableName(change.table);
         const recordId = validateRecordId(change.id);
-        const table = await this.getTable(tableName);
+        const table = this.getTableSync(tableName);
         if (!table) continue;
         const isPrivate = isPrivateTable(table);
 

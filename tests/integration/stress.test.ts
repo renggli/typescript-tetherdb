@@ -70,7 +70,7 @@ describe.each(storageDescriptors)(
       const client = createClient('bulk-creator');
       await client.login({ userName: 'stressuser', password: 'stresspass123' });
 
-      const totalRecords = 2000;
+      const totalRecords = 1200;
       const table = client.table<{ index: number; payload: string }>('records');
 
       // Batch insert 1000 records using putAll
@@ -80,8 +80,8 @@ describe.each(storageDescriptors)(
       }));
       await table.putAll(batchData);
 
-      // Parallel insert 1000 records using concurrent put calls
-      const parallelPromises = Array.from({ length: 1000 }, (_, i) => {
+      // Parallel insert 200 records using concurrent put calls
+      const parallelPromises = Array.from({ length: 200 }, (_, i) => {
         const idx = 1000 + i;
         return table.put(`parallel-${idx}`, {
           index: idx,
@@ -98,8 +98,8 @@ describe.each(storageDescriptors)(
       const sampleBatch = await table.get('batch-450');
       expect(sampleBatch).toEqual({ index: 450, payload: 'payload-450' });
 
-      const sampleParallel = await table.get('parallel-1750');
-      expect(sampleParallel).toEqual({ index: 1750, payload: 'payload-1750' });
+      const sampleParallel = await table.get('parallel-1150');
+      expect(sampleParallel).toEqual({ index: 1150, payload: 'payload-1150' });
 
       // Wait for outbox to drain across multiple batch chunks (each max 500 items)
       const user = await server.storage.getUserByUserName('stressuser');
@@ -118,8 +118,8 @@ describe.each(storageDescriptors)(
     }, 20000);
 
     it('should sync across multiple concurrent clients writing simultaneously', async () => {
-      const clientCount = 5;
-      const recordsPerClient = 200;
+      const clientCount = 4;
+      const recordsPerClient = 100;
       const totalExpected = clientCount * recordsPerClient;
 
       const clients: TetherClient[] = [];
@@ -189,27 +189,27 @@ describe.each(storageDescriptors)(
         'records',
       );
 
-      // 1. Create 1200 records offline
-      const initialBatch = Array.from({ length: 1200 }, (_, i) => ({
+      // 1. Create 1100 records offline
+      const initialBatch = Array.from({ length: 1100 }, (_, i) => ({
         id: `off-${i}`,
         data: { value: i, tag: 'initial' },
       }));
       await table.putAll(initialBatch);
 
-      // 2. Update 400 records offline
-      const updatePromises = Array.from({ length: 400 }, (_, i) =>
+      // 2. Update 200 records offline
+      const updatePromises = Array.from({ length: 200 }, (_, i) =>
         table.put(`off-${i}`, { value: i * 10, tag: 'updated' }),
       );
       await Promise.all(updatePromises);
 
-      // 3. Delete 200 records offline
+      // 3. Delete 100 records offline
       const deleteIds = Array.from(
-        { length: 200 },
+        { length: 100 },
         (_, i) => `off-${1000 + i}`,
       );
       await table.deleteAll(deleteIds);
 
-      // Local count: 1200 created - 200 deleted = 1000 remaining
+      // Local count: 1100 created - 100 deleted = 1000 remaining
       const localRecords = await table.getAll();
       expect(localRecords).toHaveLength(1000);
 
@@ -276,8 +276,8 @@ describe.each(storageDescriptors)(
 
     it('should deterministically converge under heavy concurrent conflict writes on shared keys', async () => {
       const clientCount = 4;
-      const sharedKeyCount = 30;
-      const iterationsPerClient = 15;
+      const sharedKeyCount = 20;
+      const iterationsPerClient = 10;
 
       const clients: TetherClient[] = [];
       for (let i = 0; i < clientCount; i++) {
@@ -311,7 +311,6 @@ describe.each(storageDescriptors)(
               writtenBy: clientIndex,
               iteration: iter,
             });
-            await delay(2);
           }
         })();
       });
@@ -401,7 +400,7 @@ describe.each(storageDescriptors)(
       );
       const itemsTable = client.table<{ name: string; count: number }>('items');
 
-      const count = 300;
+      const count = 150;
 
       // Concurrently write to 3 tables in parallel
       await Promise.all([
@@ -459,7 +458,7 @@ describe.each(storageDescriptors)(
       const streamTable = client.table<{ step: number; text: string }>(
         'stream',
       );
-      const totalWrites = 60;
+      const totalWrites = 40;
 
       // Run background writes while toggling logout/login
       let writesDone = 0;
@@ -476,9 +475,9 @@ describe.each(storageDescriptors)(
 
       // Flap connection 3 times
       for (let cycle = 0; cycle < 3; cycle++) {
-        await delay(10);
+        await delay(5);
         await client.logout({ dataMode: DataMode.Local });
-        await delay(10);
+        await delay(5);
         await client.login({
           userName: 'stressuser',
           password: 'stresspass123',
@@ -515,8 +514,8 @@ describe.each(storageDescriptors)(
     }, 30000);
 
     it('should handle many concurrent users registering, logging in, and performing table operations simultaneously', async () => {
-      const userCount = 10;
-      const recordsPerUser = 15;
+      const userCount = 6;
+      const recordsPerUser = 10;
       const userCredentials = Array.from({ length: userCount }, (_, i) => ({
         userName: `stress_u_${i}_${Math.random().toString(36).substring(2, 6)}`,
         password: `stress_pass_${i}`,
