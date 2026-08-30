@@ -131,8 +131,14 @@ export class Table {
    */
   canUpdate(user?: User, existing?: InternalStoredRecord): boolean {
     const perm = this.settings.permissions.update;
-    const userId = existing?.userId;
-    return isPermissionAllowed(perm, user, userId);
+    if (perm === Permission.Owner) {
+      return (
+        user !== undefined &&
+        existing?.userId !== undefined &&
+        existing.userId === user.userId
+      );
+    }
+    return isPermissionAllowed(perm, user, existing?.userId);
   }
 
   /**
@@ -143,8 +149,14 @@ export class Table {
    */
   canDelete(user?: User, existing?: InternalStoredRecord): boolean {
     const perm = this.settings.permissions.delete;
-    const userId = existing?.userId;
-    return isPermissionAllowed(perm, user, userId);
+    if (perm === Permission.Owner) {
+      return (
+        user !== undefined &&
+        existing?.userId !== undefined &&
+        existing.userId === user.userId
+      );
+    }
+    return isPermissionAllowed(perm, user, existing?.userId);
   }
 
   /**

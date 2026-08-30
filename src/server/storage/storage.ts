@@ -1,3 +1,4 @@
+import * as crypto from 'node:crypto';
 import {
   type ChangeRecord,
   OperationType,
@@ -181,7 +182,20 @@ export abstract class Storage {
   async getUserByToken(token: string): Promise<User | undefined> {
     const payload = verifySessionToken(token, this.secret);
     if (!payload) return undefined;
-    return this.getUser(payload.userId);
+    const user = await this.getUser(payload.userId);
+    if (!user) return undefined;
+    if (payload.pwd !== undefined) {
+      const passwordHash = await this.getUserPasswordHash(user.userId);
+      const expectedPwd = passwordHash
+        ? crypto
+            .createHash('sha256')
+            .update(passwordHash)
+            .digest('hex')
+            .slice(0, 16)
+        : '';
+      if (payload.pwd !== expectedPwd) return undefined;
+    }
+    return user;
   }
 
   /**

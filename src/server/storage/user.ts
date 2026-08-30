@@ -1,3 +1,4 @@
+import * as crypto from 'node:crypto';
 import { TetherServerError, TetherServerErrorCode } from '../errors.js';
 import {
   createSessionToken,
@@ -75,11 +76,13 @@ export class User {
    * @returns Signed token string.
    */
   async createToken(expiresInSeconds?: number): Promise<string> {
+    const passwordHash = await this.storage.getUserPasswordHash(this.userId);
     return createSessionToken(
       this.userId,
       this.userName,
       this.storage.secret,
       expiresInSeconds,
+      passwordHash,
     );
   }
 
@@ -91,7 +94,19 @@ export class User {
    */
   async verifyToken(token: string): Promise<boolean> {
     const payload = verifySessionToken(token, this.storage.secret);
-    return payload !== null && payload.userId === this.userId;
+    if (payload === null || payload.userId !== this.userId) return false;
+    if (payload.pwd !== undefined) {
+      const passwordHash = await this.storage.getUserPasswordHash(this.userId);
+      const expectedPwd = passwordHash
+        ? crypto
+            .createHash('sha256')
+            .update(passwordHash)
+            .digest('hex')
+            .slice(0, 16)
+        : '';
+      if (payload.pwd !== expectedPwd) return false;
+    }
+    return true;
   }
 
   /**

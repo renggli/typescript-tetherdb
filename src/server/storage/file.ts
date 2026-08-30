@@ -312,135 +312,140 @@ export class FileStorage extends Storage {
       }
 
       for (const [partitionId, pChanges] of partitionChanges.entries()) {
-        const partitionDir = this.resolvePartitionDir(partitionId);
-        const metaFile = path.join(partitionDir, 'meta.json');
-        const syncFile = path.join(partitionDir, 'sync.jsonl');
+        await this.withLock(partitionId, async () => {
+          const partitionDir = this.resolvePartitionDir(partitionId);
+          const metaFile = path.join(partitionDir, 'meta.json');
+          const syncFile = path.join(partitionDir, 'sync.jsonl');
 
-        let meta = { currentSeq: 0, minSeq: 0 };
-        try {
-          const metaContent = await fs.readFile(metaFile, 'utf-8');
-          meta = JSON.parse(metaContent);
-        } catch {
-          // Initialize new partition
-        }
-
-        const tableMaps = new Map<string, Map<string, InternalStoredRecord>>();
-        const newChangelogLines: string[] = [];
-
-        for (const change of pChanges) {
-          const tableName = change.table;
-          const table = await this.getTable(tableName);
-          if (!table) continue;
-          const maxRecords = table.settings.maxRecords ?? defaultMaxRecords;
-
-          let map = tableMaps.get(tableName);
-          if (!map) {
-            map = await this.readTableRecords(partitionId, tableName);
-            tableMaps.set(tableName, map);
+          let meta = { currentSeq: 0, minSeq: 0 };
+          try {
+            const metaContent = await fs.readFile(metaFile, 'utf-8');
+            meta = JSON.parse(metaContent);
+          } catch {
+            // Initialize new partition
           }
 
-          const existing = map.get(change.id);
-          if (!options?.skipPermissionCheck) {
-            if (change.op === OperationType.Delete) {
-              if (!table.canDelete(user, existing)) {
+          const tableMaps = new Map<
+            string,
+            Map<string, InternalStoredRecord>
+          >();
+          const newChangelogLines: string[] = [];
+
+          for (const change of pChanges) {
+            const tableName = change.table;
+            const table = await this.getTable(tableName);
+            if (!table) continue;
+            const maxRecords = table.settings.maxRecords ?? defaultMaxRecords;
+
+            let map = tableMaps.get(tableName);
+            if (!map) {
+              map = await this.readTableRecords(partitionId, tableName);
+              tableMaps.set(tableName, map);
+            }
+
+            const existing = map.get(change.id);
+            if (!options?.skipPermissionCheck) {
+              if (change.op === OperationType.Delete) {
+                if (!table.canDelete(user, existing)) {
+                  throw new TetherServerError(
+                    TetherServerErrorCode.Forbidden,
+                    `User does not have delete access to record "${change.id}" in table "${tableName}"`,
+                  );
+                }
+              } else if (!existing || existing.deleted) {
+                if (!table.canCreate(user)) {
+                  throw new TetherServerError(
+                    TetherServerErrorCode.Forbidden,
+                    `User does not have create access to table "${tableName}"`,
+                  );
+                }
+              } else if (!table.canUpdate(user, existing)) {
                 throw new TetherServerError(
                   TetherServerErrorCode.Forbidden,
-                  `User does not have delete access to record "${change.id}" in table "${tableName}"`,
+                  `User does not have update access to record "${change.id}" in table "${tableName}"`,
                 );
               }
-            } else if (!existing || existing.deleted) {
-              if (!table.canCreate(user)) {
-                throw new TetherServerError(
-                  TetherServerErrorCode.Forbidden,
-                  `User does not have create access to table "${tableName}"`,
-                );
-              }
-            } else if (!table.canUpdate(user, existing)) {
+            }
+
+            if (
+              change.op === OperationType.Put &&
+              (!existing || existing.deleted) &&
+              map.size >= maxRecords
+            ) {
               throw new TetherServerError(
-                TetherServerErrorCode.Forbidden,
-                `User does not have update access to record "${change.id}" in table "${tableName}"`,
+                TetherServerErrorCode.LimitExceeded,
+                `Table record limit reached (${maxRecords} records)`,
               );
+            }
+
+            const shouldApply = !existing || shouldOverwrite(change, existing);
+            if (shouldApply) {
+              meta.currentSeq++;
+              if (meta.minSeq === 0) meta.minSeq = 1;
+              const assignedSeq = meta.currentSeq;
+              const isDeleted = change.op === OperationType.Delete;
+              const nextVersion = (existing?.version ?? 0) + 1;
+              const userId = existing?.userId ?? user?.userId;
+
+              const updatedRecord: InternalStoredRecord = {
+                id: change.id,
+                version: nextVersion,
+                timestamp: change.timestamp,
+                clientId: change.clientId,
+                deleted: isDeleted,
+                data: isDeleted ? null : (change.data ?? null),
+                userId,
+              };
+
+              const appliedChange: InternalChangeRecord = {
+                seq: assignedSeq,
+                table: change.table,
+                id: change.id,
+                op: change.op,
+                version: nextVersion,
+                timestamp: change.timestamp,
+                clientId: change.clientId,
+                data: isDeleted ? undefined : change.data,
+                userId,
+              };
+
+              map.set(change.id, updatedRecord);
+              appliedList.push(appliedChange);
+              newChangelogLines.push(JSON.stringify(appliedChange));
+              maxNewSeq = Math.max(maxNewSeq, assignedSeq);
             }
           }
 
-          if (
-            change.op === OperationType.Put &&
-            (!existing || existing.deleted) &&
-            map.size >= maxRecords
-          ) {
-            throw new TetherServerError(
-              TetherServerErrorCode.LimitExceeded,
-              `Table record limit reached (${maxRecords} records)`,
+          // Save records per table
+          for (const [tableName, map] of tableMaps.entries()) {
+            const recordsFile = path.join(
+              partitionDir,
+              tableName,
+              'records.json',
+            );
+            await writeFileAtomic(
+              recordsFile,
+              JSON.stringify(Array.from(map.values()), null, 2),
             );
           }
 
-          const shouldApply = !existing || shouldOverwrite(change, existing);
-          if (shouldApply) {
-            meta.currentSeq++;
-            if (meta.minSeq === 0) meta.minSeq = 1;
-            const assignedSeq = meta.currentSeq;
-            const isDeleted = change.op === OperationType.Delete;
-            const nextVersion = (existing?.version ?? 0) + 1;
-            const userId = existing?.userId ?? user?.userId;
-
-            const updatedRecord: InternalStoredRecord = {
-              id: change.id,
-              version: nextVersion,
-              timestamp: change.timestamp,
-              clientId: change.clientId,
-              deleted: isDeleted,
-              data: isDeleted ? null : (change.data ?? null),
-              userId,
-            };
-
-            const appliedChange: InternalChangeRecord = {
-              seq: assignedSeq,
-              table: change.table,
-              id: change.id,
-              op: change.op,
-              version: nextVersion,
-              timestamp: change.timestamp,
-              clientId: change.clientId,
-              data: isDeleted ? undefined : change.data,
-              userId,
-            };
-
-            map.set(change.id, updatedRecord);
-            appliedList.push(appliedChange);
-            newChangelogLines.push(JSON.stringify(appliedChange));
-            maxNewSeq = Math.max(maxNewSeq, assignedSeq);
+          // Append to sync.jsonl
+          if (newChangelogLines.length > 0) {
+            const appendContent = `${newChangelogLines.join('\n')}\n`;
+            await fs.mkdir(partitionDir, { recursive: true });
+            await fs.appendFile(syncFile, appendContent, 'utf-8');
           }
-        }
 
-        // Save records per table
-        for (const [tableName, map] of tableMaps.entries()) {
-          const recordsFile = path.join(
+          // Save updated meta
+          await writeFileAtomic(metaFile, JSON.stringify(meta, null, 2));
+
+          // Auto-pruning
+          await this.prunePartitionSyncFile(
             partitionDir,
-            tableName,
-            'records.json',
+            defaultMaxHistory,
+            defaultMaxHistory + 50,
           );
-          await writeFileAtomic(
-            recordsFile,
-            JSON.stringify(Array.from(map.values()), null, 2),
-          );
-        }
-
-        // Append to sync.jsonl
-        if (newChangelogLines.length > 0) {
-          const appendContent = `${newChangelogLines.join('\n')}\n`;
-          await fs.mkdir(partitionDir, { recursive: true });
-          await fs.appendFile(syncFile, appendContent, 'utf-8');
-        }
-
-        // Save updated meta
-        await writeFileAtomic(metaFile, JSON.stringify(meta, null, 2));
-
-        // Auto-pruning
-        await this.prunePartitionSyncFile(
-          partitionDir,
-          defaultMaxHistory,
-          defaultMaxHistory + 50,
-        );
+        });
       }
 
       const resolver = new UserResolver(this);

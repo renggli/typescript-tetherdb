@@ -752,6 +752,95 @@ describe.each(storageDescriptors)(
 
         expect(await table.getRecord(undefined, 'tmp-1')).toBeUndefined();
       });
+
+      it('should prevent non-creator from updating or deleting unowned records when policy is Permission.Owner', async () => {
+        const table = await storage.createTable('shared_owner_unowned', {
+          permissions: {
+            create: Permission.Authenticated,
+            read: Permission.Everybody,
+            update: Permission.Owner,
+            delete: Permission.Owner,
+          },
+        });
+
+        // Insert unowned record (userId undefined)
+        await storage.applyChanges(
+          undefined,
+          [
+            {
+              table: 'shared_owner_unowned',
+              id: 'unowned-rec',
+              op: OperationType.Put,
+              data: { text: 'System default' },
+              timestamp: 1000,
+              clientId: 'system',
+            },
+          ],
+          { skipPermissionCheck: true },
+        );
+
+        // Alice attempts to update unowned record -> rejected
+        await expect(
+          storage.applyChanges(userAlice, [
+            {
+              table: 'shared_owner_unowned',
+              id: 'unowned-rec',
+              op: OperationType.Put,
+              data: { text: 'Hijacked' },
+              timestamp: 2000,
+              clientId: 'c1',
+            },
+          ]),
+        ).rejects.toMatchObject({
+          code: TetherServerErrorCode.Forbidden,
+        });
+
+        // Alice attempts to delete unowned record -> rejected
+        await expect(
+          storage.applyChanges(userAlice, [
+            {
+              table: 'shared_owner_unowned',
+              id: 'unowned-rec',
+              op: OperationType.Delete,
+              timestamp: 2000,
+              clientId: 'c1',
+            },
+          ]),
+        ).rejects.toMatchObject({
+          code: TetherServerErrorCode.Forbidden,
+        });
+
+        const rec = await table.getRecord(undefined, 'unowned-rec');
+        expect(rec?.data).toEqual({ text: 'System default' });
+      });
+    });
+
+    describe('Session Token Invalidation on Password Change', () => {
+      it('should invalidate existing session tokens when user changes password', async () => {
+        const user = await storage.createUser('eve', 'OldPassword123!');
+        const initialToken = await user.createToken();
+
+        // Initial token is valid
+        const authUserBefore = await storage.getUserByToken(initialToken);
+        expect(authUserBefore).toBeDefined();
+        expect(authUserBefore?.userId).toBe(user.userId);
+        expect(await user.verifyToken(initialToken)).toBe(true);
+
+        // User changes password
+        await user.changePassword('NewSecurePassword456!');
+
+        // Old token is immediately invalidated
+        const authUserAfter = await storage.getUserByToken(initialToken);
+        expect(authUserAfter).toBeUndefined();
+        expect(await user.verifyToken(initialToken)).toBe(false);
+
+        // New token is valid
+        const newToken = await user.createToken();
+        const authUserNew = await storage.getUserByToken(newToken);
+        expect(authUserNew).toBeDefined();
+        expect(authUserNew?.userId).toBe(user.userId);
+        expect(await user.verifyToken(newToken)).toBe(true);
+      });
     });
   },
 );

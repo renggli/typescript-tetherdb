@@ -3,7 +3,11 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { TetherServerErrorCode } from '../../../src/server/errors.js';
 import { FileStorage } from '../../../src/server/storage/file.js';
-import { type ChangeRecord, OperationType } from '../../../src/shared/types.js';
+import {
+  type ChangeRecord,
+  OperationType,
+  PUBLIC_READ_WRITE_PERMISSIONS,
+} from '../../../src/shared/types.js';
 import { type FileBasedStorageContext, fileStorage } from './matrix.js';
 
 describe('FileStorage', () => {
@@ -380,5 +384,35 @@ describe('FileStorage', () => {
     const deleted = await tableToDelete?.delete();
     expect(deleted).toBe(true);
     expect(await context.backend.getTable('to_delete')).toBeUndefined();
+  });
+
+  it('should maintain partition synchronization during concurrent applyChanges and maintenance prune', async () => {
+    const user = await context.backend.createUser('concurrent_user', 'pass');
+    const table = await context.backend.createTable('sync_test', {
+      permissions: PUBLIC_READ_WRITE_PERMISSIONS,
+    });
+
+    const writes = Array.from({ length: 20 }).map((_, i) =>
+      table.applyChanges(user, [
+        {
+          table: 'sync_test',
+          id: `entry-${i}`,
+          op: OperationType.Put,
+          data: { index: i },
+          timestamp: 1000 + i,
+          clientId: 'client-concurrent',
+        },
+      ]),
+    );
+
+    const prunes = [
+      context.backend.prune(5),
+      context.backend.getRawChangesSince(0, user),
+    ];
+
+    await Promise.all([...writes, ...prunes]);
+
+    const records = await table.getAllRecords(user);
+    expect(records.length).toBeGreaterThan(0);
   });
 });

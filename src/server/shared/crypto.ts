@@ -122,13 +122,25 @@ export function createSessionToken(
   userName: string,
   secret: string,
   expiresInSeconds = DEFAULT_TOKEN_EXPIRES_IN,
+  pwdHash?: string | null,
 ): string {
   const expiresAt = Math.floor(Date.now() / 1000) + expiresInSeconds;
-  const payload = JSON.stringify({
+  const payloadObj: {
+    userId: string;
+    userName: string;
+    expiresAt: number;
+    pwd?: string;
+  } = {
     userId,
     userName,
     expiresAt,
-  });
+  };
+  if (pwdHash !== undefined) {
+    payloadObj.pwd = pwdHash
+      ? crypto.createHash('sha256').update(pwdHash).digest('hex').slice(0, 16)
+      : '';
+  }
+  const payload = JSON.stringify(payloadObj);
   const payloadB64 = Buffer.from(payload, 'utf-8').toString('base64url');
   const signature = crypto
     .createHmac('sha256', secret)
@@ -150,6 +162,7 @@ export function verifySessionToken(
 ): {
   userId: string;
   userName: string;
+  pwd?: string;
   expiresAt: number;
 } | null {
   if (!token || typeof token !== 'string') return null;
@@ -188,11 +201,20 @@ export function verifySessionToken(
     ) {
       return null;
     }
-    return {
+    const result: {
+      userId: string;
+      userName: string;
+      expiresAt: number;
+      pwd?: string;
+    } = {
       userId: parsed.userId,
       userName: parsed.userName,
       expiresAt: parsed.expiresAt,
     };
+    if (typeof parsed.pwd === 'string') {
+      result.pwd = parsed.pwd;
+    }
+    return result;
   } catch {
     return null;
   }

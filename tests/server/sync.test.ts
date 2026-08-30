@@ -978,5 +978,80 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       expect(msg3.type).toBe(ServerMessageType.AuthError);
       expect(msg3.message).toMatch(/Too many login attempts/);
     });
+
+    it('should not reset IP login failure counters when authenticating with a token', async () => {
+      const ipLimiter = new RateLimiter({
+        windowMs: 60_000,
+        maxRequests: 10,
+        maxFailures: 2,
+        initialBackoffMs: 5_000,
+      });
+
+      const limitedSync = new Sync(storage, {
+        ipLoginLimiter: ipLimiter,
+      });
+
+      const ws = new MockServerWebSocket();
+      limitedSync.handleConnection(ws as unknown as WebSocket, '192.168.1.99');
+
+      // 2 failed password attempts -> triggers failure lockout on IP
+      ws.emitClientMessage({
+        type: ClientMessageType.Login,
+        userName: 'alice',
+        password: 'wrong_password_1',
+      });
+      await ws.waitForMessages(1);
+
+      ws.emitClientMessage({
+        type: ClientMessageType.Login,
+        userName: 'alice',
+        password: 'wrong_password_2',
+      });
+      await ws.waitForMessages(2);
+
+      // Authenticate with valid token on the same IP
+      ws.emitClientMessage({
+        type: ClientMessageType.Login,
+        token: validToken,
+      });
+      await ws.waitForMessages(3);
+
+      // Attempt another password login from the same IP -> should remain blocked by IP failure cooldown
+      ws.emitClientMessage({
+        type: ClientMessageType.Login,
+        userName: 'alice',
+        password: 'password123',
+      });
+      await ws.waitForMessages(4);
+
+      const msgs = ws.getParsedMessages();
+      const lastMsg = msgs[msgs.length - 1];
+      expect(lastMsg.type).toBe(ServerMessageType.AuthError);
+      expect((lastMsg as { message: string }).message).toMatch(
+        /Too many login attempts/,
+      );
+    });
+
+    it('should terminate connection when pending message queue exceeds maximum capacity', async () => {
+      const ws = new MockServerWebSocket();
+      sync.handleConnection(ws as unknown as WebSocket);
+
+      // Flood 1100 messages synchronously exceeding maxPendingMessages (1000)
+      for (let i = 0; i < 1100; i++) {
+        ws.emitClientMessage({ type: ClientMessageType.Ping });
+      }
+
+      await ws.waitForClose();
+      expect(ws.isClosed).toBe(true);
+      const messages = ws.getParsedMessages();
+      const errorMsg = messages.find(
+        (m) =>
+          m.type === ServerMessageType.Error &&
+          (m as { message: string }).message.includes(
+            'Message queue limit exceeded',
+          ),
+      );
+      expect(errorMsg).toBeDefined();
+    });
   });
 });
