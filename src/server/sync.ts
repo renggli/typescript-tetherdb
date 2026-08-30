@@ -1,3 +1,4 @@
+import * as crypto from 'node:crypto';
 import type { WebSocket } from 'ws';
 import {
   type AuthClientMessage,
@@ -790,7 +791,7 @@ export class Sync {
   ): Promise<void> {
     let client = this.webSocketToClient.get(webSocket);
     if (!client) {
-      const clientId = `client_${Math.random().toString(36).substring(2, 8)}`;
+      const clientId = `client_${crypto.randomBytes(4).toString('hex')}`;
       client = {
         webSocket,
         clientId,

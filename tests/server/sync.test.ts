@@ -911,5 +911,27 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         expect(diffMsg.changes[0].userName).not.toBe('bob_feed');
       }
     });
+
+    it('generates cryptographically secure hexadecimal client IDs when logging in without prior auth', async () => {
+      const ws = new MockServerWebSocket();
+      sync.handleConnection(ws as unknown as WebSocket);
+      ws.emitClientMessage({
+        type: ClientMessageType.Login,
+        userName: 'alice',
+        password: 'password123',
+      });
+
+      await ws.waitForMessages(2);
+      const messages = ws.getParsedMessages();
+      expect(messages[0].type).toBe(ServerMessageType.AuthSuccess);
+
+      const client = (
+        sync as unknown as {
+          webSocketToClient: Map<unknown, { clientId: string }>;
+        }
+      ).webSocketToClient.get(ws);
+      expect(client).toBeDefined();
+      expect(client?.clientId).toMatch(/^client_[0-9a-f]{8}$/);
+    });
   });
 });
