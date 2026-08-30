@@ -1,4 +1,8 @@
-import type { ChangeRecord, TableSettings } from '../../../shared/types.js';
+import {
+  type ChangeRecord,
+  OperationType,
+  type TableSettings,
+} from '../../../shared/types.js';
 import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
 import { verifySessionToken } from '../../shared/crypto.js';
 import {
@@ -135,6 +139,17 @@ export async function validateBatchChanges(
   defaultMaxRecordSize = 512 * 1024,
 ): Promise<void> {
   for (const change of changes) {
+    if (
+      !change ||
+      typeof change !== 'object' ||
+      (change.op !== OperationType.Put && change.op !== OperationType.Delete)
+    ) {
+      throw new TetherServerError(
+        TetherServerErrorCode.InvalidInput,
+        `Invalid change operation "${change?.op}"`,
+      );
+    }
+
     const tableName = validateTableName(change.table);
     validateRecordId(change.id);
     validateTimestamp(change.timestamp);

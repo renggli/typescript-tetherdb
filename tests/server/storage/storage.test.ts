@@ -407,4 +407,20 @@ function runStorageTestSuite(createStorage: () => Storage) {
       ]),
     ).rejects.toThrow('Timestamp drift exceeds maximum allowable threshold');
   });
+
+  it('should reject change records with invalid or missing operation type', async () => {
+    const user = await storage.createUser('op_user', 'password');
+
+    const invalidChange = {
+      table: 'todos',
+      id: 'invalid-op-task',
+      op: 'invalid_operation' as unknown as OperationType,
+      data: { title: 'Invalid' },
+      timestamp: Date.now(),
+    };
+
+    await expect(storage.applyChanges(user, [invalidChange])).rejects.toThrow(
+      /Invalid change operation/,
+    );
+  });
 }
