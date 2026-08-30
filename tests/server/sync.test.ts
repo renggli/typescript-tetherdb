@@ -77,6 +77,27 @@ class MockServerWebSocket extends EventEmitter {
   }
 }
 
+async function connectAndAuth(
+  sync: Sync,
+  token: string,
+  options: {
+    clientId?: string;
+    lastSyncSeq?: number;
+    expectedMessages?: number;
+  } = {},
+): Promise<{ ws: MockServerWebSocket; messages: ServerMessage[] }> {
+  const ws = new MockServerWebSocket();
+  sync.handleConnection(ws as unknown as WebSocket);
+  ws.emitClientMessage({
+    type: ClientMessageType.Auth,
+    token,
+    clientId: options.clientId ?? 'client-1',
+    lastSyncSeq: options.lastSyncSeq ?? 0,
+  });
+  await ws.waitForMessages(options.expectedMessages ?? 2);
+  return { ws, messages: ws.getParsedMessages() };
+}
+
 describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
   let context: StorageContext;
   let storage: Storage;
@@ -164,19 +185,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
     });
 
     it('should successfully authenticate and return AuthSuccess + initial snapshot for seq 0', async () => {
-      const ws = new MockServerWebSocket();
-      sync.handleConnection(ws as unknown as WebSocket);
-
-      ws.emitClientMessage({
-        type: ClientMessageType.Auth,
-        token: validToken,
-        clientId: 'client-1',
-        lastSyncSeq: 0,
-      });
-
-      await ws.waitForMessages(2);
-
-      const messages = ws.getParsedMessages();
+      const { messages } = await connectAndAuth(sync, validToken);
       expect(messages).toHaveLength(2);
 
       // 1. AuthSuccess
@@ -213,19 +222,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         },
       ]);
 
-      const ws = new MockServerWebSocket();
-      sync.handleConnection(ws as unknown as WebSocket);
-
-      ws.emitClientMessage({
-        type: ClientMessageType.Auth,
-        token: validToken,
-        clientId: 'client-1',
-        lastSyncSeq: 0,
-      });
-
-      await ws.waitForMessages(2);
-
-      const messages = ws.getParsedMessages();
+      const { messages } = await connectAndAuth(sync, validToken);
       expect(messages).toHaveLength(2);
       expect(messages[1].type).toBe(ServerMessageType.SyncSnapshot);
       if (messages[1].type === ServerMessageType.SyncSnapshot) {
@@ -258,19 +255,9 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         },
       ]);
 
-      const ws = new MockServerWebSocket();
-      sync.handleConnection(ws as unknown as WebSocket);
-
-      ws.emitClientMessage({
-        type: ClientMessageType.Auth,
-        token: validToken,
-        clientId: 'client-1',
+      const { messages } = await connectAndAuth(sync, validToken, {
         lastSyncSeq: 1,
       });
-
-      await ws.waitForMessages(2);
-
-      const messages = ws.getParsedMessages();
       expect(messages).toHaveLength(2);
       expect(messages[1].type).toBe(ServerMessageType.SyncDiff);
       if (messages[1].type === ServerMessageType.SyncDiff) {
@@ -299,20 +286,10 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       }
       await storage.applyChanges(user, changes);
 
-      const ws = new MockServerWebSocket();
-      sync.handleConnection(ws as unknown as WebSocket);
-
       // Client connecting with seq 1 (> 50 changes diff, but changelog retained)
-      ws.emitClientMessage({
-        type: ClientMessageType.Auth,
-        token: validToken,
-        clientId: 'client-1',
+      const { messages } = await connectAndAuth(sync, validToken, {
         lastSyncSeq: 1,
       });
-
-      await ws.waitForMessages(2);
-
-      const messages = ws.getParsedMessages();
       expect(messages).toHaveLength(2);
       expect(messages[1].type).toBe(ServerMessageType.SyncDiff);
       if (messages[1].type === ServerMessageType.SyncDiff) {

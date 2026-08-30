@@ -29,3 +29,13 @@ export async function waitForCondition(
   }
   throw new Error(`waitForCondition timed out after ${timeoutMs}ms`);
 }
+
+/**
+ * Generates a unique, randomized database name for test isolation.
+ *
+ * @param prefix - Name prefix (default: 'db').
+ * @returns Randomized database name string.
+ */
+export function randomDbName(prefix = 'db'): string {
+  return `${prefix}-${Math.random().toString(36).substring(2, 8)}`;
+}

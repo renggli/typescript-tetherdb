@@ -8,7 +8,7 @@ import {
 } from '../../src/client/index.js';
 import type { Storage } from '../../src/client/storage.js';
 import { TetherServer } from '../../src/server/server.js';
-import { delay, waitForCondition } from '../helpers.js';
+import { delay, randomDbName, waitForCondition } from '../helpers.js';
 import {
   type StorageContext,
   storageDescriptors,
@@ -57,14 +57,11 @@ describe.each(storageDescriptors)(
       name: string,
       overrides: Partial<TetherClientOptions> = {},
     ): TetherClient {
-      const client = new TetherClient(
-        `${name}-${Math.random().toString(36).substring(2, 8)}`,
-        {
-          url: `ws://127.0.0.1:${port}/tether`,
-          webSocketClass: WebSocket,
-          ...overrides,
-        },
-      );
+      const client = new TetherClient(randomDbName(name), {
+        url: `ws://127.0.0.1:${port}/tether`,
+        webSocketClass: WebSocket,
+        ...overrides,
+      });
       clientsToClean.push(client);
       return client;
     }

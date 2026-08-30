@@ -3,11 +3,10 @@ import type {
   StoredRecord,
   TableSettings,
 } from '../../../shared/types.js';
-import { validateRecordId, validateUserId } from '../../shared/validate.js';
+import { validateRecordId } from '../../shared/validate.js';
 import {
   canRead,
   filterActiveRecords,
-  isPrivateTable,
   TableBaseStorage,
 } from '../base/index.js';
 import type { UserStorage } from '../user.js';
@@ -40,12 +39,7 @@ export class TableFileStorage extends TableBaseStorage<FileStorage> {
     if (!canRead(this, user)) {
       return undefined;
     }
-    const isPrivate = isPrivateTable(this);
-    const effectiveUserId = isPrivate
-      ? user
-        ? validateUserId(user.userId)
-        : undefined
-      : '__shared__';
+    const effectiveUserId = this.resolveEffectiveUserId(user);
     if (!effectiveUserId) return undefined;
 
     const safeId = validateRecordId(id);
@@ -61,12 +55,7 @@ export class TableFileStorage extends TableBaseStorage<FileStorage> {
     if (!canRead(this, user)) {
       return [];
     }
-    const isPrivate = isPrivateTable(this);
-    const effectiveUserId = isPrivate
-      ? user
-        ? validateUserId(user.userId)
-        : undefined
-      : '__shared__';
+    const effectiveUserId = this.resolveEffectiveUserId(user);
     if (!effectiveUserId) return [];
 
     const map = await this.storage.readTableRecords(effectiveUserId, this.name);

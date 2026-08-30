@@ -209,29 +209,12 @@ export class Table<T = unknown> {
   async putAll(entries: TablePutEntry<T>[]): Promise<T[]> {
     if (entries.length === 0) return [];
 
-    const ids = entries.map((e) => e.id);
-    const existingMap = await this.storage.getRecords<T>(this.tableName, ids);
-    const now = Date.now();
-
-    const mutations: LocalMutationItem<T>[] = [];
-    const events: TableChangeEvent<T>[] = [];
-    const savedData: T[] = [];
-
-    for (const entry of entries) {
-      const { mutation, event } = this.createMutationItem(
-        entry.id,
-        OperationType.Put,
-        existingMap.get(entry.id),
-        now,
-        entry.data,
-      );
-      mutations.push(mutation);
-      events.push(event);
-      savedData.push(entry.data);
-    }
-
+    const { mutations, events } = await this.createBatchMutations(
+      entries,
+      OperationType.Put,
+    );
     await this.applyAndPublish(mutations, events);
-    return savedData;
+    return entries.map((e) => e.data);
   }
 
   /**
@@ -255,25 +238,10 @@ export class Table<T = unknown> {
   async deleteAll(ids: string[]): Promise<number> {
     if (ids.length === 0) return 0;
 
-    const existingMap = await this.storage.getRecords<T>(this.tableName, ids);
-    const now = Date.now();
-
-    const mutations: LocalMutationItem<T>[] = [];
-    const events: TableChangeEvent<T>[] = [];
-
-    for (const id of ids) {
-      const existing = existingMap.get(id);
-      if (!existing || existing.deleted) continue;
-
-      const { mutation, event } = this.createMutationItem(
-        id,
-        OperationType.Delete,
-        existing,
-        now,
-      );
-      mutations.push(mutation);
-      events.push(event);
-    }
+    const { mutations, events } = await this.createBatchMutations(
+      ids.map((id) => ({ id })),
+      OperationType.Delete,
+    );
 
     if (mutations.length > 0) {
       await this.applyAndPublish(mutations, events);
@@ -393,5 +361,37 @@ export class Table<T = unknown> {
   ): Promise<void> {
     await this.storage.applyLocalChanges(this.tableName, mutations);
     this.onChange.publish(events);
+  }
+
+  private async createBatchMutations(
+    entries: { id: string; data?: T }[],
+    op: OperationType,
+  ): Promise<{
+    mutations: LocalMutationItem<T>[];
+    events: TableChangeEvent<T>[];
+  }> {
+    const ids = entries.map((e) => e.id);
+    const existingMap = await this.storage.getRecords<T>(this.tableName, ids);
+    const now = Date.now();
+    const mutations: LocalMutationItem<T>[] = [];
+    const events: TableChangeEvent<T>[] = [];
+
+    for (const entry of entries) {
+      const existing = existingMap.get(entry.id);
+      if (op === OperationType.Delete && (!existing || existing.deleted)) {
+        continue;
+      }
+      const { mutation, event } = this.createMutationItem(
+        entry.id,
+        op,
+        existing,
+        now,
+        entry.data,
+      );
+      mutations.push(mutation);
+      events.push(event);
+    }
+
+    return { mutations, events };
   }
 }

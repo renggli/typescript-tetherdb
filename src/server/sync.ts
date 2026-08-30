@@ -368,33 +368,7 @@ export class Sync {
       return;
     }
 
-    let client = this.webSocketToClient.get(webSocket);
-    if (!client) {
-      const clientId = `client_${Math.random().toString(36).substring(2, 8)}`;
-      client = {
-        webSocket,
-        clientId,
-        user,
-      };
-      this.webSocketToClient.set(webSocket, client);
-      this.clients.add(client);
-    } else {
-      client.user = user;
-    }
-
-    const currentSeq = await this.storage.getCurrentSeq(user);
-    const token = await user.createToken();
-
-    this.send(webSocket, {
-      type: ServerMessageType.AuthSuccess,
-      requestId: msg.requestId,
-      protocolVersion: PROTOCOL_VERSION,
-      userName: user.userName,
-      currentSeq,
-      token,
-    });
-
-    await this.performSync(client, 0, client.tables);
+    await this.completeAuthentication(webSocket, user, msg.requestId);
   }
 
   private async handleLoginMessage(
@@ -490,33 +464,7 @@ export class Sync {
       }
     }
 
-    let client = this.webSocketToClient.get(webSocket);
-    if (!client) {
-      const clientId = `client_${Math.random().toString(36).substring(2, 8)}`;
-      client = {
-        webSocket,
-        clientId,
-        user,
-      };
-      this.webSocketToClient.set(webSocket, client);
-      this.clients.add(client);
-    } else {
-      client.user = user;
-    }
-
-    const currentSeq = await this.storage.getCurrentSeq(user);
-    const token = await user.createToken();
-
-    this.send(webSocket, {
-      type: ServerMessageType.AuthSuccess,
-      requestId: msg.requestId,
-      protocolVersion: PROTOCOL_VERSION,
-      userName: user.userName,
-      currentSeq,
-      token,
-    });
-
-    await this.performSync(client, 0, client.tables);
+    await this.completeAuthentication(webSocket, user, msg.requestId);
   }
 
   private async handleLogoutMessage(
@@ -819,6 +767,40 @@ export class Sync {
         });
       }
     }
+  }
+
+  private async completeAuthentication(
+    webSocket: WebSocket,
+    user: UserStorage,
+    requestId?: string,
+  ): Promise<void> {
+    let client = this.webSocketToClient.get(webSocket);
+    if (!client) {
+      const clientId = `client_${Math.random().toString(36).substring(2, 8)}`;
+      client = {
+        webSocket,
+        clientId,
+        user,
+      };
+      this.webSocketToClient.set(webSocket, client);
+      this.clients.add(client);
+    } else {
+      client.user = user;
+    }
+
+    const currentSeq = await this.storage.getCurrentSeq(user);
+    const token = await user.createToken();
+
+    this.send(webSocket, {
+      type: ServerMessageType.AuthSuccess,
+      requestId,
+      protocolVersion: PROTOCOL_VERSION,
+      userName: user.userName,
+      currentSeq,
+      token,
+    });
+
+    await this.performSync(client, 0, client.tables);
   }
 }
 

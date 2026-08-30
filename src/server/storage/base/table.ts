@@ -10,6 +10,7 @@ import {
   type TableSettings,
 } from '../../../shared/types.js';
 import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
+import { validateUserId } from '../../shared/validate.js';
 import type { ApplyChangesOptions, TableStorage } from '../table.js';
 import type { UserStorage } from '../user.js';
 import type { BaseStorage } from './storage.js';
@@ -153,6 +154,13 @@ export abstract class TableBaseStorage<
     this.settings = updated;
     return this.settings;
   }
+
+  protected resolveEffectiveUserId(user?: UserStorage): string | undefined {
+    if (isPrivateTable(this)) {
+      return user ? validateUserId(user.userId) : undefined;
+    }
+    return '__shared__';
+  }
 }
 
 /**
@@ -285,24 +293,14 @@ export function assertCanMutate(
   const perms = table.settings.permissions;
 
   if (change.op === OperationType.Delete) {
-    const perm = perms.delete;
-    const recordUserId =
-      (existing as { userId?: string } | undefined)?.userId ??
-      (perm === Permission.Owner ? '' : undefined);
-    if (!isPermissionAllowed(perm, user, recordUserId)) {
-      throw new TetherServerError(
-        TetherServerErrorCode.Forbidden,
-        `User does not have delete access to record "${change.id}" in table "${table.name}"`,
-      );
-    }
+    assertRecordAccess(table, user, change, perms.delete, 'delete', existing);
     return;
   }
 
   // OperationType.Put
   if (!existing || existing.deleted) {
     // Creating a new record
-    const perm = perms.create;
-    if (!isPermissionAllowed(perm, user, undefined)) {
+    if (!isPermissionAllowed(perms.create, user, undefined)) {
       throw new TetherServerError(
         TetherServerErrorCode.Forbidden,
         `User does not have create access to table "${table.name}"`,
@@ -310,16 +308,7 @@ export function assertCanMutate(
     }
   } else {
     // Updating an existing record
-    const perm = perms.update;
-    const recordUserId =
-      (existing as { userId?: string } | undefined)?.userId ??
-      (perm === Permission.Owner ? '' : undefined);
-    if (!isPermissionAllowed(perm, user, recordUserId)) {
-      throw new TetherServerError(
-        TetherServerErrorCode.Forbidden,
-        `User does not have update access to record "${change.id}" in table "${table.name}"`,
-      );
-    }
+    assertRecordAccess(table, user, change, perms.update, 'update', existing);
   }
 }
 
@@ -353,4 +342,23 @@ export function canReadRecord(
     (record as { userId?: string }).userId ??
     (readPerm === Permission.Owner ? '' : undefined);
   return isPermissionAllowed(readPerm, user, userId);
+}
+
+function assertRecordAccess(
+  table: TableStorage,
+  user: UserStorage | undefined,
+  change: ChangeRecord,
+  perm: Permission,
+  action: 'update' | 'delete',
+  existing?: StoredRecord,
+): void {
+  const recordUserId =
+    (existing as { userId?: string } | undefined)?.userId ??
+    (perm === Permission.Owner ? '' : undefined);
+  if (!isPermissionAllowed(perm, user, recordUserId)) {
+    throw new TetherServerError(
+      TetherServerErrorCode.Forbidden,
+      `User does not have ${action} access to record "${change.id}" in table "${table.name}"`,
+    );
+  }
 }

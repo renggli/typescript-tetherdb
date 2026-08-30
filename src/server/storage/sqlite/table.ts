@@ -3,8 +3,8 @@ import type {
   StoredRecord,
   TableSettings,
 } from '../../../shared/types.js';
-import { validateRecordId, validateUserId } from '../../shared/validate.js';
-import { canRead, isPrivateTable, TableBaseStorage } from '../base/index.js';
+import { validateRecordId } from '../../shared/validate.js';
+import { canRead, TableBaseStorage } from '../base/index.js';
 import type { UserStorage } from '../user.js';
 import type { SqliteStorage } from './storage.js';
 
@@ -46,14 +46,6 @@ export class TableSqliteStorage extends TableBaseStorage<SqliteStorage> {
     } catch {
       return raw;
     }
-  }
-
-  private resolveEffectiveUserId(user?: UserStorage): string | undefined {
-    const isPrivate = isPrivateTable(this);
-    if (isPrivate) {
-      return user ? validateUserId(user.userId) : undefined;
-    }
-    return '__shared__';
   }
 
   async getRecord(
