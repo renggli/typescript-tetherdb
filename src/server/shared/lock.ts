@@ -87,6 +87,26 @@ export function readServerLock(baseDir: string): ServerLockInfo | null {
 }
 
 /**
+ * Validates that no external TetherDB server process is actively running on this data directory.
+ *
+ * @param baseDir - Storage base directory.
+ * @param backendLabel - Storage backend description ('sqlite' | 'file' | 'storage').
+ * @throws TetherServerError if an active server lock is held by another process.
+ */
+export function assertNoActiveServerLock(
+  baseDir: string,
+  backendLabel = 'storage',
+): void {
+  const lock = readServerLock(baseDir);
+  if (lock && lock.pid !== process.pid) {
+    throw new TetherServerError(
+      TetherServerErrorCode.NotSupported,
+      `Cannot modify ${backendLabel} storage directly while server is running (PID ${lock.pid})`,
+    );
+  }
+}
+
+/**
  * Acquires an exclusive server lock on the specified directory to prevent multiple instances
  * from running against the same data storage.
  *

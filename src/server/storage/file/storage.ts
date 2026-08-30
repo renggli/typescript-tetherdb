@@ -10,7 +10,7 @@ import {
 } from '../../../shared/types.js';
 import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
 import { getOrCreateKeyfileSecret, hashPassword } from '../../shared/crypto.js';
-import { readServerLock } from '../../shared/lock.js';
+import { assertNoActiveServerLock } from '../../shared/lock.js';
 import {
   getUserBucket,
   normalizeUserName,
@@ -704,21 +704,7 @@ export class FileStorage extends BaseStorage {
 
 // -- Private Helpers --------------------------------------------------------
 
-/**
- * Validates that no external TetherDB server process is actively running on this data directory.
- *
- * @param baseDir - Storage base directory.
- * @throws TetherServerError if an active server lock is held by another process.
- */
-export function assertNoActiveServerLock(baseDir: string): void {
-  const lock = readServerLock(baseDir);
-  if (lock && lock.pid !== process.pid) {
-    throw new TetherServerError(
-      TetherServerErrorCode.NotSupported,
-      `Cannot modify file storage directly while server is running (PID ${lock.pid})`,
-    );
-  }
-}
+export { assertNoActiveServerLock };
 
 /**
  * Writes data atomically to a file using a unique temp file and atomic rename.

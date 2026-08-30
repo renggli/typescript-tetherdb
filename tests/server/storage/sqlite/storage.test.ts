@@ -1,6 +1,8 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { acquireServerLock } from '../../../../src/server/shared/lock.js';
+import { BackendType } from '../../../../src/server/storage/index.js';
 import { SqliteStorage } from '../../../../src/server/storage/sqlite/index.js';
 import { OperationType } from '../../../../src/shared/types.js';
 import { type FileBasedStorageContext, sqliteStorage } from '../matrix.js';
@@ -325,5 +327,45 @@ describe('SqliteStorage', () => {
 
     // Deleting again should return false
     expect(await context.backend.deleteUser(user.userId)).toBe(false);
+  });
+
+  it('should prevent direct mutation when an active server lock is held by another process', async () => {
+    const handle = acquireServerLock(context.dir, {
+      port: 8080,
+      host: '127.0.0.1',
+      backend: BackendType.Sqlite,
+    });
+
+    // Simulate an external PID holding the lock
+    const lockFile = path.join(context.dir, 'server.lock');
+    const lockInfo = JSON.parse(await fs.readFile(lockFile, 'utf-8'));
+    lockInfo.pid = 999999999;
+    // We mock process.kill for isProcessAlive checking PID 999999999
+    const originalKill = process.kill;
+    (
+      process as { kill: (pid: number, sig?: number | string) => boolean }
+    ).kill = (pid: number, _sig?: number | string) => {
+      if (pid === 999999999) return true;
+      return originalKill(pid);
+    };
+
+    try {
+      await fs.writeFile(lockFile, JSON.stringify(lockInfo, null, 2));
+
+      await expect(
+        context.backend.createUser('blocked_user', 'pass'),
+      ).rejects.toThrow(
+        /Cannot modify sqlite storage directly while server is running/,
+      );
+
+      await expect(
+        context.backend.createTable('blocked_table'),
+      ).rejects.toThrow(
+        /Cannot modify sqlite storage directly while server is running/,
+      );
+    } finally {
+      process.kill = originalKill;
+      handle.release();
+    }
   });
 });

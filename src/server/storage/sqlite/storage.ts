@@ -12,6 +12,7 @@ import {
 } from '../../../shared/types.js';
 import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
 import { getOrCreateKeyfileSecret, hashPassword } from '../../shared/crypto.js';
+import { assertNoActiveServerLock } from '../../shared/lock.js';
 import {
   normalizeUserName,
   validatePassword,
@@ -120,6 +121,7 @@ export class SqliteStorage extends BaseStorage {
     name: string,
     settings: Partial<TableSettings> = {},
   ): Promise<TableStorage> {
+    if (!this.inMemory) assertNoActiveServerLock(this.baseDir, 'sqlite');
     const safeName = validateTableName(name);
     const dbHandle = this.getTablesDb();
     const existing = dbHandle.stmtFindTable.get(safeName);
@@ -197,6 +199,7 @@ export class SqliteStorage extends BaseStorage {
   }
 
   async createUser(userName: string, password: string): Promise<UserStorage> {
+    if (!this.inMemory) assertNoActiveServerLock(this.baseDir, 'sqlite');
     const safeUserName = validateUserName(userName);
     const validPassword = validatePassword(password);
     const usersDb = this.getUsersDb();
@@ -719,6 +722,7 @@ export class SqliteStorage extends BaseStorage {
   }
 
   updateTableSettingsInDb(name: string, settings: TableSettings): void {
+    if (!this.inMemory) assertNoActiveServerLock(this.baseDir, 'sqlite');
     const safeName = validateTableName(name);
     const dbHandle = this.getTablesDb();
     dbHandle.stmtUpdateTableSettings.run(JSON.stringify(settings), safeName);
@@ -744,17 +748,20 @@ export class SqliteStorage extends BaseStorage {
   }
 
   updateUserData(userId: string, passwordHash: string): void {
+    if (!this.inMemory) assertNoActiveServerLock(this.baseDir, 'sqlite');
     const usersDb = this.getUsersDb();
     usersDb.stmtUpdatePassword.run(passwordHash, userId);
   }
 
   deleteUserData(userId: string): boolean {
+    if (!this.inMemory) assertNoActiveServerLock(this.baseDir, 'sqlite');
     const usersDb = this.getUsersDb();
     const info = usersDb.stmtDeleteUser.run(userId);
     return info.changes > 0;
   }
 
   deleteTable(name: string): boolean {
+    if (!this.inMemory) assertNoActiveServerLock(this.baseDir, 'sqlite');
     const safeName = validateTableName(name);
     const dbHandle = this.getTablesDb();
     const res = dbHandle.stmtDeleteTable.run(safeName) as {
@@ -769,6 +776,7 @@ export class SqliteStorage extends BaseStorage {
   }
 
   deleteUser(userId: string): boolean {
+    if (!this.inMemory) assertNoActiveServerLock(this.baseDir, 'sqlite');
     const safeUserId = validateUserId(userId);
     const usersDb = this.getUsersDb();
     const res = usersDb.stmtDeleteUser.run(safeUserId) as {
