@@ -207,4 +207,49 @@ describe('MemoryStorage', () => {
       await cleanup();
     }
   });
+
+  it('should isolate private table changelogs by user ID in getChangesSince', async () => {
+    const { backend, cleanup } = await memoryStorage.createBackend();
+    try {
+      await backend.createTable('private_items');
+      const userA = await backend.createUser('alice', 'passA');
+      const userB = await backend.createUser('bob', 'passB');
+
+      await backend.applyChanges(userA, [
+        {
+          table: 'private_items',
+          id: 'item-1',
+          op: OperationType.Put,
+          data: { secret: 'alice_initial' },
+          timestamp: 100,
+          clientId: 'c1',
+        },
+      ]);
+
+      const seqAfterA1 = await backend.getCurrentSeq(userA);
+
+      await backend.applyChanges(userA, [
+        {
+          table: 'private_items',
+          id: 'item-2',
+          op: OperationType.Put,
+          data: { secret: 'alice_update' },
+          timestamp: 200,
+          clientId: 'c1',
+        },
+      ]);
+
+      const aliceChanges = await backend.getChangesSince(userA, seqAfterA1);
+      expect(aliceChanges.changes.length).toBe(1);
+      expect(aliceChanges.changes[0].id).toBe('item-2');
+
+      const bobChanges = await backend.getChangesSince(userB, seqAfterA1);
+      expect(bobChanges.changes.length).toBe(0);
+
+      const guestChanges = await backend.getChangesSince(undefined, seqAfterA1);
+      expect(guestChanges.changes.length).toBe(0);
+    } finally {
+      await cleanup();
+    }
+  });
 });
