@@ -47,6 +47,8 @@ export interface RateLimitOptions {
   ipRegisterMaxRequests?: number;
   /** Maximum connection handshakes per IP within the time window (defaults to 100). */
   ipSyncMaxRequests?: number;
+  /** Maximum allowable WebSocket frame payload in bytes (defaults to maxBatchSizeBytes + 64KB). */
+  maxPayloadBytes?: number;
 }
 
 /**
@@ -177,6 +179,7 @@ export class TetherServer {
   private readonly corsConfig: CorsOptions | null;
   private readonly logger: TetherLogger | null;
   private readonly adminSecret: string;
+  private readonly maxPayloadBytes: number;
   private readonly baseDir?: string;
 
   private _httpServer: http.Server | null = null;
@@ -208,6 +211,13 @@ export class TetherServer {
     this.logger = options.logger === false ? null : (options.logger ?? console);
 
     const rateLimitConfig = options.rateLimiting ?? true;
+    const defaultMaxPayload =
+      (this.storage.options?.maxBatchSizeBytes ?? 5 * 1024 * 1024) + 64 * 1024;
+    this.maxPayloadBytes =
+      typeof rateLimitConfig === 'object'
+        ? (rateLimitConfig.maxPayloadBytes ?? defaultMaxPayload)
+        : defaultMaxPayload;
+
     if (rateLimitConfig === false) {
       this.sync = new Sync(this.storage, {
         maxConcurrentConnectionsPerUser: 1_000,
@@ -398,6 +408,7 @@ export class TetherServer {
     if (!this._webSocketServer) {
       this._webSocketServer = new WebSocketServer({
         noServer: true,
+        maxPayload: this.maxPayloadBytes,
         perMessageDeflate: {
           zlibDeflateOptions: {
             level: 6,

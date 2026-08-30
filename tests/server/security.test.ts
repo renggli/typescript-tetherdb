@@ -2,7 +2,8 @@ import * as fs from 'node:fs';
 import type * as http from 'node:http';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { TetherServer } from '../../src/server/server.js';
+import WebSocket from 'ws';
+import { startServer, TetherServer } from '../../src/server/server.js';
 import { acquireServerLock } from '../../src/server/shared/lock.js';
 import { BackendType } from '../../src/server/storage/index.js';
 import { OperationType, Permission } from '../../src/shared/types.js';
@@ -169,6 +170,48 @@ describe.each(storageDescriptors)(
 
         await server.handleHttpRequest(req, res);
         expect(headersSet['Access-Control-Allow-Origin']).not.toBe('*');
+      });
+    });
+
+    describe('WebSocket Transport Limits', () => {
+      it('rejects oversized WebSocket frames exceeding maxPayloadBytes with close code 1009', async () => {
+        const running = await startServer({
+          storage: storageContext.storage,
+          port: 0,
+          rateLimiting: {
+            maxPayloadBytes: 256,
+          },
+        });
+
+        try {
+          const wsUrl = `${running.url.replace(/^http/, 'ws')}/tether`;
+          const ws = new WebSocket(wsUrl);
+
+          await new Promise<void>((resolve, reject) => {
+            ws.once('open', resolve);
+            ws.once('error', reject);
+          });
+
+          // Send an oversized payload (> 256 bytes)
+          const largePayload = JSON.stringify({
+            type: 'ping',
+            padding: 'x'.repeat(1000),
+          });
+
+          const closePromise = new Promise<{ code: number; reason: string }>(
+            (resolve) => {
+              ws.once('close', (code, reason) => {
+                resolve({ code, reason: reason.toString() });
+              });
+            },
+          );
+
+          ws.send(largePayload);
+          const { code } = await closePromise;
+          expect(code).toBe(1009); // 1009 = Message Too Big
+        } finally {
+          await running.close();
+        }
       });
     });
   },
