@@ -21,7 +21,7 @@ export async function handleStatusCommand(
 
 function printStatus(status: StorageStatus, lock: ServerLockInfo | null): void {
   console.log('TetherDB Storage Status:');
-  console.log(`  Backend:     ${status.backend}`);
+  console.log(`  Type:        ${status.type}`);
   if (status.baseDir) {
     console.log(`  Directory:   ${status.baseDir}`);
   }
@@ -34,13 +34,4 @@ function printStatus(status: StorageStatus, lock: ServerLockInfo | null): void {
   }
   console.log(`  Users:       ${status.usersCount}`);
   console.log(`  Tables:      ${status.tablesCount}`);
-
-  if (status.tables && status.tables.length > 0) {
-    console.log('\nTables:');
-    for (const t of status.tables) {
-      console.log(
-        `  • ${t.name} (read: ${t.read}, records: ${t.recordsCount})`,
-      );
-    }
-  }
 }

@@ -12,9 +12,10 @@ import {
   type RegisterClientMessage,
   type ServerMessage,
   ServerMessageType,
-  type SnapshotRecord,
 } from '../shared/types.js';
 import { TetherServerError, TetherServerErrorCode } from './errors.js';
+import { filterAndSanitizeSnapshot } from './security/filter.js';
+import { UserResolver } from './security/resolver.js';
 import type { TetherLogger } from './server.js';
 import { verifyDummyPasswordHash } from './shared/crypto.js';
 import type { RateLimiter } from './shared/rate-limiter.js';
@@ -23,10 +24,9 @@ import {
   normalizeUserName,
   validateIdentifier,
 } from './shared/validate.js';
-import { canRead, isPrivateTable } from './storage/base/index.js';
 import type { Storage } from './storage/storage.js';
-import type { TableStorage } from './storage/table.js';
-import type { UserStorage } from './storage/user.js';
+import type { Table } from './storage/table.js';
+import type { User } from './storage/user.js';
 
 /**
  * Configuration options for the synchronization coordinator.
@@ -238,7 +238,7 @@ export class Sync {
       return;
     }
 
-    let user: UserStorage | undefined;
+    let user: User | undefined;
     if (typeof msg.token === 'string' && msg.token) {
       user = await this.storage.getUserByToken(msg.token);
       if (!user) {
@@ -359,7 +359,7 @@ export class Sync {
       return;
     }
 
-    let user: UserStorage;
+    let user: User;
     try {
       user = await this.storage.createUser(safeUserName, msg.password);
     } catch (err) {
@@ -383,7 +383,7 @@ export class Sync {
     const ip = this.webSocketToIp.get(webSocket) ?? '127.0.0.1';
     this.clearPendingAuthTimer(webSocket);
 
-    let user: UserStorage | undefined;
+    let user: User | undefined;
 
     if (msg.userName !== undefined && msg.password !== undefined) {
       if (!msg.userName || !msg.password) {
@@ -612,7 +612,15 @@ export class Sync {
     currentSeq: number,
     tableFilters?: string[],
   ): Promise<void> {
-    const snapshot = await this.buildSnapshot(client.user, tableFilters);
+    const tables = await this.storage.getTables();
+    const resolver = new UserResolver(this.storage);
+    const snapshot = await filterAndSanitizeSnapshot(
+      tables,
+      client.user,
+      resolver,
+      tableFilters,
+    );
+
     this.send(client.webSocket, {
       type: ServerMessageType.SyncSnapshot,
       seq: currentSeq,
@@ -641,117 +649,21 @@ export class Sync {
       return;
     }
 
-    const populatedChanges = await this.populateChangeUserNames(
-      changes,
-      client.user,
-    );
-
     this.send(client.webSocket, {
       type: ServerMessageType.SyncDiff,
       fromSeq: seq,
       toSeq: currentSeq,
-      changes: populatedChanges,
+      changes,
     });
-  }
-
-  private async buildSnapshot(
-    user?: UserStorage,
-    tableFilters?: string[],
-  ): Promise<SnapshotRecord[]> {
-    const snapshot: SnapshotRecord[] = [];
-    const tables = await this.storage.getTables();
-    const userCache = new Map<string, string>();
-
-    for (const table of tables) {
-      if (!canRead(table, user)) continue;
-      if (tableFilters && !tableFilters.includes(table.name)) continue;
-
-      const records = await table.getAllRecords(user);
-      for (const rec of records) {
-        let userName = rec.userName;
-        const internalUserId = (rec as { userId?: string }).userId;
-        if (internalUserId && !userName) {
-          userName = await this.resolveUserName(
-            internalUserId,
-            user,
-            userCache,
-          );
-        }
-        snapshot.push({
-          table: rec.table,
-          id: rec.id,
-          data: rec.data,
-          version: rec.version,
-          timestamp: rec.timestamp,
-          deleted: rec.deleted,
-          clientId: rec.clientId,
-          userName,
-        });
-      }
-    }
-    return snapshot;
-  }
-
-  private async populateChangeUserNames(
-    changes: ChangeRecord[],
-    fallbackUser?: UserStorage,
-    userCache = new Map<string, string>(),
-  ): Promise<ChangeRecord[]> {
-    const populated: ChangeRecord[] = [];
-    for (const change of changes) {
-      const internalUserId = (change as { userId?: string }).userId;
-      let userName: string | undefined;
-      if (internalUserId) {
-        userName = await this.resolveUserName(
-          internalUserId,
-          fallbackUser,
-          userCache,
-        );
-      }
-      if (!userName) {
-        userName =
-          change.userName ??
-          (internalUserId ? undefined : fallbackUser?.userName);
-      }
-      populated.push({
-        table: change.table,
-        id: change.id,
-        op: change.op,
-        data: change.data,
-        version: change.version,
-        seq: change.seq,
-        timestamp: change.timestamp,
-        clientId: change.clientId,
-        userName,
-      });
-    }
-    return populated;
-  }
-
-  private async resolveUserName(
-    userId?: string,
-    user?: UserStorage,
-    userCache?: Map<string, string>,
-  ): Promise<string | undefined> {
-    if (!userId) return undefined;
-    if (user && userId === user.userId) return user.userName;
-    if (userCache?.has(userId)) return userCache.get(userId);
-
-    const foundUser = await this.storage.getUser(userId);
-    if (foundUser) {
-      userCache?.set(userId, foundUser.userName);
-      return foundUser.userName;
-    }
-    return undefined;
   }
 
   private async broadcastChanges(
     senderClientId: string,
-    senderUser: UserStorage | undefined,
+    senderUser: User | undefined,
     changes: ChangeRecord[],
     seq: number,
   ): Promise<void> {
-    const tableCache = new Map<string, TableStorage | undefined>();
+    const tableCache = new Map<string, Table | undefined>();
 
     for (const client of this.clients) {
       if (client.clientId === senderClientId) continue;
@@ -766,9 +678,8 @@ export class Sync {
           tableCache.set(change.table, table);
         }
 
-        if (table && canRead(table, client.user)) {
-          const isPrivate = isPrivateTable(table);
-          if (isPrivate) {
+        if (table?.canRead(client.user)) {
+          if (table.isPrivate) {
             if (
               client.user &&
               senderUser &&
@@ -783,15 +694,10 @@ export class Sync {
       }
 
       if (clientChanges.length > 0) {
-        const populatedChanges = await this.populateChangeUserNames(
-          clientChanges,
-          senderUser,
-        );
-
         this.send(client.webSocket, {
           type: ServerMessageType.BroadcastChanges,
           fromClientId: senderClientId,
-          changes: populatedChanges,
+          changes: clientChanges,
           seq,
         });
       }
@@ -800,7 +706,7 @@ export class Sync {
 
   private async completeAuthentication(
     webSocket: WebSocket,
-    user: UserStorage,
+    user: User,
     requestId?: string,
   ): Promise<void> {
     let client = this.webSocketToClient.get(webSocket);
@@ -838,6 +744,6 @@ export class Sync {
 interface ActiveClient {
   webSocket: WebSocket;
   clientId: string;
-  user?: UserStorage;
+  user?: User;
   tables?: string[];
 }

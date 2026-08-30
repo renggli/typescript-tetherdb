@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   FileStorage,
   SqliteStorage,
+  StorageType,
   TetherServer,
   TetherServerError,
   TetherServerErrorCode,
@@ -47,13 +48,13 @@ describe('ServerLock', () => {
     const handle = acquireServerLock(tmpDir, {
       port: 9000,
       host: '127.0.0.1',
-      backend: 'sqlite',
+      type: StorageType.Sqlite,
     });
 
     expect(handle.info.pid).toBe(process.pid);
     expect(handle.info.port).toBe(9000);
     expect(handle.info.host).toBe('127.0.0.1');
-    expect(handle.info.backend).toBe('sqlite');
+    expect(handle.info.type).toBe('sqlite');
     expect(handle.info.startedAt).toBeGreaterThan(0);
 
     const lockFile = path.join(tmpDir, 'server.lock');
@@ -85,7 +86,7 @@ describe('ServerLock', () => {
         pid: process.pid,
         port: 8080,
         host: '0.0.0.0',
-        backend: 'sqlite',
+        type: StorageType.Sqlite,
         startedAt: Date.now(),
       }),
       { mode: 0o600 },
@@ -100,7 +101,7 @@ describe('ServerLock', () => {
           pid: parentPid,
           port: 8080,
           host: '0.0.0.0',
-          backend: 'sqlite',
+          type: StorageType.Sqlite,
           startedAt: Date.now(),
         }),
         { mode: 0o600 },
@@ -110,7 +111,7 @@ describe('ServerLock', () => {
         acquireServerLock(tmpDir, {
           port: 8081,
           host: '0.0.0.0',
-          backend: 'sqlite',
+          type: StorageType.Sqlite,
         }),
       ).toThrow(TetherServerError);
 
@@ -118,7 +119,7 @@ describe('ServerLock', () => {
         acquireServerLock(tmpDir, {
           port: 8081,
           host: '0.0.0.0',
-          backend: 'sqlite',
+          type: StorageType.Sqlite,
         });
       } catch (err) {
         expect((err as TetherServerError).code).toBe(
@@ -139,7 +140,7 @@ describe('ServerLock', () => {
         pid: deadPid,
         port: 8080,
         host: '0.0.0.0',
-        backend: 'sqlite',
+        type: StorageType.Sqlite,
         startedAt: Date.now() - 100000,
       }),
       { mode: 0o600 },
@@ -183,7 +184,7 @@ describe('ServerLock', () => {
           pid: parentPid,
           port: port1,
           host: '127.0.0.1',
-          backend: 'sqlite',
+          type: StorageType.Sqlite,
           startedAt: Date.now(),
         }),
       );
@@ -211,7 +212,7 @@ describe('ServerLock', () => {
         pid: parentPid,
         port: 8080,
         host: '0.0.0.0',
-        backend: 'file',
+        type: StorageType.File,
         startedAt: Date.now(),
       }),
       { mode: 0o600 },
@@ -262,7 +263,7 @@ describe('ServerLock', () => {
         pid: parentPid,
         port: 8080,
         host: '0.0.0.0',
-        backend: 'file',
+        type: StorageType.File,
         startedAt: Date.now(),
       }),
       { mode: 0o600 },
@@ -322,7 +323,7 @@ describe('ServerLock', () => {
     const handle = acquireServerLock(tmpDir, {
       port: 9000,
       host: '127.0.0.1',
-      backend: 'sqlite',
+      type: StorageType.Sqlite,
     });
 
     handle.release();
@@ -333,14 +334,14 @@ describe('ServerLock', () => {
     const handle1 = acquireServerLock(tmpDir, {
       port: 9000,
       host: '127.0.0.1',
-      backend: 'sqlite',
+      type: StorageType.Sqlite,
     });
     expect(handle1.info.pid).toBe(process.pid);
 
     const handle2 = acquireServerLock(tmpDir, {
       port: 9001,
       host: '127.0.0.1',
-      backend: 'sqlite',
+      type: StorageType.Sqlite,
     });
     expect(handle2.info.port).toBe(9001);
 
@@ -356,7 +357,7 @@ describe('ServerLock', () => {
         pid: deadPid,
         port: 8080,
         host: '127.0.0.1',
-        backend: 'sqlite',
+        type: StorageType.Sqlite,
         startedAt: Date.now() - 10000,
       }),
     );
@@ -364,7 +365,7 @@ describe('ServerLock', () => {
     const handle = acquireServerLock(tmpDir, {
       port: 8080,
       host: '127.0.0.1',
-      backend: 'sqlite',
+      type: StorageType.Sqlite,
     });
     expect(handle.info.pid).toBe(process.pid);
     handle.release();

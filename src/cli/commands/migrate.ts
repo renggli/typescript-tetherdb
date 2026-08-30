@@ -2,18 +2,18 @@ import * as path from 'node:path';
 import {
   TetherServerError,
   TetherServerErrorCode,
-} from '../../../server/errors.js';
-import { BackendType } from '../../../server/storage/index.js';
-import { migrateFileStorage } from './file.js';
-import { assertDatabaseIsOffline, parseAppOption } from './helpers.js';
-import { migrateSqliteStorage } from './sqlite.js';
+} from '../../server/errors.js';
+import { StorageType } from '../../server/storage/storage.js';
+import { migrateFileStorage } from './migrate/file.js';
+import { assertDatabaseIsOffline, parseAppOption } from './migrate/helpers.js';
+import { migrateSqliteStorage } from './migrate/sqlite.js';
 
 /**
  * Result metrics returned after running a storage migration.
  */
 export interface MigrationResult {
-  /** Target backend engine. */
-  backend: BackendType;
+  /** Target storage engine type. */
+  type: StorageType;
   /** Number of tables migrated. */
   migratedTables: number;
   /** Number of user partitions migrated. */
@@ -30,19 +30,19 @@ export interface MigrationResult {
  * Handles the 'migrate' command to migrate an offline database from v1 to v2 format.
  *
  * @param positionalArgs - CLI arguments passed to the command.
- * @param backend - Storage backend type ('sqlite' | 'file').
+ * @param backend - Storage type ('sqlite' | 'file').
  * @param dir - Target database directory.
  * @returns Result summary of the migration.
  */
 export async function handleMigrateCommand(
   positionalArgs: string[] = [],
-  backend: BackendType = BackendType.Sqlite,
+  backend: StorageType = StorageType.Sqlite,
   dir = '.data',
 ): Promise<MigrationResult> {
   const resolvedDir = path.resolve(dir);
   assertDatabaseIsOffline(resolvedDir);
 
-  if (backend === BackendType.Memory) {
+  if (backend === StorageType.Memory) {
     throw new TetherServerError(
       TetherServerErrorCode.NotSupported,
       'Migration is only supported for persistent storage backends (--sqlite or --file)',
@@ -51,7 +51,7 @@ export async function handleMigrateCommand(
 
   const appFilter = parseAppOption(positionalArgs);
 
-  if (backend === BackendType.Sqlite) {
+  if (backend === StorageType.Sqlite) {
     const result = await migrateSqliteStorage(resolvedDir, appFilter);
     console.log(result.message);
     return result;

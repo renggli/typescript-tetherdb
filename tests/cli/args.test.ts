@@ -4,7 +4,7 @@ import {
   TetherServerError,
   TetherServerErrorCode,
 } from '../../src/server/errors.js';
-import { BackendType } from '../../src/server/storage/index.js';
+import { StorageType } from '../../src/server/storage/storage.js';
 
 describe('parseCliArgs', () => {
   const originalEnv = process.env;
@@ -24,7 +24,7 @@ describe('parseCliArgs', () => {
     expect(result).toEqual({
       command: 'serve',
       positionalArgs: [],
-      backend: BackendType.Memory,
+      backend: StorageType.Memory,
       dir: '.data',
       host: '0.0.0.0',
       port: 8080,
@@ -55,15 +55,15 @@ describe('parseCliArgs', () => {
 
   it('should parse backend options (-b, --backend, --memory, --file, --sqlite)', () => {
     const memResult = parseCliArgs(['--memory']);
-    expect(memResult.backend).toBe(BackendType.Memory);
+    expect(memResult.backend).toBe(StorageType.Memory);
     expect(memResult.token).toBeUndefined();
 
     const memTokenResult1 = parseCliArgs(['--memory=abc123token']);
-    expect(memTokenResult1.backend).toBe(BackendType.Memory);
+    expect(memTokenResult1.backend).toBe(StorageType.Memory);
     expect(memTokenResult1.token).toBe('abc123token');
 
     const memTokenResult2 = parseCliArgs(['--memory', 'xyz789token']);
-    expect(memTokenResult2.backend).toBe(BackendType.Memory);
+    expect(memTokenResult2.backend).toBe(StorageType.Memory);
     expect(memTokenResult2.token).toBe('xyz789token');
 
     const tokenResult1 = parseCliArgs(['--token=custom-token']);
@@ -73,35 +73,35 @@ describe('parseCliArgs', () => {
     expect(tokenResult2.token).toBe('custom-token-2');
 
     const bResult = parseCliArgs(['-b', 'sqlite', '-d', '/custom/path']);
-    expect(bResult.backend).toBe(BackendType.Sqlite);
+    expect(bResult.backend).toBe(StorageType.Sqlite);
     expect(bResult.dir).toBe('/custom/path');
 
     const backendResult = parseCliArgs(['--backend=file', '--dir=/file/path']);
-    expect(backendResult.backend).toBe(BackendType.File);
+    expect(backendResult.backend).toBe(StorageType.File);
     expect(backendResult.dir).toBe('/file/path');
 
     const fileResult1 = parseCliArgs(['--file']);
-    expect(fileResult1.backend).toBe(BackendType.File);
+    expect(fileResult1.backend).toBe(StorageType.File);
     expect(fileResult1.dir).toBe('.data');
 
     const fileResult2 = parseCliArgs(['--file=/custom/path']);
-    expect(fileResult2.backend).toBe(BackendType.File);
+    expect(fileResult2.backend).toBe(StorageType.File);
     expect(fileResult2.dir).toBe('/custom/path');
 
     const fileResult3 = parseCliArgs(['--file', '/space/path']);
-    expect(fileResult3.backend).toBe(BackendType.File);
+    expect(fileResult3.backend).toBe(StorageType.File);
     expect(fileResult3.dir).toBe('/space/path');
 
     const sqliteResult1 = parseCliArgs(['--sqlite']);
-    expect(sqliteResult1.backend).toBe(BackendType.Sqlite);
+    expect(sqliteResult1.backend).toBe(StorageType.Sqlite);
     expect(sqliteResult1.dir).toBe('.data');
 
     const sqliteResult2 = parseCliArgs(['--sqlite=/db/path']);
-    expect(sqliteResult2.backend).toBe(BackendType.Sqlite);
+    expect(sqliteResult2.backend).toBe(StorageType.Sqlite);
     expect(sqliteResult2.dir).toBe('/db/path');
 
     const sqliteResult3 = parseCliArgs(['--sqlite', '/db/space']);
-    expect(sqliteResult3.backend).toBe(BackendType.Sqlite);
+    expect(sqliteResult3.backend).toBe(StorageType.Sqlite);
     expect(sqliteResult3.dir).toBe('/db/space');
   });
 
@@ -114,7 +114,7 @@ describe('parseCliArgs', () => {
     ]);
     expect(result1.command).toBe('tables');
     expect(result1.positionalArgs).toEqual(['tables', 'add', 'recipes']);
-    expect(result1.backend).toBe(BackendType.Sqlite);
+    expect(result1.backend).toBe(StorageType.Sqlite);
 
     const result2 = parseCliArgs(['tables', 'list']);
     expect(result2.command).toBe('tables');

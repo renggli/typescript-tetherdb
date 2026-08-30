@@ -1,15 +1,15 @@
 import * as path from 'node:path';
 import { TetherServerError, TetherServerErrorCode } from '../server/errors.js';
+import { FileStorage } from '../server/storage/file.js';
+import { MemoryStorage } from '../server/storage/memory.js';
+import { SqliteStorage } from '../server/storage/sqlite.js';
 import {
-  BackendType,
-  FileStorage,
-  MemoryStorage,
-  SqliteStorage,
   type Storage,
   type StorageOptions,
-} from '../server/storage/index.js';
+  StorageType,
+} from '../server/storage/storage.js';
 
-export { BackendType };
+export { StorageType };
 
 /**
  * Instantiates the matching Storage implementation for a given backend type and directory.
@@ -20,17 +20,17 @@ export { BackendType };
  * @returns Instantiated `Storage` engine.
  */
 export function createBackend(
-  backend: BackendType = BackendType.Memory,
+  backend: StorageType = StorageType.Memory,
   baseDir = '.data',
   options?: StorageOptions,
 ): Storage {
   const resolvedDir = path.resolve(baseDir);
   switch (backend) {
-    case BackendType.Memory:
+    case StorageType.Memory:
       return new MemoryStorage(options);
-    case BackendType.Sqlite:
+    case StorageType.Sqlite:
       return new SqliteStorage({ baseDir: resolvedDir, ...options });
-    case BackendType.File:
+    case StorageType.File:
       return new FileStorage({ baseDir: resolvedDir, ...options });
     default:
       throw new TetherServerError(

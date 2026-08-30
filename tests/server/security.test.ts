@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { startServer, TetherServer } from '../../src/server/server.js';
 import { acquireServerLock } from '../../src/server/shared/lock.js';
-import { BackendType } from '../../src/server/storage/index.js';
+import { StorageType } from '../../src/server/storage/storage.js';
 import { OperationType, Permission } from '../../src/shared/types.js';
 import { type StorageContext, storageDescriptors } from './storage/matrix.js';
 
@@ -236,7 +236,7 @@ describe('acquireServerLock', () => {
     const handle = acquireServerLock(tmpDir, {
       port: 8080,
       host: '127.0.0.1',
-      backend: BackendType.Sqlite,
+      type: StorageType.Sqlite,
     });
 
     expect(handle).toBeDefined();
@@ -245,7 +245,7 @@ describe('acquireServerLock', () => {
       acquireServerLock(tmpDir, {
         port: 8081,
         host: '127.0.0.1',
-        backend: BackendType.Sqlite,
+        type: StorageType.Sqlite,
       }),
     ).not.toThrow();
 

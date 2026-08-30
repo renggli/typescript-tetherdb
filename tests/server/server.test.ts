@@ -548,8 +548,8 @@ describe.each(storageDescriptors)(
           headers: authHeader,
         });
         expect(statusRes.status).toBe(200);
-        const statusData = (await statusRes.json()) as { backend: string };
-        expect(statusData.backend).toBeDefined();
+        const statusData = (await statusRes.json()) as { type: string };
+        expect(statusData.type).toBeDefined();
 
         // 2. POST /admin/tables (create table)
         const createTableRes = await fetch(

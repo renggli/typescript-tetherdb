@@ -37,7 +37,7 @@ describe('handleStatusCommand', () => {
     await handleStatusCommand(target, ['status']);
 
     expect(testLogger.hasMessage('TetherDB Storage Status:')).toBe(true);
-    expect(testLogger.hasMessage('Backend:     sqlite')).toBe(true);
+    expect(testLogger.hasMessage('Type:        sqlite')).toBe(true);
     expect(testLogger.hasMessage('Server:      Stopped')).toBe(true);
     expect(testLogger.hasMessage('Users:       0')).toBe(true);
     expect(testLogger.hasMessage('Tables:      0')).toBe(true);
@@ -52,8 +52,6 @@ describe('handleStatusCommand', () => {
     expect(testLogger.hasMessage('TetherDB Storage Status:')).toBe(true);
     expect(testLogger.hasMessage('Server:      Stopped')).toBe(true);
     expect(testLogger.hasMessage('Tables:      2')).toBe(true);
-    expect(testLogger.hasMessage('• tasks')).toBe(true);
-    expect(testLogger.hasMessage('• settings')).toBe(true);
   });
 
   it('should display running server details when lock is present', async () => {
@@ -61,7 +59,7 @@ describe('handleStatusCommand', () => {
       pid: process.pid,
       port: 8080,
       host: '0.0.0.0',
-      backend: 'sqlite' as const,
+      type: 'sqlite' as const,
       startedAt: Date.now(),
     };
 

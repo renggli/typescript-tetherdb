@@ -6,7 +6,7 @@ import {
   type ResolvedAdminContext,
 } from '../server/admin.js';
 import { readServerLock } from '../server/shared/lock.js';
-import { BackendType, createBackend } from './backend.js';
+import { createBackend, StorageType } from './backend.js';
 
 export {
   AdminClient,
@@ -21,13 +21,13 @@ export {
  * otherwise instantiates an offline `Storage` engine (`LocalAdminTarget`).
  *
  * @param dir - Data directory.
- * @param backend - Storage backend type if operating offline.
+ * @param backend - Storage type if operating offline.
  * @param token - Optional admin connection token.
  * @returns Resolved administrative context.
  */
 export async function resolveAdminTarget(
   dir = '.data',
-  backend: BackendType = BackendType.Memory,
+  backend: StorageType = StorageType.Memory,
   token?: string,
 ): Promise<ResolvedAdminContext> {
   if (token) {
@@ -42,7 +42,7 @@ export async function resolveAdminTarget(
         host,
         adminSecret: secret,
         startedAt: Date.now(),
-        backend: BackendType.Memory,
+        type: StorageType.Memory,
       },
       close: async () => {},
     };

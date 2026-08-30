@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { WebSocket } from 'ws';
 import { RateLimiter } from '../../src/server/shared/rate-limiter.js';
-import type { Storage } from '../../src/server/storage/index.js';
+import type { Storage } from '../../src/server/storage/storage.js';
 import { Sync } from '../../src/server/sync.js';
 import {
   ClientMessageType,

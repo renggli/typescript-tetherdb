@@ -1,13 +1,41 @@
+import { TetherServerError, TetherServerErrorCode } from '../errors.js';
+import {
+  createSessionToken,
+  hashPassword,
+  verifyPasswordHash,
+  verifySessionToken,
+} from '../shared/crypto.js';
+import { normalizePassword, validatePassword } from '../shared/validate.js';
+import type { Storage } from './storage.js';
+
 /**
- * User storage handle managing account identity, credentials, tokens, and data lifecycles.
+ * Concrete User domain object managing credentials, session tokens, and deletion.
  */
-export interface UserStorage {
-  /** Unique user account identifier. */
+export class User {
   readonly userId: string;
-  /** Normalized username. */
   readonly userName: string;
-  /** Epoch timestamp when the user account was created. */
   readonly createdAt: number;
+  private readonly storage: Storage;
+
+  /**
+   * Initializes a new User instance.
+   *
+   * @param userId - Unique user identifier.
+   * @param userName - Normalized username.
+   * @param createdAt - Epoch creation timestamp.
+   * @param storage - Underlying storage backend.
+   */
+  constructor(
+    userId: string,
+    userName: string,
+    createdAt: number,
+    storage: Storage,
+  ) {
+    this.userId = userId;
+    this.userName = userName;
+    this.createdAt = createdAt;
+    this.storage = storage;
+  }
 
   /**
    * Verifies if the provided plaintext password matches the stored credentials.
@@ -15,14 +43,30 @@ export interface UserStorage {
    * @param password - Plaintext password to verify.
    * @returns True if password matches.
    */
-  verifyPassword(password: string): Promise<boolean>;
+  async verifyPassword(password: string): Promise<boolean> {
+    const passwordHash = await this.storage.getUserPasswordHash(this.userId);
+    if (passwordHash === undefined) {
+      throw new TetherServerError(
+        TetherServerErrorCode.NotFound,
+        'User not found',
+      );
+    }
+    if (!passwordHash) return false;
+    const normalized = normalizePassword(password);
+    if (!normalized) return false;
+    return verifyPasswordHash(normalized, passwordHash);
+  }
 
   /**
    * Changes the user's password.
    *
    * @param newPassword - New plaintext password.
    */
-  changePassword(newPassword: string): Promise<void>;
+  async changePassword(newPassword: string): Promise<void> {
+    const valid = validatePassword(newPassword);
+    const newHash = await hashPassword(valid);
+    await this.storage.setUserPasswordHash(this.userId, newHash);
+  }
 
   /**
    * Creates a signed session token for this user.
@@ -30,7 +74,14 @@ export interface UserStorage {
    * @param expiresInSeconds - Optional duration before token expires.
    * @returns Signed token string.
    */
-  createToken(expiresInSeconds?: number): Promise<string>;
+  async createToken(expiresInSeconds?: number): Promise<string> {
+    return createSessionToken(
+      this.userId,
+      this.userName,
+      this.storage.secret,
+      expiresInSeconds,
+    );
+  }
 
   /**
    * Verifies if a session token is valid for this user.
@@ -38,12 +89,17 @@ export interface UserStorage {
    * @param token - Token string to verify.
    * @returns True if valid and not expired.
    */
-  verifyToken(token: string): Promise<boolean>;
+  async verifyToken(token: string): Promise<boolean> {
+    const payload = verifySessionToken(token, this.storage.secret);
+    return payload !== null && payload.userId === this.userId;
+  }
 
   /**
-   * Deletes this user account and all of their data across all applications.
+   * Deletes this user account and all of their data.
    *
    * @returns True if deleted successfully.
    */
-  delete(): Promise<boolean>;
+  async delete(): Promise<boolean> {
+    return this.storage.deleteUser(this.userId);
+  }
 }

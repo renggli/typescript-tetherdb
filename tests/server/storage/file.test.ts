@@ -1,13 +1,10 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { TetherServerErrorCode } from '../../../../src/server/errors.js';
-import { FileStorage } from '../../../../src/server/storage/file/index.js';
-import {
-  type ChangeRecord,
-  OperationType,
-} from '../../../../src/shared/types.js';
-import { type FileBasedStorageContext, fileStorage } from '../matrix.js';
+import { TetherServerErrorCode } from '../../../src/server/errors.js';
+import { FileStorage } from '../../../src/server/storage/file.js';
+import { type ChangeRecord, OperationType } from '../../../src/shared/types.js';
+import { type FileBasedStorageContext, fileStorage } from './matrix.js';
 
 describe('FileStorage', () => {
   let context: FileBasedStorageContext<FileStorage>;
@@ -295,7 +292,7 @@ describe('FileStorage', () => {
 
     const pruneRes = await context.backend.prune(3, 'records');
     expect(pruneRes.action).toBe('prune');
-    expect(pruneRes.backend).toBe('file');
+    expect(pruneRes.type).toBe('file');
     expect(pruneRes.affectedCount).toBe(5);
   });
 

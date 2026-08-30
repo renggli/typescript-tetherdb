@@ -2,7 +2,7 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { TetherServerError, TetherServerErrorCode } from '../errors.js';
-import type { BackendType } from '../storage/storage.js';
+import type { StorageType } from '../storage/storage.js';
 
 /**
  * Metadata recorded inside the server lockfile.
@@ -14,8 +14,8 @@ export interface ServerLockInfo {
   host: string;
   /** Port number the server is bound to. */
   port: number;
-  /** Storage backend type ('sqlite', 'file', or 'memory'). */
-  backend: BackendType;
+  /** Storage persistence type ('sqlite', 'file', or 'memory'). */
+  type: StorageType;
   /** Epoch timestamp when the server acquired the lock. */
   startedAt: number;
   /** Ephemeral secret used by the CLI to authenticate against local admin API. */
@@ -146,7 +146,7 @@ export function acquireServerLock(
     pid: process.pid,
     port: details.port,
     host: details.host,
-    backend: details.backend,
+    type: details.type,
     startedAt: Date.now(),
     adminSecret,
   };

@@ -4,21 +4,18 @@ import { WebSocketServer } from 'ws';
 import { normalizeHttpPath } from '../shared/path.js';
 import type { TableRow, TableSettings } from '../shared/types.js';
 import { encodeAdminToken } from './admin.js';
-import {
-  type CorsOptions,
-  getHttpStatusForError,
-  handleAdminRequest,
-  handleCorsPreflight,
-  handleHealth,
-  handleMetrics,
-  handleReady,
-  sendJson,
-} from './http/index.js';
+import { handleAdminRequest } from './http/admin.js';
+import { type CorsOptions, handleCorsPreflight } from './http/cors.js';
+import { getHttpStatusForError } from './http/errors.js';
+import { sendJson } from './http/json.js';
+import { handleHealth, handleMetrics, handleReady } from './http/system.js';
 import { acquireServerLock, type ServerLockHandle } from './shared/lock.js';
 import { RateLimiter } from './shared/rate-limiter.js';
 import { validateTableName } from './shared/validate.js';
-import type { Storage, TableStorage, UserStorage } from './storage/index.js';
-import { MemoryStorage } from './storage/memory/index.js';
+import { MemoryStorage } from './storage/memory.js';
+import type { Storage } from './storage/storage.js';
+import type { Table } from './storage/table.js';
+import type { User } from './storage/user.js';
 import { Sync } from './sync.js';
 
 export type { CorsOptions };
@@ -575,13 +572,13 @@ export class TetherServer {
    * @param name - Name of the table.
    * @param settings - Optional table settings.
    * @param rows - Optional array of table rows to insert if not already present.
-   * @returns TableStorage handle for the declared table.
+   * @returns Table handle for the declared table.
    */
   async declareTable(
     name: string,
     settings?: Partial<TableSettings>,
     rows?: TableRow[],
-  ): Promise<TableStorage> {
+  ): Promise<Table> {
     const safeName = validateTableName(name);
     let table = await this.storage.getTable(safeName);
     if (!table) {
@@ -602,9 +599,9 @@ export class TetherServer {
    *
    * @param userName - Username for the account.
    * @param password - Plaintext password for the account.
-   * @returns UserStorage handle for the declared user.
+   * @returns User handle for the declared user.
    */
-  async declareUser(userName: string, password: string): Promise<UserStorage> {
+  async declareUser(userName: string, password: string): Promise<User> {
     const user = await this.storage.getUserByUserName(userName);
     if (user) {
       await user.changePassword(password);
@@ -652,7 +649,7 @@ export class TetherServer {
       this.lockHandle = acquireServerLock(lockDir, {
         port,
         host,
-        backend: this.storage.backend,
+        type: this.storage.type,
         adminSecret: this.adminSecret,
       });
     }

@@ -197,7 +197,7 @@ describe('tetherPlugin (Vite Dev Server Integration)', () => {
       const lock = readServerLock(tmpDir);
       expect(lock).not.toBeNull();
       expect(lock?.pid).toBe(process.pid);
-      expect(lock?.backend).toBe('sqlite');
+      expect(lock?.type).toBe('sqlite');
       expect(lock?.adminSecret).toBeDefined();
 
       await vite.close();

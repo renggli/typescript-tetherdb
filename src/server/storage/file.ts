@@ -1,39 +1,38 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { shouldOverwrite } from '../../../shared/clock.js';
+import { shouldOverwrite } from '../../shared/clock.js';
 import {
   type ChangeRecord,
   OperationType,
-  type StoredRecord,
   type TableSettings,
-} from '../../../shared/types.js';
-import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
-import { getOrCreateKeyfileSecret, hashPassword } from '../../shared/crypto.js';
-import { assertNoActiveServerLock } from '../../shared/lock.js';
+} from '../../shared/types.js';
+import { TetherServerError, TetherServerErrorCode } from '../errors.js';
+import { UserResolver } from '../security/resolver.js';
+import type {
+  InternalChangeRecord,
+  InternalStoredRecord,
+} from '../security/types.js';
+import { getOrCreateKeyfileSecret, hashPassword } from '../shared/crypto.js';
+import { assertNoActiveServerLock } from '../shared/lock.js';
 import {
   getUserBucket,
   normalizeUserName,
   validatePassword,
+  validateRecordId,
   validateTableName,
   validateUserId,
   validateUserName,
-} from '../../shared/validate.js';
+} from '../shared/validate.js';
 import {
-  applyChangeToRecord,
-  assertCanMutate,
-  BaseStorage,
-  canRead,
-  isPrivateTable,
-  isSnapshotRequired,
+  type MaintenanceResult,
+  Storage,
+  type StorageOptions,
+  StorageType,
   validateBatchChanges,
-} from '../base/index.js';
-import type { MaintenanceResult, StorageOptions } from '../storage.js';
-import { BackendType } from '../storage.js';
-import type { ApplyChangesOptions, TableStorage } from '../table.js';
-import type { UserStorage } from '../user.js';
-import { TableFileStorage } from './table.js';
-import { UserFileStorage } from './user.js';
+} from './storage.js';
+import { type ApplyChangesOptions, Table } from './table.js';
+import { User } from './user.js';
 
 export interface FileUserData {
   userId: string;
@@ -48,15 +47,20 @@ export interface FileTableData {
   createdAt: number;
 }
 
+/**
+ * Configuration options for the file-based storage backend.
+ */
 export interface FileStorageOptions extends StorageOptions {
+  /** Optional custom crypto secret. If omitted, read/written from `.secret.key`. */
+  secret?: string;
   baseDir?: string;
 }
 
 /**
- * Filesystem-backed implementation of `Storage`.
+ * Filesystem storage engine persisting records in JSON files and bucketed directories.
  */
-export class FileStorage extends BaseStorage {
-  readonly backend = BackendType.File;
+export class FileStorage extends Storage {
+  readonly type = StorageType.File;
   readonly baseDir: string;
   readonly secret: string;
   override readonly options: FileStorageOptions;
@@ -72,7 +76,7 @@ export class FileStorage extends BaseStorage {
   async createTable(
     name: string,
     settings: Partial<TableSettings> = {},
-  ): Promise<TableStorage> {
+  ): Promise<Table> {
     assertNoActiveServerLock(this.baseDir);
     const safeName = validateTableName(name);
     return this.withLock('__tables__', async () => {
@@ -88,28 +92,43 @@ export class FileStorage extends BaseStorage {
       tables.set(safeName, { name: safeName, settings, createdAt: now });
       await this.writeTablesFile(tables);
 
-      return new TableFileStorage(safeName, this, settings);
+      return new Table(safeName, this, settings);
     });
   }
 
-  async getTable(name: string): Promise<TableStorage | undefined> {
+  async getTable(name: string): Promise<Table | undefined> {
     const safeName = validateTableName(name);
     const tables = await this.readTablesFile();
     const data = tables.get(safeName);
     if (data) {
-      return new TableFileStorage(data.name, this, data.settings);
+      return new Table(data.name, this, data.settings);
     }
     return undefined;
   }
 
-  async getTables(): Promise<TableStorage[]> {
+  async updateTableSettings(
+    name: string,
+    settings: TableSettings,
+  ): Promise<void> {
+    assertNoActiveServerLock(this.baseDir);
+    return this.withLock('__tables__', async () => {
+      const tables = await this.readTablesFile();
+      const existing = tables.get(name);
+      if (existing) {
+        existing.settings = settings;
+        await this.writeTablesFile(tables);
+      }
+    });
+  }
+
+  async getTables(): Promise<Table[]> {
     const tables = await this.readTablesFile();
     return Array.from(tables.values())
       .sort((a, b) => a.name.localeCompare(b.name))
-      .map((t) => new TableFileStorage(t.name, this, t.settings));
+      .map((t) => new Table(t.name, this, t.settings));
   }
 
-  async createUser(userName: string, password: string): Promise<UserStorage> {
+  async createUser(userName: string, password: string): Promise<User> {
     assertNoActiveServerLock(this.baseDir);
     const safeUserName = validateUserName(userName);
     const validPassword = validatePassword(password);
@@ -137,40 +156,123 @@ export class FileStorage extends BaseStorage {
 
       users.set(userId, userData);
       await this.writeUsersFile(users);
-      return new UserFileStorage(userData, this);
+      return new User(userId, safeUserName, userData.createdAt, this);
     });
   }
 
-  async getUser(userId: string): Promise<UserStorage | undefined> {
+  async getUser(userId: string): Promise<User | undefined> {
     const safeUserId = validateUserId(userId);
     const data = await this.findUserDataById(safeUserId);
     if (data) {
-      return new UserFileStorage(data, this);
+      return new User(data.userId, data.userName, data.createdAt, this);
     }
     return undefined;
   }
 
-  async getUserByUserName(userName: string): Promise<UserStorage | undefined> {
+  async getUserByUserName(userName: string): Promise<User | undefined> {
     const safeUserName = normalizeUserName(userName);
     if (!safeUserName) return undefined;
     const users = await this.readUsersFile();
     for (const u of users.values()) {
       if (u.userName.toLowerCase() === safeUserName) {
-        return new UserFileStorage(u, this);
+        return new User(u.userId, u.userName, u.createdAt, this);
       }
     }
     return undefined;
   }
 
-  async getUsers(): Promise<UserStorage[]> {
+  async getUsers(): Promise<User[]> {
     const users = await this.readUsersFile();
     return Array.from(users.values()).map(
-      (data) => new UserFileStorage(data, this),
+      (data) => new User(data.userId, data.userName, data.createdAt, this),
     );
   }
 
+  async getUserPasswordHash(
+    userId: string,
+  ): Promise<string | null | undefined> {
+    const safeUserId = validateUserId(userId);
+    const user = await this.findUserDataById(safeUserId);
+    return user?.passwordHash;
+  }
+
+  async setUserPasswordHash(userId: string, hash: string): Promise<void> {
+    await this.updateUserData(userId, { passwordHash: hash });
+  }
+
+  async getRawRecord(
+    tableName: string,
+    partition: string,
+    id: string,
+  ): Promise<InternalStoredRecord | undefined> {
+    const safeId = validateRecordId(id);
+    const map = await this.readTableRecords(partition, tableName);
+    return map.get(safeId);
+  }
+
+  async getRawRecords(
+    tableName: string,
+    partition: string,
+  ): Promise<InternalStoredRecord[]> {
+    const map = await this.readTableRecords(partition, tableName);
+    return Array.from(map.values());
+  }
+
+  async getRawChangesSince(
+    fromSeq: number,
+    user?: User,
+  ): Promise<{
+    rawChanges: InternalChangeRecord[];
+    currentSeq: number;
+    minSeq: number;
+  }> {
+    const partitions: string[] = ['__shared__'];
+    if (user) partitions.push(user.userId);
+
+    let maxCurrentSeq = 0;
+    let minSeq = 0;
+    const allChanges: InternalChangeRecord[] = [];
+
+    for (const partitionId of partitions) {
+      await this.withLock(partitionId, async () => {
+        const partitionDir = this.resolvePartitionDir(partitionId);
+        const metaFile = path.join(partitionDir, 'meta.json');
+        const syncFile = path.join(partitionDir, 'sync.jsonl');
+
+        try {
+          const metaContent = await fs.readFile(metaFile, 'utf-8');
+          const meta = JSON.parse(metaContent) as {
+            currentSeq: number;
+            minSeq: number;
+          };
+          maxCurrentSeq = Math.max(maxCurrentSeq, meta.currentSeq);
+          minSeq = Math.max(minSeq, meta.minSeq);
+        } catch {
+          return;
+        }
+
+        try {
+          const content = await fs.readFile(syncFile, 'utf-8');
+          const lines = content
+            .split('\n')
+            .map((l) => l.trim())
+            .filter(Boolean);
+          for (const line of lines) {
+            const rec = JSON.parse(line) as InternalChangeRecord;
+            if (rec.seq > fromSeq) {
+              allChanges.push(rec);
+            }
+          }
+        } catch {}
+      });
+    }
+
+    allChanges.sort((a, b) => a.seq - b.seq);
+    return { rawChanges: allChanges, currentSeq: maxCurrentSeq, minSeq };
+  }
+
   async applyChanges(
-    user: UserStorage | undefined,
+    user: User | undefined,
     changes: ChangeRecord[],
     options?: ApplyChangesOptions,
   ): Promise<{ applied: ChangeRecord[]; newSeq: number }> {
@@ -183,7 +285,7 @@ export class FileStorage extends BaseStorage {
 
     // Phase 2: Lock and apply changes
     return this.withLock('__apply_changes__', async () => {
-      const appliedList: (ChangeRecord & { seq: number })[] = [];
+      const appliedList: InternalChangeRecord[] = [];
       let maxNewSeq = 0;
 
       // Group changes by partition
@@ -191,11 +293,10 @@ export class FileStorage extends BaseStorage {
       for (const change of changes) {
         const table = await this.getTable(change.table);
         if (!table) continue;
-        const isPrivate = isPrivateTable(table);
-        const partitionId = isPrivate
+        const partitionId = table.isPrivate
           ? (user?.userId ?? '__shared__')
           : '__shared__';
-        if (isPrivate && !user && !options?.skipPermissionCheck) {
+        if (table.isPrivate && !user && !options?.skipPermissionCheck) {
           throw new TetherServerError(
             TetherServerErrorCode.Forbidden,
             `Authentication required for private table "${change.table}"`,
@@ -223,7 +324,7 @@ export class FileStorage extends BaseStorage {
           // Initialize new partition
         }
 
-        const tableMaps = new Map<string, Map<string, StoredRecord>>();
+        const tableMaps = new Map<string, Map<string, InternalStoredRecord>>();
         const newChangelogLines: string[] = [];
 
         for (const change of pChanges) {
@@ -240,7 +341,26 @@ export class FileStorage extends BaseStorage {
 
           const existing = map.get(change.id);
           if (!options?.skipPermissionCheck) {
-            assertCanMutate(table, user, change, existing);
+            if (change.op === OperationType.Delete) {
+              if (!table.canDelete(user, existing)) {
+                throw new TetherServerError(
+                  TetherServerErrorCode.Forbidden,
+                  `User does not have delete access to record "${change.id}" in table "${tableName}"`,
+                );
+              }
+            } else if (!existing || existing.deleted) {
+              if (!table.canCreate(user)) {
+                throw new TetherServerError(
+                  TetherServerErrorCode.Forbidden,
+                  `User does not have create access to table "${tableName}"`,
+                );
+              }
+            } else if (!table.canUpdate(user, existing)) {
+              throw new TetherServerError(
+                TetherServerErrorCode.Forbidden,
+                `User does not have update access to record "${change.id}" in table "${tableName}"`,
+              );
+            }
           }
 
           if (
@@ -259,13 +379,31 @@ export class FileStorage extends BaseStorage {
             meta.currentSeq++;
             if (meta.minSeq === 0) meta.minSeq = 1;
             const assignedSeq = meta.currentSeq;
+            const isDeleted = change.op === OperationType.Delete;
+            const nextVersion = (existing?.version ?? 0) + 1;
+            const userId = existing?.userId ?? user?.userId;
 
-            const { updatedRecord, appliedChange } = applyChangeToRecord(
-              change,
-              existing,
-              assignedSeq,
-              user,
-            );
+            const updatedRecord: InternalStoredRecord = {
+              id: change.id,
+              version: nextVersion,
+              timestamp: change.timestamp,
+              clientId: change.clientId,
+              deleted: isDeleted,
+              data: isDeleted ? null : (change.data ?? null),
+              userId,
+            };
+
+            const appliedChange: InternalChangeRecord = {
+              seq: assignedSeq,
+              table: change.table,
+              id: change.id,
+              op: change.op,
+              version: nextVersion,
+              timestamp: change.timestamp,
+              clientId: change.clientId,
+              data: isDeleted ? undefined : change.data,
+              userId,
+            };
 
             map.set(change.id, updatedRecord);
             appliedList.push(appliedChange);
@@ -297,7 +435,7 @@ export class FileStorage extends BaseStorage {
         // Save updated meta
         await writeFileAtomic(metaFile, JSON.stringify(meta, null, 2));
 
-        // Auto-pruning with hysteresis buffer (+50)
+        // Auto-pruning
         await this.prunePartitionSyncFile(
           partitionDir,
           defaultMaxHistory,
@@ -305,86 +443,28 @@ export class FileStorage extends BaseStorage {
         );
       }
 
-      return { applied: appliedList, newSeq: maxNewSeq };
+      const resolver = new UserResolver(this);
+      const publicApplied: ChangeRecord[] = [];
+      for (const applied of appliedList) {
+        const userName = await resolver.resolveUserName(applied.userId, user);
+        publicApplied.push({
+          table: applied.table,
+          id: applied.id,
+          op: applied.op,
+          data: applied.data,
+          version: applied.version,
+          seq: applied.seq,
+          timestamp: applied.timestamp,
+          clientId: applied.clientId,
+          userName,
+        });
+      }
+
+      return { applied: publicApplied, newSeq: maxNewSeq };
     });
   }
 
-  async getChangesSince(
-    user: UserStorage | undefined,
-    fromSeq: number,
-    tableFilters?: string[],
-  ): Promise<{
-    changes: ChangeRecord[];
-    currentSeq: number;
-    requiresSnapshot?: boolean;
-  }> {
-    const partitions: string[] = ['__shared__'];
-    if (user) partitions.push(user.userId);
-
-    let maxCurrentSeq = 0;
-    let minSeq = 0;
-    const allChanges: (ChangeRecord & { seq: number })[] = [];
-
-    for (const partitionId of partitions) {
-      await this.withLock(partitionId, async () => {
-        const partitionDir = this.resolvePartitionDir(partitionId);
-        const metaFile = path.join(partitionDir, 'meta.json');
-        const syncFile = path.join(partitionDir, 'sync.jsonl');
-
-        try {
-          const metaContent = await fs.readFile(metaFile, 'utf-8');
-          const meta = JSON.parse(metaContent) as {
-            currentSeq: number;
-            minSeq: number;
-          };
-          maxCurrentSeq = Math.max(maxCurrentSeq, meta.currentSeq);
-          minSeq = Math.max(minSeq, meta.minSeq);
-        } catch {
-          return;
-        }
-
-        try {
-          const content = await fs.readFile(syncFile, 'utf-8');
-          const lines = content
-            .split('\n')
-            .map((l) => l.trim())
-            .filter(Boolean);
-          for (const line of lines) {
-            const rec = JSON.parse(line) as ChangeRecord & { seq: number };
-            if (rec.seq > fromSeq) {
-              allChanges.push(rec);
-            }
-          }
-        } catch {}
-      });
-    }
-
-    if (isSnapshotRequired(fromSeq, minSeq, maxCurrentSeq)) {
-      return {
-        changes: [],
-        currentSeq: maxCurrentSeq,
-        requiresSnapshot: true,
-      };
-    }
-
-    allChanges.sort((a, b) => a.seq - b.seq);
-
-    const filtered: ChangeRecord[] = [];
-    for (const c of allChanges) {
-      const table = await this.getTable(c.table);
-      if (!table || !canRead(table, user)) continue;
-      if (tableFilters && !tableFilters.includes(c.table)) continue;
-      filtered.push(c);
-    }
-
-    return {
-      changes: filtered,
-      currentSeq: maxCurrentSeq,
-      requiresSnapshot: false,
-    };
-  }
-
-  async getCurrentSeq(user?: UserStorage): Promise<number> {
+  async getCurrentSeq(user?: User): Promise<number> {
     const partitions: string[] = ['__shared__'];
     if (user) partitions.push(user.userId);
     let maxSeq = 0;
@@ -437,7 +517,7 @@ export class FileStorage extends BaseStorage {
 
     return {
       action: 'prune',
-      backend: BackendType.File,
+      type: StorageType.File,
       tableName,
       affectedCount: totalPruned,
       message: `Prune completed successfully. Removed ${totalPruned} changelog record(s)`,
@@ -452,13 +532,7 @@ export class FileStorage extends BaseStorage {
     return this.baseDir;
   }
 
-  private get usersFile(): string {
-    return path.join(this.baseDir, 'users.json');
-  }
-
-  private get tablesFile(): string {
-    return path.join(this.baseDir, 'tables.json');
-  }
+  // -- Internal File Helpers --------------------------------------------------
 
   async withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
     const prevLock = this.locks.get(key) ?? Promise.resolve();
@@ -480,6 +554,134 @@ export class FileStorage extends BaseStorage {
         this.locks.delete(key);
       }
     }
+  }
+
+  async readTableRecords(
+    partitionId: string,
+    tableName: string,
+  ): Promise<Map<string, InternalStoredRecord>> {
+    const partitionDir = this.resolvePartitionDir(partitionId);
+    const recordsFile = path.join(partitionDir, tableName, 'records.json');
+    try {
+      const content = await fs.readFile(recordsFile, 'utf-8');
+      const list = JSON.parse(content) as InternalStoredRecord[];
+      const map = new Map<string, InternalStoredRecord>();
+      for (const r of list) {
+        map.set(r.id, r);
+      }
+      return map;
+    } catch {
+      return new Map();
+    }
+  }
+
+  async findUserDataById(userId: string): Promise<FileUserData | undefined> {
+    const users = await this.readUsersFile();
+    return users.get(userId);
+  }
+
+  async updateUserData(
+    userId: string,
+    update: Partial<FileUserData>,
+  ): Promise<void> {
+    assertNoActiveServerLock(this.baseDir);
+    return this.withLock('__users__', async () => {
+      const users = await this.readUsersFile();
+      const existing = users.get(userId);
+      if (!existing) {
+        throw new TetherServerError(
+          TetherServerErrorCode.NotFound,
+          'User not found',
+        );
+      }
+      users.set(userId, { ...existing, ...update });
+      await this.writeUsersFile(users);
+    });
+  }
+
+  async deleteTable(name: string): Promise<boolean> {
+    assertNoActiveServerLock(this.baseDir);
+    const safeName = validateTableName(name);
+    return this.withLock('__tables__', async () => {
+      const tables = await this.readTablesFile();
+      const deleted = tables.delete(safeName);
+      if (deleted) {
+        await this.writeTablesFile(tables);
+        try {
+          await fs.rm(path.join(this.baseDir, 'shared', safeName), {
+            recursive: true,
+            force: true,
+          });
+        } catch {
+          // Ignore
+        }
+        try {
+          const usersBase = path.join(this.baseDir, 'users');
+          const buckets = await fs
+            .readdir(usersBase)
+            .catch(() => [] as string[]);
+          for (const b of buckets) {
+            const bucketDir = path.join(usersBase, b);
+            const userDirs = await fs
+              .readdir(bucketDir)
+              .catch(() => [] as string[]);
+            for (const u of userDirs) {
+              await fs
+                .rm(path.join(bucketDir, u, safeName), {
+                  recursive: true,
+                  force: true,
+                })
+                .catch(() => {});
+            }
+          }
+        } catch {
+          // Ignore
+        }
+      }
+      return deleted;
+    });
+  }
+
+  async deleteUser(userId: string): Promise<boolean> {
+    assertNoActiveServerLock(this.baseDir);
+    const safeUserId = validateUserId(userId);
+    return this.withLock('__users__', async () => {
+      let deleted = false;
+      const users = await this.readUsersFile();
+      if (users.has(safeUserId)) {
+        users.delete(safeUserId);
+        await this.writeUsersFile(users);
+        deleted = true;
+      }
+
+      const bucket = getUserBucket(safeUserId);
+      const userDir = path.join(this.baseDir, 'users', bucket, safeUserId);
+      try {
+        await fs.rm(userDir, { recursive: true, force: true });
+      } catch {
+        // Ignore
+      }
+
+      return deleted;
+    });
+  }
+
+  // -- Private Helpers --------------------------------------------------------
+
+  private get usersFile(): string {
+    return path.join(this.baseDir, 'users.json');
+  }
+
+  private get tablesFile(): string {
+    return path.join(this.baseDir, 'tables.json');
+  }
+
+  private resolvePartitionDir(effectiveUserId: string): string {
+    if (effectiveUserId === '__shared__') {
+      return path.join(this.baseDir, 'shared');
+    }
+    const bucket = getUserBucket(effectiveUserId);
+    return path.join(this.baseDir, 'users', bucket, effectiveUserId);
   }
 
   private async prunePartitionSyncFile(
@@ -567,144 +769,9 @@ export class FileStorage extends BaseStorage {
       JSON.stringify(Array.from(tables.values()), null, 2),
     );
   }
-
-  async updateTableSettingsInFile(
-    name: string,
-    settings: TableSettings,
-  ): Promise<void> {
-    assertNoActiveServerLock(this.baseDir);
-    return this.withLock('__tables__', async () => {
-      const tables = await this.readTablesFile();
-      const existing = tables.get(name);
-      if (existing) {
-        existing.settings = settings;
-        await this.writeTablesFile(tables);
-      }
-    });
-  }
-
-  private resolvePartitionDir(effectiveUserId: string): string {
-    if (effectiveUserId === '__shared__') {
-      return path.join(this.baseDir, 'shared');
-    }
-    const bucket = getUserBucket(effectiveUserId);
-    return path.join(this.baseDir, 'users', bucket, effectiveUserId);
-  }
-
-  async readTableRecords(
-    effectiveUserId: string,
-    tableName: string,
-  ): Promise<Map<string, StoredRecord>> {
-    const partitionDir = this.resolvePartitionDir(effectiveUserId);
-    const recordsFile = path.join(partitionDir, tableName, 'records.json');
-    try {
-      const content = await fs.readFile(recordsFile, 'utf-8');
-      const list = JSON.parse(content) as StoredRecord[];
-      const map = new Map<string, StoredRecord>();
-      for (const r of list) {
-        map.set(r.id, r);
-      }
-      return map;
-    } catch {
-      return new Map();
-    }
-  }
-
-  async findUserDataById(userId: string): Promise<FileUserData | undefined> {
-    const users = await this.readUsersFile();
-    return users.get(userId);
-  }
-
-  async updateUserData(
-    userId: string,
-    update: Partial<FileUserData>,
-  ): Promise<void> {
-    assertNoActiveServerLock(this.baseDir);
-    return this.withLock('__users__', async () => {
-      const users = await this.readUsersFile();
-      const existing = users.get(userId);
-      if (!existing) {
-        throw new TetherServerError(
-          TetherServerErrorCode.NotFound,
-          'User not found',
-        );
-      }
-      users.set(userId, { ...existing, ...update });
-      await this.writeUsersFile(users);
-    });
-  }
-
-  async deleteTable(name: string): Promise<boolean> {
-    assertNoActiveServerLock(this.baseDir);
-    const safeName = validateTableName(name);
-    return this.withLock('__tables__', async () => {
-      const tables = await this.readTablesFile();
-      const deleted = tables.delete(safeName);
-      if (deleted) {
-        await this.writeTablesFile(tables);
-        // Clean up shared table directory
-        try {
-          await fs.rm(path.join(this.baseDir, 'shared', safeName), {
-            recursive: true,
-            force: true,
-          });
-        } catch {
-          // Ignore
-        }
-        // Clean up user table directories
-        try {
-          const usersBase = path.join(this.baseDir, 'users');
-          const buckets = await fs
-            .readdir(usersBase)
-            .catch(() => [] as string[]);
-          for (const b of buckets) {
-            const bucketDir = path.join(usersBase, b);
-            const userDirs = await fs
-              .readdir(bucketDir)
-              .catch(() => [] as string[]);
-            for (const u of userDirs) {
-              await fs
-                .rm(path.join(bucketDir, u, safeName), {
-                  recursive: true,
-                  force: true,
-                })
-                .catch(() => {});
-            }
-          }
-        } catch {
-          // Ignore
-        }
-      }
-      return deleted;
-    });
-  }
-
-  async deleteUser(userId: string): Promise<boolean> {
-    assertNoActiveServerLock(this.baseDir);
-    const safeUserId = validateUserId(userId);
-    return this.withLock('__users__', async () => {
-      let deleted = false;
-      const users = await this.readUsersFile();
-      if (users.has(safeUserId)) {
-        users.delete(safeUserId);
-        await this.writeUsersFile(users);
-        deleted = true;
-      }
-
-      const bucket = getUserBucket(safeUserId);
-      const userDir = path.join(this.baseDir, 'users', bucket, safeUserId);
-      try {
-        await fs.rm(userDir, { recursive: true, force: true });
-      } catch {
-        // Ignore
-      }
-
-      return deleted;
-    });
-  }
 }
 
-// -- Private Helpers --------------------------------------------------------
+// -- Utility Functions --------------------------------------------------------
 
 export { assertNoActiveServerLock };
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { TetherServer } from '../src/server/server.js';
-import { MemoryStorage } from '../src/server/storage/memory/storage.js';
+import { MemoryStorage } from '../src/server/storage/memory.js';
 import { TestLogger, testLogger } from './logger.js';
 
 describe('TestLogger', () => {

@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { BackendType, createBackend } from '../../src/cli/backend.js';
+import { createBackend, StorageType } from '../../src/cli/backend.js';
 import {
   FileStorage,
   MemoryStorage,
@@ -34,22 +34,22 @@ describe('createBackend', () => {
     const storage = createBackend();
     expect(storage).toBeInstanceOf(MemoryStorage);
 
-    const explicitMem = createBackend(BackendType.Memory);
+    const explicitMem = createBackend(StorageType.Memory);
     expect(explicitMem).toBeInstanceOf(MemoryStorage);
   });
 
   it('should create matching SQLite storage with resolved baseDir', () => {
-    const storage = createBackend(BackendType.Sqlite, tmpDir);
+    const storage = createBackend(StorageType.Sqlite, tmpDir);
     expect(storage).toBeInstanceOf(SqliteStorage);
   });
 
   it('should create matching file storage with resolved baseDir', () => {
-    const storage = createBackend(BackendType.File, tmpDir);
+    const storage = createBackend(StorageType.File, tmpDir);
     expect(storage).toBeInstanceOf(FileStorage);
   });
 
   it('should pass custom options through createBackend', () => {
-    const storage = createBackend(BackendType.Memory, '.data', {
+    const storage = createBackend(StorageType.Memory, '.data', {
       maxRecords: 500,
     });
     expect(storage).toBeInstanceOf(MemoryStorage);
@@ -57,10 +57,10 @@ describe('createBackend', () => {
 
   it('should throw an error for unsupported backend types', () => {
     expect(() =>
-      createBackend('unknown_backend' as unknown as BackendType),
+      createBackend('unknown_backend' as unknown as StorageType),
     ).toThrow(TetherServerError);
     try {
-      createBackend('unknown_backend' as unknown as BackendType);
+      createBackend('unknown_backend' as unknown as StorageType);
     } catch (err) {
       expect((err as TetherServerError).code).toBe(
         TetherServerErrorCode.ConfigurationError,

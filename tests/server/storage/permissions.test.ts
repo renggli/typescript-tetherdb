@@ -1,9 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { TetherServerErrorCode } from '../../../src/server/errors.js';
-import type {
-  Storage,
-  UserStorage,
-} from '../../../src/server/storage/index.js';
+import type { Storage } from '../../../src/server/storage/storage.js';
+import type { User } from '../../../src/server/storage/user.js';
 import {
   type ChangeRecord,
   OperationType,
@@ -16,15 +14,15 @@ import {
 import { type StorageContext, storageDescriptors } from './matrix.js';
 
 describe.each(storageDescriptors)(
-  'Storage Permissions Enforcement ($name)',
-  (descriptor) => {
+  'Storage Permissions ($name)',
+  ({ createBackend }) => {
     let context: StorageContext;
     let storage: Storage;
-    let userAlice: UserStorage;
-    let userBob: UserStorage;
+    let userAlice: User;
+    let userBob: User;
 
     beforeEach(async () => {
-      context = await descriptor.createBackend();
+      context = await createBackend();
       storage = context.backend;
       userAlice = await storage.createUser('alice', 'alice-pass');
       userBob = await storage.createUser('bob', 'bob-pass');

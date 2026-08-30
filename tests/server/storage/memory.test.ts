@@ -2,12 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   TetherServerError,
   TetherServerErrorCode,
-} from '../../../../src/server/errors.js';
-import {
-  type ChangeRecord,
-  OperationType,
-} from '../../../../src/shared/types.js';
-import { memoryStorage } from '../matrix.js';
+} from '../../../src/server/errors.js';
+import { type ChangeRecord, OperationType } from '../../../src/shared/types.js';
+import { memoryStorage } from './matrix.js';
 
 describe('MemoryStorage', () => {
   it('should enforce maxRecords quota in memory', async () => {
@@ -129,9 +126,8 @@ describe('MemoryStorage', () => {
       }
 
       const status = await backend.getStatus();
-      expect(status.backend).toBe('memory');
+      expect(status.type).toBe('memory');
       expect(status.tablesCount).toBe(1);
-      expect(status.tables?.[0].name).toBe('records');
 
       const pruneRes = await backend.prune(2, 'records');
       expect(pruneRes.action).toBe('prune');

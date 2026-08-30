@@ -5,17 +5,15 @@ import { TetherServerError, TetherServerErrorCode } from '../server/index.js';
 import { type ResolvedAdminContext, resolveAdminTarget } from './admin.js';
 import { parseCliArgs } from './args.js';
 import { createBackend } from './backend.js';
-import {
-  handleMaintenanceCommand,
-  handleMigrateCommand,
-  handleRecordsCommand,
-  handleServeCommand,
-  handleStatusCommand,
-  handleStopCommand,
-  handleTablesCommand,
-  handleUsersCommand,
-  printHelp,
-} from './commands/index.js';
+import { printHelp } from './commands/help.js';
+import { handleMaintenanceCommand } from './commands/maintenance.js';
+import { handleMigrateCommand } from './commands/migrate.js';
+import { handleRecordsCommand } from './commands/records.js';
+import { handleServeCommand } from './commands/serve.js';
+import { handleStatusCommand } from './commands/status.js';
+import { handleStopCommand } from './commands/stop.js';
+import { handleTablesCommand } from './commands/tables.js';
+import { handleUsersCommand } from './commands/users.js';
 
 /**
  * Standard command line interface for TetherDB.

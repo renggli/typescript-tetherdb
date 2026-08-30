@@ -1,5 +1,5 @@
 import { TetherServerError, TetherServerErrorCode } from '../server/errors.js';
-import { BackendType } from '../server/storage/index.js';
+import { StorageType } from '../server/storage/storage.js';
 
 /**
  * Parsed CLI arguments and configuration options.
@@ -7,7 +7,7 @@ import { BackendType } from '../server/storage/index.js';
 export interface ParsedCliArgs {
   command: string;
   positionalArgs: string[];
-  backend: BackendType;
+  backend: StorageType;
   dir: string;
   host: string;
   port: number;
@@ -24,7 +24,7 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
   const positionalArgs: string[] = [];
   let port = process.env.PORT ? Number.parseInt(process.env.PORT, 10) : 8080;
   let host = process.env.HOST ?? '0.0.0.0';
-  let backend: BackendType = BackendType.Memory;
+  let backend: StorageType = StorageType.Memory;
   let dir = '.data';
   let token: string | undefined;
 
@@ -47,10 +47,10 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
     } else if (arg === '-b' || arg === '--backend') {
       backend = parseBackend(args[++i] ?? '');
     } else if (arg.startsWith('--memory=')) {
-      backend = BackendType.Memory;
+      backend = StorageType.Memory;
       token = arg.slice(9);
     } else if (arg === '--memory') {
-      backend = BackendType.Memory;
+      backend = StorageType.Memory;
       if (args[i + 1] && !args[i + 1].startsWith('-')) {
         token = args[++i];
       }
@@ -59,18 +59,18 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
     } else if (arg === '-t' || arg === '--token') {
       token = args[++i];
     } else if (arg.startsWith('--file=')) {
-      backend = BackendType.File;
+      backend = StorageType.File;
       dir = arg.slice(7);
     } else if (arg === '--file') {
-      backend = BackendType.File;
+      backend = StorageType.File;
       if (args[i + 1] && !args[i + 1].startsWith('-')) {
         dir = args[++i];
       }
     } else if (arg.startsWith('--sqlite=')) {
-      backend = BackendType.Sqlite;
+      backend = StorageType.Sqlite;
       dir = arg.slice(9);
     } else if (arg === '--sqlite') {
-      backend = BackendType.Sqlite;
+      backend = StorageType.Sqlite;
       if (args[i + 1] && !args[i + 1].startsWith('-')) {
         dir = args[++i];
       }
@@ -112,11 +112,11 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
   };
 }
 
-function parseBackend(val: string): BackendType {
+function parseBackend(val: string): StorageType {
   const normalized = val.toLowerCase();
-  if (normalized === 'memory') return BackendType.Memory;
-  if (normalized === 'file') return BackendType.File;
-  if (normalized === 'sqlite') return BackendType.Sqlite;
+  if (normalized === 'memory') return StorageType.Memory;
+  if (normalized === 'file') return StorageType.File;
+  if (normalized === 'sqlite') return StorageType.Sqlite;
   throw new TetherServerError(
     TetherServerErrorCode.ConfigurationError,
     `Invalid backend: "${val}". Expected "sqlite", "file", or "memory"`,

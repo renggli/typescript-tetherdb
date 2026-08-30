@@ -1,11 +1,11 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { acquireServerLock } from '../../../../src/server/shared/lock.js';
-import { BackendType } from '../../../../src/server/storage/index.js';
-import { SqliteStorage } from '../../../../src/server/storage/sqlite/index.js';
-import { OperationType } from '../../../../src/shared/types.js';
-import { type FileBasedStorageContext, sqliteStorage } from '../matrix.js';
+import { acquireServerLock } from '../../../src/server/shared/lock.js';
+import { SqliteStorage } from '../../../src/server/storage/sqlite.js';
+import { StorageType } from '../../../src/server/storage/storage.js';
+import { OperationType } from '../../../src/shared/types.js';
+import { type FileBasedStorageContext, sqliteStorage } from './matrix.js';
 
 describe('SqliteStorage', () => {
   let context: FileBasedStorageContext<SqliteStorage>;
@@ -180,7 +180,7 @@ describe('SqliteStorage', () => {
     // Checkpoint
     const res = await context.backend.checkpoint();
     expect(res.action).toBe('checkpoint');
-    expect(res.backend).toBe('sqlite');
+    expect(res.type).toBe('sqlite');
     expect(res.affectedCount).toBeGreaterThan(0);
 
     // Vacuum
@@ -333,7 +333,7 @@ describe('SqliteStorage', () => {
     const handle = acquireServerLock(context.dir, {
       port: 8080,
       host: '127.0.0.1',
-      backend: BackendType.Sqlite,
+      type: StorageType.Sqlite,
     });
 
     // Simulate an external PID holding the lock

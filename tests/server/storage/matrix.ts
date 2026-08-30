@@ -4,13 +4,19 @@ import * as path from 'node:path';
 import {
   FileStorage,
   type FileStorageOptions,
+} from '../../../src/server/storage/file.js';
+import {
   MemoryStorage,
   type MemoryStorageOptions,
+} from '../../../src/server/storage/memory.js';
+import {
   SqliteStorage,
   type SqliteStorageOptions,
-  type Storage,
-  type StorageOptions,
-} from '../../../src/server/storage/index.js';
+} from '../../../src/server/storage/sqlite.js';
+import type {
+  Storage,
+  StorageOptions,
+} from '../../../src/server/storage/storage.js';
 
 /**
  * Context holding an instantiated storage backend and its cleanup handler.

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { SyncStatus, TetherClient } from '../../src/client/index.js';
 import { type RunningServer, startServer } from '../../src/server/server.js';
-import type { Storage } from '../../src/server/storage/index.js';
+import type { Storage } from '../../src/server/storage/storage.js';
 import {
   type StorageContext,
   storageDescriptors,

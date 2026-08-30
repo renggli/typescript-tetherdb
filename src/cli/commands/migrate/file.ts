@@ -5,10 +5,10 @@ import {
   TetherServerErrorCode,
 } from '../../../server/errors.js';
 import { getUserBucket } from '../../../server/shared/validate.js';
-import { BackendType } from '../../../server/storage/index.js';
+import { StorageType } from '../../../server/storage/storage.js';
 import type { StoredRecord } from '../../../shared/types.js';
+import type { MigrationResult } from '../migrate.js';
 import { backupFile, filterTargetApps } from './helpers.js';
-import type { MigrationResult } from './index.js';
 
 /**
  * Migrates a v1 multi-app FileStorage database to the v2 unified storage format.
@@ -27,7 +27,7 @@ export async function migrateFileStorage(
   if (!fs.existsSync(appsJsonPath)) {
     if (fs.existsSync(tablesJsonPath)) {
       return {
-        backend: BackendType.File,
+        type: StorageType.File,
         migratedTables: 0,
         migratedUsers: 0,
         migratedRecords: 0,
@@ -189,7 +189,7 @@ export async function migrateFileStorage(
   backupFile(appsJsonPath);
 
   return {
-    backend: BackendType.File,
+    type: StorageType.File,
     migratedTables,
     migratedUsers,
     migratedRecords,

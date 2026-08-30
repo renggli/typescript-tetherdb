@@ -3,7 +3,7 @@ import {
   TetherServerError,
   TetherServerErrorCode,
 } from '../../../src/server/errors.js';
-import type { Storage } from '../../../src/server/storage/index.js';
+import type { Storage } from '../../../src/server/storage/storage.js';
 import {
   type ChangeRecord,
   OperationType,
@@ -298,7 +298,7 @@ function runStorageTestSuite(createStorage: () => Storage) {
     expect(count).toBe(3);
     const rec1 = await table.getRecord(user, 's1');
     expect(rec1?.data).toEqual({ title: 'First' });
-    expect(rec1?.userId).toBe(user.userId);
+    expect(rec1?.userName).toBe(user.userName);
   });
 
   it('should delete a table via table.delete and clean up all data', async () => {
@@ -341,15 +341,14 @@ function runStorageTestSuite(createStorage: () => Storage) {
     expect(await recreated.getAllRecords(user)).toHaveLength(0);
   });
 
-  it('should return storage status and tables list', async () => {
+  it('should return storage status and metadata', async () => {
     const status = await storage.getStatus();
-    expect(status.backend).toBeDefined();
+    expect(status.type).toBeDefined();
     expect(status.tablesCount).toBeGreaterThanOrEqual(3);
-    expect(status.tables?.some((t) => t.name === 'todos')).toBe(true);
   });
 
   it('should handle checkpoint and vacuum or throw NotSupported', async () => {
-    const isSqlite = (await storage.getStatus()).backend === 'sqlite';
+    const isSqlite = (await storage.getStatus()).type === 'sqlite';
 
     if (isSqlite) {
       const checkpointRes = await storage.checkpoint('todos');

@@ -7,7 +7,7 @@
 import type * as http from 'node:http';
 import type { Plugin, PreviewServer, ViteDevServer } from 'vite';
 import { TetherServer, type TetherServerOptions } from '../server/server.js';
-import { MemoryStorage } from '../server/storage/memory/index.js';
+import { MemoryStorage } from '../server/storage/memory.js';
 import type { TableRow, TableSettings } from '../shared/types.js';
 
 /**

@@ -28,17 +28,23 @@ export {
   type TetherServerOptions,
 } from './server.js';
 export {
-  BackendType,
   FileStorage,
   type FileStorageOptions,
-  type MaintenanceResult,
+} from './storage/file.js';
+export {
   MemoryStorage,
   type MemoryStorageOptions,
+} from './storage/memory.js';
+export {
   SqliteStorage,
   type SqliteStorageOptions,
-  type Storage,
+} from './storage/sqlite.js';
+export {
+  type MaintenanceResult,
+  Storage,
   type StorageOptions,
   type StorageStatus,
-  type TableStorage,
-  type UserStorage,
-} from './storage/index.js';
+  StorageType,
+} from './storage/storage.js';
+export { Table } from './storage/table.js';
+export { User } from './storage/user.js';

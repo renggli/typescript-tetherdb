@@ -5,7 +5,7 @@ import {
   handleMetrics,
   handleReady,
 } from '../../../src/server/http/system.js';
-import { MemoryStorage } from '../../../src/server/storage/memory/storage.js';
+import { MemoryStorage } from '../../../src/server/storage/memory.js';
 import type { Storage } from '../../../src/server/storage/storage.js';
 
 function createMockHttp() {

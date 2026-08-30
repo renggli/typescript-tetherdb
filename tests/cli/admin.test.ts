@@ -4,7 +4,8 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolveAdminTarget } from '../../src/cli/admin.js';
 import { TetherServer } from '../../src/server/server.js';
-import { BackendType, SqliteStorage } from '../../src/server/storage/index.js';
+import { SqliteStorage } from '../../src/server/storage/sqlite.js';
+import { StorageType } from '../../src/server/storage/storage.js';
 
 describe('resolveAdminTarget', () => {
   let tmpDir: string;
@@ -31,13 +32,13 @@ describe('resolveAdminTarget', () => {
   });
 
   it('should resolve LocalAdminTarget when no server is running', async () => {
-    const context = await resolveAdminTarget(tmpDir, BackendType.Sqlite);
+    const context = await resolveAdminTarget(tmpDir, StorageType.Sqlite);
     expect(context.isRemote).toBe(false);
     expect(context.lock).toBeNull();
     expect(context.target).toBeDefined();
 
     const status = await context.target.getStatus();
-    expect(status.backend).toBe('sqlite');
+    expect(status.type).toBe('sqlite');
 
     await context.close();
   });
@@ -47,13 +48,13 @@ describe('resolveAdminTarget', () => {
     server = new TetherServer({ storage });
     await server.listen(0, '127.0.0.1');
 
-    const context = await resolveAdminTarget(tmpDir, BackendType.Sqlite);
+    const context = await resolveAdminTarget(tmpDir, StorageType.Sqlite);
     expect(context.isRemote).toBe(true);
     expect(context.lock).not.toBeNull();
     expect(context.lock?.pid).toBe(process.pid);
 
     const status = await context.target.getStatus();
-    expect(status.backend).toBe('sqlite');
+    expect(status.type).toBe('sqlite');
 
     await context.close();
   });
@@ -62,14 +63,14 @@ describe('resolveAdminTarget', () => {
     server = new TetherServer({ baseDir: tmpDir });
     await server.listen(0, '127.0.0.1');
 
-    const context = await resolveAdminTarget(tmpDir, BackendType.Memory);
+    const context = await resolveAdminTarget(tmpDir, StorageType.Memory);
     expect(context.isRemote).toBe(true);
     expect(context.lock).not.toBeNull();
     expect(context.lock?.pid).toBe(process.pid);
     expect(context.lock?.adminSecret).toBeDefined();
 
     const status = await context.target.getStatus();
-    expect(status.backend).toBe('memory');
+    expect(status.type).toBe('memory');
 
     await context.close();
   });
@@ -79,13 +80,13 @@ describe('resolveAdminTarget', () => {
     await server.listen(0, '127.0.0.1');
     const token = server.getAdminToken('127.0.0.1');
 
-    const context = await resolveAdminTarget(tmpDir, BackendType.Memory, token);
+    const context = await resolveAdminTarget(tmpDir, StorageType.Memory, token);
     expect(context.isRemote).toBe(true);
     expect(context.lock).not.toBeNull();
-    expect(context.lock?.backend).toBe('memory');
+    expect(context.lock?.type).toBe('memory');
 
     const status = await context.target.getStatus();
-    expect(status.backend).toBe('memory');
+    expect(status.type).toBe('memory');
 
     await context.close();
   });

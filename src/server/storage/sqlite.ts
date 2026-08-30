@@ -3,16 +3,20 @@ import * as fs from 'node:fs';
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
-import { shouldOverwrite } from '../../../shared/clock.js';
+import { shouldOverwrite } from '../../shared/clock.js';
 import {
   type ChangeRecord,
   OperationType,
-  type StoredRecord,
   type TableSettings,
-} from '../../../shared/types.js';
-import { TetherServerError, TetherServerErrorCode } from '../../errors.js';
-import { getOrCreateKeyfileSecret, hashPassword } from '../../shared/crypto.js';
-import { assertNoActiveServerLock } from '../../shared/lock.js';
+} from '../../shared/types.js';
+import { TetherServerError, TetherServerErrorCode } from '../errors.js';
+import { UserResolver } from '../security/resolver.js';
+import type {
+  InternalChangeRecord,
+  InternalStoredRecord,
+} from '../security/types.js';
+import { getOrCreateKeyfileSecret, hashPassword } from '../shared/crypto.js';
+import { assertNoActiveServerLock } from '../shared/lock.js';
 import {
   normalizeUserName,
   validatePassword,
@@ -20,21 +24,16 @@ import {
   validateTableName,
   validateUserId,
   validateUserName,
-} from '../../shared/validate.js';
+} from '../shared/validate.js';
 import {
-  assertCanMutate,
-  BaseStorage,
-  canRead,
-  isPrivateTable,
-  isSnapshotRequired,
+  type MaintenanceResult,
+  Storage,
+  type StorageOptions,
+  StorageType,
   validateBatchChanges,
-} from '../base/index.js';
-import type { MaintenanceResult, StorageOptions } from '../storage.js';
-import { BackendType } from '../storage.js';
-import type { ApplyChangesOptions, TableStorage } from '../table.js';
-import type { UserStorage } from '../user.js';
-import { TableSqliteStorage } from './table.js';
-import { UserSqliteStorage } from './user.js';
+} from './storage.js';
+import { type ApplyChangesOptions, Table } from './table.js';
+import { User } from './user.js';
 
 export interface SqliteUserData {
   userId: string;
@@ -81,17 +80,17 @@ export interface SqliteStorageOptions extends StorageOptions {
 }
 
 /**
- * SQLite-backed implementation of `Storage`.
+ * SQLite storage engine persisting records in consolidated SQLite databases.
  */
-export class SqliteStorage extends BaseStorage {
-  readonly backend = BackendType.Sqlite;
+export class SqliteStorage extends Storage {
+  readonly type = StorageType.Sqlite;
   readonly baseDir: string;
   readonly inMemory: boolean;
   readonly secret: string;
   override readonly options: SqliteStorageOptions;
   private usersHandle: UsersDbHandle | null = null;
   private tablesHandle: TablesDbHandle | null = null;
-  private tableInstances: Map<string, TableSqliteStorage> = new Map();
+  private tableInstances: Map<string, Table> = new Map();
 
   constructor(options: SqliteStorageOptions = {}) {
     super(options);
@@ -120,7 +119,7 @@ export class SqliteStorage extends BaseStorage {
   async createTable(
     name: string,
     settings: Partial<TableSettings> = {},
-  ): Promise<TableStorage> {
+  ): Promise<Table> {
     if (!this.inMemory) assertNoActiveServerLock(this.baseDir, 'sqlite');
     const safeName = validateTableName(name);
     const dbHandle = this.getTablesDb();
@@ -137,12 +136,12 @@ export class SqliteStorage extends BaseStorage {
       JSON.stringify(settings),
       Date.now(),
     );
-    const table = new TableSqliteStorage(safeName, this, settings);
+    const table = new Table(safeName, this, settings);
     this.tableInstances.set(safeName, table);
     return table;
   }
 
-  getTableSync(name: string): TableSqliteStorage | undefined {
+  getTableSync(name: string): Table | undefined {
     const safeName = validateTableName(name);
     const existingInstance = this.tableInstances.get(safeName);
     if (existingInstance) return existingInstance;
@@ -162,35 +161,47 @@ export class SqliteStorage extends BaseStorage {
       }
     }
 
-    const table = new TableSqliteStorage(safeName, this, parsedSettings);
+    const table = new Table(row.name, this, parsedSettings);
     this.tableInstances.set(safeName, table);
     return table;
   }
 
-  async getTable(name: string): Promise<TableStorage | undefined> {
+  async getTable(name: string): Promise<Table | undefined> {
     return this.getTableSync(name);
   }
 
-  async getTables(): Promise<TableStorage[]> {
+  updateTableSettings(name: string, settings: TableSettings): void {
+    if (!this.inMemory) assertNoActiveServerLock(this.baseDir, 'sqlite');
+    const safeName = validateTableName(name);
+    const dbHandle = this.getTablesDb();
+    dbHandle.stmtUpdateTableSettings.run(JSON.stringify(settings), safeName);
+    const existing = this.tableInstances.get(safeName);
+    if (existing) {
+      existing.settings = settings;
+    }
+  }
+
+  async getTables(): Promise<Table[]> {
     const dbHandle = this.getTablesDb();
     const rows = dbHandle.stmtListTables.all() as Array<{
       name: string;
       settings: string | null;
+      created_at: number;
     }>;
 
-    const tables: TableStorage[] = [];
+    const tables: Table[] = [];
     for (const r of rows) {
-      let parsedSettings: Partial<TableSettings> = {};
-      if (r.settings) {
-        try {
-          parsedSettings = JSON.parse(r.settings);
-        } catch {
-          // Ignore
-        }
-      }
       let instance = this.tableInstances.get(r.name);
       if (!instance) {
-        instance = new TableSqliteStorage(r.name, this, parsedSettings);
+        let parsedSettings: Partial<TableSettings> = {};
+        if (r.settings) {
+          try {
+            parsedSettings = JSON.parse(r.settings);
+          } catch {
+            // Ignore
+          }
+        }
+        instance = new Table(r.name, this, parsedSettings);
         this.tableInstances.set(r.name, instance);
       }
       tables.push(instance);
@@ -198,7 +209,7 @@ export class SqliteStorage extends BaseStorage {
     return tables;
   }
 
-  async createUser(userName: string, password: string): Promise<UserStorage> {
+  async createUser(userName: string, password: string): Promise<User> {
     if (!this.inMemory) assertNoActiveServerLock(this.baseDir, 'sqlite');
     const safeUserName = validateUserName(userName);
     const validPassword = validatePassword(password);
@@ -217,26 +228,19 @@ export class SqliteStorage extends BaseStorage {
     const createdAt = Date.now();
 
     usersDb.stmtInsertUser.run(userId, safeUserName, passwordHash, createdAt);
-    const userData: SqliteUserData = {
-      userId,
-      userName: safeUserName,
-      passwordHash,
-      createdAt,
-    };
-
-    return new UserSqliteStorage(userData, this);
+    return new User(userId, safeUserName, createdAt, this);
   }
 
-  async getUser(userId: string): Promise<UserStorage | undefined> {
+  async getUser(userId: string): Promise<User | undefined> {
     const safeUserId = validateUserId(userId);
     const data = this.findUserDataById(safeUserId);
     if (data) {
-      return new UserSqliteStorage(data, this);
+      return new User(data.userId, data.userName, data.createdAt, this);
     }
     return undefined;
   }
 
-  async getUserByUserName(userName: string): Promise<UserStorage | undefined> {
+  async getUserByUserName(userName: string): Promise<User | undefined> {
     const safeUserName = normalizeUserName(userName);
     if (!safeUserName) return undefined;
     const usersDb = this.getUsersDb();
@@ -249,16 +253,10 @@ export class SqliteStorage extends BaseStorage {
         }
       | undefined;
     if (!row) return undefined;
-    const data: SqliteUserData = {
-      userId: row.id,
-      userName: row.user_name,
-      passwordHash: row.password_hash,
-      createdAt: row.created_at,
-    };
-    return new UserSqliteStorage(data, this);
+    return new User(row.id, row.user_name, row.created_at, this);
   }
 
-  async getUsers(): Promise<UserStorage[]> {
+  async getUsers(): Promise<User[]> {
     const usersDb = this.getUsersDb();
     const rows = usersDb.stmtListUsers.all() as Array<{
       id: string;
@@ -266,22 +264,146 @@ export class SqliteStorage extends BaseStorage {
       password_hash: string | null;
       created_at: number;
     }>;
-    return rows.map(
-      (r) =>
-        new UserSqliteStorage(
-          {
-            userId: r.id,
-            userName: r.user_name,
-            passwordHash: r.password_hash,
-            createdAt: r.created_at,
-          },
-          this,
-        ),
-    );
+    return rows.map((r) => new User(r.id, r.user_name, r.created_at, this));
+  }
+
+  async getUserPasswordHash(
+    userId: string,
+  ): Promise<string | null | undefined> {
+    const safeUserId = validateUserId(userId);
+    const user = this.findUserDataById(safeUserId);
+    return user?.passwordHash;
+  }
+
+  async setUserPasswordHash(userId: string, hash: string): Promise<void> {
+    this.updateUserData(userId, hash);
+  }
+
+  async getRawRecord(
+    tableName: string,
+    partition: string,
+    id: string,
+  ): Promise<InternalStoredRecord | undefined> {
+    const safeId = validateRecordId(id);
+    const dbHandle = this.getTablesDb();
+
+    const row = dbHandle.stmtGetRecord.get(tableName, partition, safeId) as
+      | {
+          id: string;
+          version: number;
+          timestamp: number;
+          client_id: string | null;
+          deleted: number;
+          data: string | null;
+          user_id: string | null;
+        }
+      | undefined;
+
+    if (!row) return undefined;
+
+    return {
+      id: row.id,
+      version: row.version,
+      timestamp: row.timestamp,
+      clientId: row.client_id ?? undefined,
+      deleted: Boolean(row.deleted),
+      data: parseJsonData(row.data),
+      userId: row.user_id ?? undefined,
+    };
+  }
+
+  async getRawRecords(
+    tableName: string,
+    partition: string,
+  ): Promise<InternalStoredRecord[]> {
+    const dbHandle = this.getTablesDb();
+    const rows = dbHandle.stmtGetSnapshotByTable.all(
+      tableName,
+      partition,
+    ) as Array<{
+      table_name: string;
+      partition: string;
+      id: string;
+      version: number;
+      timestamp: number;
+      client_id: string | null;
+      deleted: number;
+      data: string | null;
+      user_id: string | null;
+    }>;
+
+    return rows.map((row) => ({
+      id: row.id,
+      version: row.version,
+      timestamp: row.timestamp,
+      clientId: row.client_id ?? undefined,
+      deleted: Boolean(row.deleted),
+      data: parseJsonData(row.data),
+      userId: row.user_id ?? undefined,
+    }));
+  }
+
+  async getRawChangesSince(
+    fromSeq: number,
+    _user?: User,
+  ): Promise<{
+    rawChanges: InternalChangeRecord[];
+    currentSeq: number;
+    minSeq: number;
+  }> {
+    const dbHandle = this.getTablesDb();
+    let currentSeq = 0;
+    let minSeq = 0;
+    let rows: Array<{
+      seq: number;
+      table_name: string;
+      partition: string;
+      id: string;
+      op: string;
+      version: number;
+      timestamp: number;
+      client_id: string | null;
+      deleted: number;
+      data: string | null;
+      user_id: string | null;
+    }> = [];
+
+    try {
+      dbHandle.db.exec('BEGIN DEFERRED;');
+      const metaRow = dbHandle.stmtGetMeta.get() as
+        | { current_seq: number; min_seq: number }
+        | undefined;
+      currentSeq = metaRow?.current_seq ?? 0;
+      minSeq = metaRow?.min_seq ?? 0;
+
+      rows = dbHandle.stmtGetChangelogSince.all(
+        fromSeq,
+      ) as unknown as typeof rows;
+      dbHandle.db.exec('COMMIT;');
+    } catch (err) {
+      try {
+        dbHandle.db.exec('ROLLBACK;');
+      } catch {}
+      throw err;
+    }
+
+    const rawChanges: InternalChangeRecord[] = rows.map((r) => ({
+      seq: r.seq,
+      table: r.table_name,
+      id: r.id,
+      op: r.op as OperationType,
+      version: r.version,
+      timestamp: r.timestamp,
+      clientId: r.client_id ?? undefined,
+      data: parseJsonData(r.data),
+      userId: r.user_id ?? undefined,
+    }));
+
+    return { rawChanges, currentSeq, minSeq };
   }
 
   async applyChanges(
-    user: UserStorage | undefined,
+    user: User | undefined,
     changes: ChangeRecord[],
     options?: ApplyChangesOptions,
   ): Promise<{ applied: ChangeRecord[]; newSeq: number }> {
@@ -307,7 +429,7 @@ export class SqliteStorage extends BaseStorage {
         throw err;
       }
     }
-    const appliedList: (ChangeRecord & { seq: number })[] = [];
+    const appliedList: InternalChangeRecord[] = [];
     let newSeq = 0;
 
     try {
@@ -316,9 +438,8 @@ export class SqliteStorage extends BaseStorage {
         const recordId = validateRecordId(change.id);
         const table = this.getTableSync(tableName);
         if (!table) continue;
-        const isPrivate = isPrivateTable(table);
 
-        if (isPrivate && !user && !options?.skipPermissionCheck) {
+        if (table.isPrivate && !user && !options?.skipPermissionCheck) {
           throw new TetherServerError(
             TetherServerErrorCode.Forbidden,
             `Authentication required for private table "${tableName}"`,
@@ -326,7 +447,7 @@ export class SqliteStorage extends BaseStorage {
         }
 
         const effectiveUserId: string =
-          isPrivate && user ? user.userId : '__shared__';
+          table.isPrivate && user ? user.userId : '__shared__';
 
         const maxRecords = table.settings.maxRecords ?? defaultMaxRecords;
 
@@ -345,21 +466,39 @@ export class SqliteStorage extends BaseStorage {
             }
           | undefined;
 
-        const existing: (StoredRecord & { userId?: string }) | undefined =
-          existingRow
-            ? {
-                id: recordId,
-                version: existingRow.version,
-                timestamp: existingRow.timestamp,
-                clientId: existingRow.client_id,
-                deleted: Boolean(existingRow.deleted),
-                data: existingRow.data ? JSON.parse(existingRow.data) : null,
-                userId: existingRow.user_id ?? undefined,
-              }
-            : undefined;
+        const existing: InternalStoredRecord | undefined = existingRow
+          ? {
+              id: recordId,
+              version: existingRow.version,
+              timestamp: existingRow.timestamp,
+              clientId: existingRow.client_id,
+              deleted: Boolean(existingRow.deleted),
+              data: parseJsonData(existingRow.data ?? null),
+              userId: existingRow.user_id ?? undefined,
+            }
+          : undefined;
 
         if (!options?.skipPermissionCheck) {
-          assertCanMutate(table, user, change, existing);
+          if (change.op === OperationType.Delete) {
+            if (!table.canDelete(user, existing)) {
+              throw new TetherServerError(
+                TetherServerErrorCode.Forbidden,
+                `User does not have delete access to record "${change.id}" in table "${tableName}"`,
+              );
+            }
+          } else if (!existing || existing.deleted) {
+            if (!table.canCreate(user)) {
+              throw new TetherServerError(
+                TetherServerErrorCode.Forbidden,
+                `User does not have create access to table "${tableName}"`,
+              );
+            }
+          } else if (!table.canUpdate(user, existing)) {
+            throw new TetherServerError(
+              TetherServerErrorCode.Forbidden,
+              `User does not have update access to record "${change.id}" in table "${tableName}"`,
+            );
+          }
         }
 
         if (
@@ -440,6 +579,7 @@ export class SqliteStorage extends BaseStorage {
             timestamp: change.timestamp,
             clientId: change.clientId,
             data: change.op === OperationType.Delete ? undefined : change.data,
+            userId: userId ?? undefined,
           });
         }
       }
@@ -478,85 +618,27 @@ export class SqliteStorage extends BaseStorage {
       throw err;
     }
 
-    return { applied: appliedList, newSeq };
-  }
-
-  async getChangesSince(
-    user: UserStorage | undefined,
-    fromSeq: number,
-    tableFilters?: string[],
-  ): Promise<{
-    changes: ChangeRecord[];
-    currentSeq: number;
-    requiresSnapshot?: boolean;
-  }> {
-    const dbHandle = this.getTablesDb();
-    let currentSeq = 0;
-    let minSeq = 0;
-    let rows: Array<{
-      seq: number;
-      table_name: string;
-      partition: string;
-      id: string;
-      op: string;
-      version: number;
-      timestamp: number;
-      client_id: string;
-      deleted: number;
-      data: string | null;
-      user_id?: string | null;
-    }> = [];
-
-    try {
-      dbHandle.db.exec('BEGIN DEFERRED;');
-      const metaRow = dbHandle.stmtGetMeta.get() as
-        | { current_seq: number; min_seq: number }
-        | undefined;
-      currentSeq = metaRow?.current_seq ?? 0;
-      minSeq = metaRow?.min_seq ?? 0;
-
-      if (isSnapshotRequired(fromSeq, minSeq, currentSeq)) {
-        dbHandle.db.exec('COMMIT;');
-        return { changes: [], currentSeq, requiresSnapshot: true };
-      }
-
-      rows = dbHandle.stmtGetChangelogSince.all(
-        fromSeq,
-      ) as unknown as typeof rows;
-      dbHandle.db.exec('COMMIT;');
-    } catch (err) {
-      try {
-        dbHandle.db.exec('ROLLBACK;');
-      } catch {}
-      throw err;
-    }
-
-    const changes: ChangeRecord[] = [];
-    for (const r of rows) {
-      const table = await this.getTable(r.table_name);
-      if (!table || !canRead(table, user)) continue;
-      if (tableFilters && !tableFilters.includes(r.table_name)) continue;
-
-      const isPrivate = isPrivateTable(table);
-      if (isPrivate && (!user || r.partition !== user.userId)) continue;
-
-      changes.push({
-        seq: r.seq,
-        table: r.table_name,
-        id: r.id,
-        op: r.op as OperationType,
-        version: r.version,
-        timestamp: r.timestamp,
-        clientId: r.client_id ?? undefined,
-        data: r.data ? JSON.parse(r.data) : undefined,
-        ...({ userId: r.user_id ?? undefined } as { userId?: string }),
+    const resolver = new UserResolver(this);
+    const publicApplied: ChangeRecord[] = [];
+    for (const applied of appliedList) {
+      const userName = await resolver.resolveUserName(applied.userId, user);
+      publicApplied.push({
+        table: applied.table,
+        id: applied.id,
+        op: applied.op,
+        data: applied.data,
+        version: applied.version,
+        seq: applied.seq,
+        timestamp: applied.timestamp,
+        clientId: applied.clientId,
+        userName,
       });
     }
 
-    return { changes, currentSeq, requiresSnapshot: false };
+    return { applied: publicApplied, newSeq };
   }
 
-  async getCurrentSeq(_user?: UserStorage): Promise<number> {
+  async getCurrentSeq(_user?: User): Promise<number> {
     const dbHandle = this.getTablesDb();
     const metaRow = dbHandle.stmtGetMeta.get() as
       | { current_seq: number; min_seq: number }
@@ -570,7 +652,7 @@ export class SqliteStorage extends BaseStorage {
 
     return {
       action: 'checkpoint',
-      backend: BackendType.Sqlite,
+      type: StorageType.Sqlite,
       affectedCount: 2,
       message: 'Checkpoint completed successfully across databases',
     };
@@ -582,7 +664,7 @@ export class SqliteStorage extends BaseStorage {
 
     return {
       action: 'vacuum',
-      backend: BackendType.Sqlite,
+      type: StorageType.Sqlite,
       affectedCount: 2,
       message: 'Vacuum completed successfully across databases',
     };
@@ -612,7 +694,7 @@ export class SqliteStorage extends BaseStorage {
 
     return {
       action: 'prune',
-      backend: BackendType.Sqlite,
+      type: StorageType.Sqlite,
       tableName,
       affectedCount: totalPruned,
       message: `Prune completed successfully. Removed ${totalPruned} changelog record(s)`,
@@ -735,13 +817,6 @@ export class SqliteStorage extends BaseStorage {
     return this.tablesHandle;
   }
 
-  updateTableSettingsInDb(name: string, settings: TableSettings): void {
-    if (!this.inMemory) assertNoActiveServerLock(this.baseDir, 'sqlite');
-    const safeName = validateTableName(name);
-    const dbHandle = this.getTablesDb();
-    dbHandle.stmtUpdateTableSettings.run(JSON.stringify(settings), safeName);
-  }
-
   findUserDataById(userId: string): SqliteUserData | undefined {
     const usersDb = this.getUsersDb();
     const row = usersDb.stmtFindById.get(userId) as
@@ -765,13 +840,6 @@ export class SqliteStorage extends BaseStorage {
     if (!this.inMemory) assertNoActiveServerLock(this.baseDir, 'sqlite');
     const usersDb = this.getUsersDb();
     usersDb.stmtUpdatePassword.run(passwordHash, userId);
-  }
-
-  deleteUserData(userId: string): boolean {
-    if (!this.inMemory) assertNoActiveServerLock(this.baseDir, 'sqlite');
-    const usersDb = this.getUsersDb();
-    const info = usersDb.stmtDeleteUser.run(userId);
-    return info.changes > 0;
   }
 
   deleteTable(name: string): boolean {
@@ -811,6 +879,15 @@ export class SqliteStorage extends BaseStorage {
 }
 
 // -- Private Schema Helpers -------------------------------------------------
+
+function parseJsonData(raw: string | null): unknown {
+  if (raw === null || raw === undefined) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
 
 function initUsersSchema(db: DatabaseSync): void {
   db.exec(`

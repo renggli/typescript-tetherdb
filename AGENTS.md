@@ -19,7 +19,7 @@ This document outlines the core architecture, developer rules, TypeScript conven
     3. `constructor`.
     4. Public methods grouped by lifecycle and domain (e.g., Table CRUD → User CRUD → Sync/Mutations → Maintenance & Cleanup).
     5. Private helper methods and internal utilities at the very bottom.
-- **Minimal Public API Surface**: Only export or make public APIs, types, classes, methods, and properties that are absolutely necessary for consumers. Keep internal implementations, helper utilities, state fields, rate limiters, crypto primitives, lock handlers, and command dispatchers strictly private to their classes and internal modules. Never export internal constants, helpers, or properties just for unit tests.
+- **Minimal Public API Surface**: Only export or make public APIs, types, classes, methods, and properties that are absolutely necessary for consumers. Keep internal implementations, helper utilities, state fields, rate limiters, crypto primitives, lock handlers, and command dispatchers strictly private to their classes and internal modules. Never export internal constants, helpers, or properties just for unit tests. Avoid `index.ts` files for internal-only packages, import the files directly.
 - **Private Helpers at the Bottom**: Place private helper methods and internal utility functions at the bottom of classes and files so that the public API and core lifecycle methods appear clearly at the top.
 - **No `any` Types**: Never use the `any` type. Leverage strict types, `unknown`, explicit generics (`<T = unknown>`), type narrowing, or specific interfaces/unions instead.
 - **Reusability & Duplication**: Reuse logic, types, and utility functions across modules. Refactor shared functions into utility modules (`src/shared/`). Do not duplicate code.
@@ -56,9 +56,10 @@ The codebase is organized into five decoupled layers with clear subpath exports:
 - **Server Layer (`src/server/`)**:
   - Exported as `tetherdb/server`.
   - **Server (`server.ts`)**: Unified HTTP and WebSocket server (`TetherServer`, `startServer`) handling authentication endpoints, health/readiness/metrics, and real-time synchronization.
-  - **Storage (`storage/`)**: Pluggable storage abstraction with implementations for in-memory testing (`MemoryStorage`), per-user filesystem directories (`FileStorage`), and SQLite (`SqliteStorage`).
-  - **Locking (`lock.ts`)**: Exclusive server process lockfile management (`server.lock`) and stale PID crash recovery.
-  - **Authentication (`crypto.ts`)**: Internal token signing, password hashing, and persistent keyfile management.
+  - **Storage (`storage/`)**: Storage abstraction (`storage.ts`), common base (`base.ts`), with implementations for in-memory testing (`memory.ts`), per-user filesystem directories (`file.ts`), and SQLite (`sqlite.ts`), unified table (`table.ts`) and user (`user.ts`).
+  - **Security (`security/`)**: Centralized authorization and response fattening pipeline (`filter.ts`), caching user resolver (`resolver.ts`), and internal schemas (`types.ts`).
+  - **Locking (`shared/lock.ts`)**: Exclusive server process lockfile management (`server.lock`) and stale PID crash recovery.
+  - **Authentication (`shared/crypto.ts`)**: Internal token signing, password hashing, and persistent keyfile management.
   - **Sync (`sync.ts`)**: Internal WebSocket connection hub and broadcast engine.
 - **CLI Layer (`src/cli/`)**:
   - Exported as `tetherdb/cli` (`runCli`).

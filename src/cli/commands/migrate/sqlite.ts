@@ -6,10 +6,10 @@ import {
   TetherServerError,
   TetherServerErrorCode,
 } from '../../../server/errors.js';
-import { DEFAULT_TABLE_PERMISSIONS } from '../../../server/storage/base/index.js';
-import { BackendType } from '../../../server/storage/index.js';
+import { StorageType } from '../../../server/storage/storage.js';
+import { DEFAULT_TABLE_PERMISSIONS } from '../../../shared/types.js';
+import type { MigrationResult } from '../migrate.js';
 import { backupFile, filterTargetApps } from './helpers.js';
-import type { MigrationResult } from './index.js';
 
 /**
  * Migrates a v1 multi-app SQLite database to the v2 unified storage format.
@@ -28,7 +28,7 @@ export async function migrateSqliteStorage(
   if (!fs.existsSync(appsDbPath)) {
     if (fs.existsSync(tablesDbPath)) {
       return {
-        backend: BackendType.Sqlite,
+        type: StorageType.Sqlite,
         migratedTables: 0,
         migratedUsers: 0,
         migratedRecords: 0,
@@ -195,7 +195,7 @@ export async function migrateSqliteStorage(
   backupFile(`${appsDbPath}-shm`);
 
   return {
-    backend: BackendType.Sqlite,
+    type: StorageType.Sqlite,
     migratedTables,
     migratedUsers,
     migratedRecords,

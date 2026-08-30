@@ -4,18 +4,16 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { handleMigrateCommand } from '../../../../src/cli/commands/migrate/index.js';
+import { handleMigrateCommand } from '../../../../src/cli/commands/migrate.js';
 import {
   TetherServerError,
   TetherServerErrorCode,
 } from '../../../../src/server/errors.js';
 import { acquireServerLock } from '../../../../src/server/shared/lock.js';
 import { getUserBucket } from '../../../../src/server/shared/validate.js';
-import {
-  BackendType,
-  FileStorage,
-  SqliteStorage,
-} from '../../../../src/server/storage/index.js';
+import { FileStorage } from '../../../../src/server/storage/file.js';
+import { SqliteStorage } from '../../../../src/server/storage/sqlite.js';
+import { StorageType } from '../../../../src/server/storage/storage.js';
 import { OperationType } from '../../../../src/shared/types.js';
 
 describe('handleMigrateCommand', () => {
@@ -39,7 +37,7 @@ describe('handleMigrateCommand', () => {
 
   it('should reject migration when memory backend is specified', async () => {
     await expect(
-      handleMigrateCommand(['migrate'], BackendType.Memory, tmpDir),
+      handleMigrateCommand(['migrate'], StorageType.Memory, tmpDir),
     ).rejects.toThrow(
       new TetherServerError(
         TetherServerErrorCode.NotSupported,
@@ -49,7 +47,11 @@ describe('handleMigrateCommand', () => {
   });
 
   it('should reject migration when server is actively running with a lock', async () => {
-    const lockHandle = acquireServerLock(tmpDir, 8080, '127.0.0.1');
+    const lockHandle = acquireServerLock(tmpDir, {
+      port: 8080,
+      host: '127.0.0.1',
+      type: StorageType.Sqlite,
+    });
 
     // Overwrite lock with active PID different than process.pid (e.g. process.ppid)
     const lockFile = path.join(tmpDir, 'server.lock');
@@ -59,14 +61,14 @@ describe('handleMigrateCommand', () => {
         pid: process.ppid,
         port: 8080,
         host: '127.0.0.1',
-        backend: BackendType.Sqlite,
+        type: StorageType.Sqlite,
         startedAt: Date.now(),
       }),
       'utf-8',
     );
 
     await expect(
-      handleMigrateCommand(['migrate'], BackendType.Sqlite, tmpDir),
+      handleMigrateCommand(['migrate'], StorageType.Sqlite, tmpDir),
     ).rejects.toThrow(/Cannot migrate database while server is running/);
 
     lockHandle.release();
@@ -80,7 +82,7 @@ describe('handleMigrateCommand', () => {
 
     const result = await handleMigrateCommand(
       ['migrate'],
-      BackendType.Sqlite,
+      StorageType.Sqlite,
       tmpDir,
     );
     expect(result.migratedTables).toBe(0);
@@ -244,7 +246,7 @@ describe('handleMigrateCommand', () => {
     // 4. Run migration
     const result = await handleMigrateCommand(
       ['migrate'],
-      BackendType.File,
+      StorageType.File,
       tmpDir,
     );
     expect(result.migratedTables).toBe(1);
@@ -286,7 +288,7 @@ describe('handleMigrateCommand', () => {
 
     const result = await handleMigrateCommand(
       ['migrate'],
-      BackendType.File,
+      StorageType.File,
       tmpDir,
     );
     expect(result.migratedTables).toBe(0);
@@ -297,7 +299,7 @@ describe('handleMigrateCommand', () => {
 
   it('should throw NotFound when no v1 database or apps.json exists', async () => {
     await expect(
-      handleMigrateCommand(['migrate'], BackendType.File, tmpDir),
+      handleMigrateCommand(['migrate'], StorageType.File, tmpDir),
     ).rejects.toMatchObject({
       code: TetherServerErrorCode.NotFound,
     });
@@ -313,7 +315,7 @@ describe('handleMigrateCommand', () => {
     await expect(
       handleMigrateCommand(
         ['migrate', '--app=nonexistent-app'],
-        BackendType.File,
+        StorageType.File,
         tmpDir,
       ),
     ).rejects.toMatchObject({
