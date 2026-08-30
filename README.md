@@ -334,8 +334,11 @@ npx tetherdb users --sqlite=./data
 # Register a new user account
 npx tetherdb users add alice securepassword123 --sqlite=./data
 
+# Rename a user account
+npx tetherdb users mv alice alicia --sqlite=./data
+
 # Delete a user account and purge user data partitions
-npx tetherdb users rm alice --sqlite=./data
+npx tetherdb users rm alicia --sqlite=./data
 ```
 
 ### Record Inspection & Mutations
@@ -345,7 +348,7 @@ npx tetherdb users rm alice --sqlite=./data
 npx tetherdb records list todos --sqlite=./data
 
 # List records belonging to a specific user
-npx tetherdb records list todos --user=usr_alice123 --sqlite=./data
+npx tetherdb records list todos --user=alice --sqlite=./data
 
 # Put or update a record directly with JSON data
 npx tetherdb records put todos task-1 '{"title":"Buy milk","completed":false}' --sqlite=./data
@@ -422,19 +425,12 @@ Ensure `mod_proxy`, `mod_proxy_http`, `mod_proxy_wstunnel`, and `mod_rewrite` ar
   SSLCertificateFile /path/to/cert.pem
   SSLCertificateKeyFile /path/to/key.pem
 
-  # Forward WebSocket handshake upgrades to TetherDB
+  # Forward WebSocket synchronization route
   RewriteEngine On
   RewriteCond %{HTTP:Upgrade} =websocket [NC]
-  RewriteCond %{HTTP:Connection} upgrade [NC]
-  RewriteRule ^/tether(.*) ws://127.0.0.1:8080/tether$1 [P,L]
+  RewriteRule ^/tether$ ws://127.0.0.1:8080/tether [P,L]
 
-  # Expose only the public WebSocket sync endpoint
-  <Location "/tether">
-    ProxyPass http://127.0.0.1:8080/tether
-    ProxyPassReverse http://127.0.0.1:8080/tether
-  </Location>
-
-  # Block public access to private administration and metrics endpoints
+  # Block private administrative endpoints
   <Location "/admin">
     Require all denied
   </Location>
@@ -454,7 +450,7 @@ server {
   ssl_certificate /path/to/cert.pem;
   ssl_certificate_key /path/to/key.pem;
 
-  # Expose only the public WebSocket sync endpoint
+  # Forward WebSocket synchronization route
   location /tether {
     proxy_pass http://127.0.0.1:8080/tether;
     proxy_http_version 1.1;
@@ -465,7 +461,7 @@ server {
     proxy_buffering off;
   }
 
-  # Block public access to private administration and metrics endpoints
+  # Block private administrative endpoints
   location /admin {
     deny all;
     return 404;
