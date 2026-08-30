@@ -679,15 +679,24 @@ export class Sync {
 
   private async populateChangeUserNames(
     changes: ChangeRecord[],
-    user?: UserStorage,
+    fallbackUser?: UserStorage,
     userCache = new Map<string, string>(),
   ): Promise<ChangeRecord[]> {
     const populated: ChangeRecord[] = [];
     for (const change of changes) {
-      let userName = change.userName ?? user?.userName;
       const internalUserId = (change as { userId?: string }).userId;
-      if (internalUserId && !userName) {
-        userName = await this.resolveUserName(internalUserId, user, userCache);
+      let userName: string | undefined;
+      if (internalUserId) {
+        userName = await this.resolveUserName(
+          internalUserId,
+          fallbackUser,
+          userCache,
+        );
+      }
+      if (!userName) {
+        userName =
+          change.userName ??
+          (internalUserId ? undefined : fallbackUser?.userName);
       }
       populated.push({
         table: change.table,
@@ -761,7 +770,7 @@ export class Sync {
       if (clientChanges.length > 0) {
         const populatedChanges = await this.populateChangeUserNames(
           clientChanges,
-          client.user ?? senderUser,
+          senderUser,
         );
 
         this.send(client.webSocket, {

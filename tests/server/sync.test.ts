@@ -8,6 +8,7 @@ import {
   ClientMessageType,
   OperationType,
   PROTOCOL_VERSION,
+  PUBLIC_READ_WRITE_PERMISSIONS,
   type ServerMessage,
   ServerMessageType,
 } from '../../src/shared/types.js';
@@ -828,6 +829,87 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       const msg3 = ws3.getParsedMessages()[0];
       expect(msg3.type).toBe(ServerMessageType.AuthError);
       expect(msg3.message).toMatch(/Too many login attempts for this account/);
+    });
+
+    it('attributes mutations to the original author in broadcasts and delta syncs rather than the recipient', async () => {
+      const userAlice = await storage.getUser(testUserId);
+      expect(userAlice).toBeDefined();
+      const userBob = await storage.createUser('bob_feed', 'password123');
+      await storage.createTable('shared_feed', {
+        permissions: PUBLIC_READ_WRITE_PERMISSIONS,
+      });
+
+      const tokenAlice = validToken;
+      const tokenBob = await userBob.createToken();
+
+      const { ws: wsAlice } = await connectAndAuth(sync, tokenAlice, {
+        clientId: 'client-alice',
+      });
+      const { ws: wsBob } = await connectAndAuth(sync, tokenBob, {
+        clientId: 'client-bob',
+      });
+
+      // Alice sends a change batch
+      wsAlice.emitClientMessage({
+        type: ClientMessageType.ChangeBatch,
+        batchId: 'batch-1',
+        changes: [
+          {
+            table: 'shared_feed',
+            id: 'post-1',
+            op: OperationType.Put,
+            data: { message: 'Hello from Alice' },
+            timestamp: Date.now(),
+          },
+        ],
+      });
+
+      // Alice sends a second change batch
+      wsAlice.emitClientMessage({
+        type: ClientMessageType.ChangeBatch,
+        batchId: 'batch-2',
+        changes: [
+          {
+            table: 'shared_feed',
+            id: 'post-2',
+            op: OperationType.Put,
+            data: { message: 'Second message from Alice' },
+            timestamp: Date.now(),
+          },
+        ],
+      });
+
+      await wsBob.waitForMessages(4); // 2 auth + 2 broadcasts
+      const bobMessages = wsBob.getParsedMessages();
+      const broadcastMsgs = bobMessages.filter(
+        (m) => m.type === ServerMessageType.BroadcastChanges,
+      );
+      expect(broadcastMsgs).toHaveLength(2);
+      if (broadcastMsgs[0].type === ServerMessageType.BroadcastChanges) {
+        expect(broadcastMsgs[0].changes[0].userName).toBe('alice');
+        expect(broadcastMsgs[0].changes[0].userName).not.toBe('bob_feed');
+      }
+
+      // Now Bob reconnects and requests a delta diff from seq 1
+      const wsBobReconnect = new MockServerWebSocket();
+      sync.handleConnection(wsBobReconnect as unknown as WebSocket);
+      wsBobReconnect.emitClientMessage({
+        type: ClientMessageType.Auth,
+        token: tokenBob,
+        clientId: 'client-bob-2',
+        lastSyncSeq: 1,
+      });
+
+      await wsBobReconnect.waitForMessages(2);
+      const reconnectMessages = wsBobReconnect.getParsedMessages();
+      const diffMsg = reconnectMessages.find(
+        (m) => m.type === ServerMessageType.SyncDiff,
+      );
+      expect(diffMsg).toBeDefined();
+      if (diffMsg && diffMsg.type === ServerMessageType.SyncDiff) {
+        expect(diffMsg.changes[0].userName).toBe('alice');
+        expect(diffMsg.changes[0].userName).not.toBe('bob_feed');
+      }
     });
   });
 });
