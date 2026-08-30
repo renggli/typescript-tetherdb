@@ -17,7 +17,11 @@ import { TetherServerError, TetherServerErrorCode } from './errors.js';
 import type { TetherLogger } from './server.js';
 import { verifyDummyPasswordHash } from './shared/crypto.js';
 import type { RateLimiter } from './shared/rate-limiter.js';
-import { calculateByteSize, validateIdentifier } from './shared/validate.js';
+import {
+  calculateByteSize,
+  normalizeUserName,
+  validateIdentifier,
+} from './shared/validate.js';
 import { canRead, isPrivateTable } from './storage/base/index.js';
 import type { Storage } from './storage/storage.js';
 import type { TableStorage } from './storage/table.js';
@@ -399,7 +403,8 @@ export class Sync {
         return;
       }
 
-      const userKey = `${ip}:${msg.userName}`;
+      const normalizedTarget = normalizeUserName(msg.userName);
+      const userKey = `user:${normalizedTarget}`;
       if (this.userLoginLimiter && !this.userLoginLimiter.consume(userKey)) {
         this.send(webSocket, {
           type: ServerMessageType.AuthError,

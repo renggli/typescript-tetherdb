@@ -782,5 +782,52 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       );
       expect(snapshotMsg).toBeDefined();
     });
+
+    it('should throttle distributed login attempts targeting the same account across different IPs', async () => {
+      const userLimiter = new RateLimiter({
+        windowMs: 60_000,
+        maxRequests: 2,
+      });
+
+      const limitedSync = new Sync(storage, {
+        userLoginLimiter: userLimiter,
+      });
+
+      const ws1 = new MockServerWebSocket();
+      const ws2 = new MockServerWebSocket();
+      const ws3 = new MockServerWebSocket();
+
+      limitedSync.handleConnection(ws1 as unknown as WebSocket, '1.1.1.1');
+      limitedSync.handleConnection(ws2 as unknown as WebSocket, '2.2.2.2');
+      limitedSync.handleConnection(ws3 as unknown as WebSocket, '3.3.3.3');
+
+      // Attempt 1: from IP 1.1.1.1 targeting alice
+      ws1.emitClientMessage({
+        type: ClientMessageType.Login,
+        userName: 'alice',
+        password: 'wrong_password_1',
+      });
+      await ws1.waitForMessages(1);
+
+      // Attempt 2: from IP 2.2.2.2 targeting Alice with different casing
+      ws2.emitClientMessage({
+        type: ClientMessageType.Login,
+        userName: 'Alice',
+        password: 'wrong_password_2',
+      });
+      await ws2.waitForMessages(1);
+
+      // Attempt 3: from IP 3.3.3.3 targeting ALICE (exceeds maxRequests: 2 for the account)
+      ws3.emitClientMessage({
+        type: ClientMessageType.Login,
+        userName: 'ALICE',
+        password: 'wrong_password_3',
+      });
+      await ws3.waitForMessages(1);
+
+      const msg3 = ws3.getParsedMessages()[0];
+      expect(msg3.type).toBe(ServerMessageType.AuthError);
+      expect(msg3.message).toMatch(/Too many login attempts for this account/);
+    });
   });
 });
