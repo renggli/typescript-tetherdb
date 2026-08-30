@@ -820,5 +820,24 @@ describe('TetherServer Standalone Lifecycle & Error Mapping', () => {
 
       await server.close();
     });
+
+    it('should resolve client origin IP as first entry in X-Forwarded-For when trustProxy is enabled', async () => {
+      const server = new TetherServer({ trustProxy: true });
+      const req = {
+        headers: {
+          'x-forwarded-for': '203.0.113.195, 70.41.3.18, 150.172.238.178',
+        },
+        socket: { remoteAddress: '127.0.0.1' },
+      } as unknown as http.IncomingMessage;
+
+      const clientIp = (
+        server as unknown as {
+          getClientIp(req: http.IncomingMessage): string;
+        }
+      ).getClientIp(req);
+
+      expect(clientIp).toBe('203.0.113.195');
+      await server.close();
+    });
   });
 });

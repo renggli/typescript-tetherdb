@@ -612,7 +612,7 @@ export class TetherServer {
           .split(',')
           .map((s) => s.trim())
           .filter(Boolean);
-        if (ips.length > 0) return ips[ips.length - 1];
+        if (ips.length > 0) return ips[0];
       }
     }
     return req.socket.remoteAddress ?? '127.0.0.1';
