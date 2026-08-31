@@ -75,8 +75,12 @@ export class ConnectionManager {
 
     if (this.webSocket) {
       if (this.isOpen) {
-        this.setStatus(SyncStatus.Connecting);
-        this.callbacks.onOpen();
+        if (this.currentStatus !== SyncStatus.Connected) {
+          // Open but not yet fully authenticated — re-trigger the Auth handshake.
+          this.setStatus(SyncStatus.Connecting);
+          this.callbacks.onOpen();
+        }
+        // If already Connected, the caller already updated the token; no re-auth needed.
         return;
       }
       if (this.isConnecting) {
