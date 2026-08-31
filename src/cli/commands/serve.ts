@@ -29,7 +29,15 @@ export async function handleServeCommand(
 ): Promise<RunningServer> {
   const baseDir = backend === StorageType.Memory ? undefined : dir;
   const running = await startServer({ port, host, storage, baseDir });
-  const hostLabel = running.host === '0.0.0.0' ? 'localhost' : running.host;
+  const resolvedHost =
+    running.host === '0.0.0.0'
+      ? 'localhost'
+      : running.host === '::'
+        ? '::1'
+        : running.host;
+  const hostLabel = resolvedHost.includes(':')
+    ? `[${resolvedHost}]`
+    : resolvedHost;
   const storageInfo =
     backend === StorageType.Memory
       ? 'in-memory (ephemeral)'

@@ -177,7 +177,11 @@ export class AdminClient implements AdminTarget {
   readonly adminSecret: string;
 
   constructor(port: number, host: string, adminSecret: string) {
-    const safeHost = host === '0.0.0.0' ? '127.0.0.1' : host;
+    const resolvedHost =
+      host === '0.0.0.0' ? '127.0.0.1' : host === '::' ? '::1' : host;
+    const safeHost = resolvedHost.includes(':')
+      ? `[${resolvedHost}]`
+      : resolvedHost;
     this.baseUrl = `http://${safeHost}:${port}`;
     this.adminSecret = adminSecret;
   }
