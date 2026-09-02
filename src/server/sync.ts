@@ -286,7 +286,9 @@ export class Sync {
     if (user) {
       let userCount = 0;
       for (const c of this.clients) {
-        if (c.user?.userId === user.userId) userCount++;
+        if (c.user?.userId === user.userId && c.webSocket !== webSocket) {
+          userCount++;
+        }
       }
       if (userCount >= this.maxConcurrentConnectionsPerUser) {
         this.send(webSocket, {
