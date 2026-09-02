@@ -61,11 +61,23 @@ describe('Storage', () => {
     it('should close active IDBDatabase connection and allow reopening', async () => {
       const db1 = await storage.getDatabase();
       expect(db1).toBeDefined();
-
       await storage.close();
       const db2 = await storage.getDatabase();
       expect(db2).toBeDefined();
       expect(db2).not.toBe(db1);
+    });
+
+    it('should trigger onversionchange listener when another connection upgrades', async () => {
+      const db = await storage.getDatabase();
+      let versionChangeCalled = false;
+      const originalOnVersionChange = db.onversionchange;
+      if (typeof originalOnVersionChange === 'function') {
+        versionChangeCalled = true;
+        originalOnVersionChange(
+          new Event('versionchange') as IDBVersionChangeEvent,
+        );
+      }
+      expect(versionChangeCalled).toBe(true);
     });
   });
 

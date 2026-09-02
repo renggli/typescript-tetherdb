@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { TetherServerErrorCode } from '../../../src/server/errors.js';
 import { acquireServerLock } from '../../../src/server/shared/lock.js';
 import { SqliteStorage } from '../../../src/server/storage/sqlite.js';
 import { StorageType } from '../../../src/server/storage/storage.js';
@@ -367,5 +368,25 @@ describe('SqliteStorage', () => {
       process.kill = originalKill;
       handle.release();
     }
+  });
+
+  it('should rename user and enforce uniqueness in SQLite', async () => {
+    const u1 = await context.backend.createUser('sql_user1', 'pass1');
+    await context.backend.createUser('sql_user2', 'pass2');
+    const renamed = await context.backend.renameUser(
+      u1.userId,
+      'sql_user1_renamed',
+    );
+    expect(renamed.userName).toBe('sql_user1_renamed');
+    await expect(
+      context.backend.renameUser(u1.userId, 'sql_user2'),
+    ).rejects.toMatchObject({
+      code: TetherServerErrorCode.AlreadyExists,
+    });
+    await expect(
+      context.backend.renameUser('non_existent', 'new_name'),
+    ).rejects.toMatchObject({
+      code: TetherServerErrorCode.NotFound,
+    });
   });
 });

@@ -54,11 +54,24 @@ describe('handleServeCommand', () => {
       0,
       '0.0.0.0',
     );
-
     expect(running).toBeDefined();
     expect(testLogger.hasMessage('HTTP API:')).toBe(true);
     expect(testLogger.hasMessage('sqlite (/tmp/test-db)')).toBe(true);
+    await running.close();
+    await storage.close?.();
+  });
 
+  it('should format IPv6 host addresses with brackets', async () => {
+    const storage = createBackend('memory');
+    const running = await handleServeCommand(
+      storage,
+      'memory',
+      tmpDir,
+      0,
+      '::',
+    );
+    expect(running).toBeDefined();
+    expect(testLogger.hasMessage('HTTP API:')).toBe(true);
     await running.close();
     await storage.close?.();
   });

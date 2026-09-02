@@ -248,4 +248,29 @@ describe('MemoryStorage', () => {
       await cleanup();
     }
   });
+
+  it('should rename user and enforce unique usernames in memory', async () => {
+    const { backend, cleanup } = await memoryStorage.createBackend();
+    try {
+      const u1 = await backend.createUser('mem_user1', 'pass1');
+      await backend.createUser('mem_user2', 'pass2');
+      const renamed = await backend.renameUser(u1.userId, 'mem_user1_renamed');
+      expect(renamed.userName).toBe('mem_user1_renamed');
+      await expect(
+        backend.renameUser(u1.userId, 'mem_user2'),
+      ).rejects.toMatchObject({
+        code: TetherServerErrorCode.AlreadyExists,
+      });
+      await expect(
+        backend.renameUser('non_existent', 'new_name'),
+      ).rejects.toMatchObject({
+        code: TetherServerErrorCode.NotFound,
+      });
+      expect(await backend.deleteUser('non_existent')).toBe(false);
+      const emptyResult = await backend.applyChanges(u1, []);
+      expect(emptyResult.applied).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
 });

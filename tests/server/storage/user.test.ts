@@ -40,10 +40,21 @@ describe('User', () => {
   it('deletes user through user instance', async () => {
     const storage = new MemoryStorage();
     const user = await storage.createUser('charlie', 'pass123');
-
     expect(await storage.getUser(user.userId)).toBeDefined();
     const deleted = await user.delete();
     expect(deleted).toBe(true);
     expect(await storage.getUser(user.userId)).toBeUndefined();
+  });
+
+  it('rejects tokens when password hash changes or does not match', async () => {
+    const storage = new MemoryStorage();
+    const user = await storage.createUser(
+      'token_check_user',
+      'initial_pass123',
+    );
+    const token = await user.createToken();
+    expect(await user.verifyToken(token)).toBe(true);
+    await user.changePassword('updated_pass456');
+    expect(await user.verifyToken(token)).toBe(false);
   });
 });

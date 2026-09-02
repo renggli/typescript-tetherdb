@@ -348,10 +348,10 @@ describe('ServerLock', () => {
     handle2.release();
   });
 
-  it('should overwrite stale lock when process is no longer alive', () => {
+  it('should overwrite stale lock when process is no longer alive', async () => {
     const deadPid = 9999999;
     const lockFile = path.join(tmpDir, 'server.lock');
-    fs.writeFile(
+    await fs.writeFile(
       lockFile,
       JSON.stringify({
         pid: deadPid,
@@ -361,7 +361,6 @@ describe('ServerLock', () => {
         startedAt: Date.now() - 10000,
       }),
     );
-
     const handle = acquireServerLock(tmpDir, {
       port: 8080,
       host: '127.0.0.1',

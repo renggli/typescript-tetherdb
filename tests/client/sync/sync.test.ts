@@ -794,9 +794,37 @@ describe('Sync', () => {
       ws.close = () => {
         throw new Error('Socket already disposed');
       };
-
       expect(() => sync.disconnect()).not.toThrow();
       expect(sync.status).toBe(SyncStatus.Disconnected);
+    });
+
+    it('should handle window online and offline events to reconnect or disconnect', () => {
+      let onlineHandler: (() => void) | undefined;
+      let offlineHandler: (() => void) | undefined;
+      const mockWindow = {
+        addEventListener: (event: string, handler: () => void) => {
+          if (event === 'online') onlineHandler = handler;
+          if (event === 'offline') offlineHandler = handler;
+        },
+        removeEventListener: vi.fn(),
+      };
+      const originalWindow = (globalThis as unknown as { window?: unknown })
+        .window;
+      (globalThis as unknown as { window: unknown }).window = mockWindow;
+      try {
+        const sync = createSync({ token: 'token-online' });
+        const ws = MockWebSocket.instances[0];
+        ws.triggerOpen();
+        expect(offlineHandler).toBeDefined();
+        offlineHandler?.();
+        expect(sync.status).toBe(SyncStatus.Disconnected);
+        expect(onlineHandler).toBeDefined();
+        onlineHandler?.();
+        expect(sync.status).toBe(SyncStatus.Connecting);
+        sync.destroy();
+      } finally {
+        (globalThis as unknown as { window?: unknown }).window = originalWindow;
+      }
     });
   });
 });

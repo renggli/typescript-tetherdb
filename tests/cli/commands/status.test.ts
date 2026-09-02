@@ -71,4 +71,14 @@ describe('handleStatusCommand', () => {
 
     expect(testLogger.hasMessage(/Server:\s+Running \(PID:/)).toBe(true);
   });
+
+  it('should display status for memory backend without directory', async () => {
+    const memStorage = createBackend('memory');
+    const memTarget = new LocalAdminTarget(memStorage);
+    testLogger.clear();
+    await handleStatusCommand(memTarget, ['status']);
+    expect(testLogger.hasMessage('TetherDB Storage Status:')).toBe(true);
+    expect(testLogger.hasMessage('Type:        memory')).toBe(true);
+    expect(testLogger.hasMessage('Directory:')).toBe(false);
+  });
 });

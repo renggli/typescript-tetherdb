@@ -52,7 +52,6 @@ describe('getCorsHeaders', () => {
     const req = {
       headers: { origin: 'https://unknown.com' },
     } as unknown as http.IncomingMessage;
-
     const headers = getCorsHeaders(
       {
         origin: ['https://app.example.com'],
@@ -60,6 +59,23 @@ describe('getCorsHeaders', () => {
       req,
     );
     expect(headers['Access-Control-Allow-Origin']).toBeUndefined();
+  });
+
+  it('should reflect request origin when origin is true or credentials are enabled', () => {
+    const req = {
+      headers: { origin: 'https://client.example.com' },
+    } as unknown as http.IncomingMessage;
+    const headersWithCreds = getCorsHeaders(
+      {
+        origin: true,
+        credentials: true,
+      },
+      req,
+    );
+    expect(headersWithCreds['Access-Control-Allow-Origin']).toBe(
+      'https://client.example.com',
+    );
+    expect(headersWithCreds['Access-Control-Allow-Credentials']).toBe('true');
   });
 });
 

@@ -126,4 +126,17 @@ describe('RateLimiter', () => {
     expect(limiter.isLimited('key1', now)).toBe(false);
     expect(limiter.size).toBe(3);
   });
+
+  it('should initialize with default options and handle re-consuming expired entries', () => {
+    const defaultLimiter = new RateLimiter();
+    expect(defaultLimiter.size).toBe(0);
+    expect(defaultLimiter.isLimited('default_key')).toBe(false);
+    const now = 100_000;
+    defaultLimiter.consume('keyA', now);
+    defaultLimiter.consume('keyA', now + 70_000);
+    expect(defaultLimiter.isLimited('keyA', now + 70_000)).toBe(false);
+    defaultLimiter.recordFailure('keyB', now);
+    defaultLimiter.recordFailure('keyB', now + 70_000);
+    expect(defaultLimiter.isLimited('keyB', now + 70_000)).toBe(false);
+  });
 });

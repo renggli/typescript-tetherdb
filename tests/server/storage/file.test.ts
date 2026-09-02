@@ -415,4 +415,29 @@ describe('FileStorage', () => {
     const records = await table.getAllRecords(user);
     expect(records.length).toBeGreaterThan(0);
   });
+
+  it('should rename user and enforce unique usernames across renames', async () => {
+    const user1 = await context.backend.createUser('user_one', 'pass');
+    await context.backend.createUser('user_two', 'pass');
+    const renamed = await context.backend.renameUser(
+      user1.userId,
+      'user_one_renamed',
+    );
+    expect(renamed.userName).toBe('user_one_renamed');
+    await expect(
+      context.backend.renameUser(user1.userId, 'user_two'),
+    ).rejects.toMatchObject({
+      code: TetherServerErrorCode.AlreadyExists,
+    });
+    await expect(
+      context.backend.renameUser('non_existent_user_id', 'new_name'),
+    ).rejects.toMatchObject({
+      code: TetherServerErrorCode.NotFound,
+    });
+    await expect(
+      context.backend.updateUserData('non_existent_user_id', {}),
+    ).rejects.toMatchObject({
+      code: TetherServerErrorCode.NotFound,
+    });
+  });
 });

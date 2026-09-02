@@ -303,6 +303,11 @@ describe('handleMigrateCommand', () => {
     ).rejects.toMatchObject({
       code: TetherServerErrorCode.NotFound,
     });
+    await expect(
+      handleMigrateCommand(['migrate'], StorageType.Sqlite, tmpDir),
+    ).rejects.toMatchObject({
+      code: TetherServerErrorCode.NotFound,
+    });
   });
 
   it('should throw NotFound when --app filter does not match any app in v1 database', async () => {
@@ -311,7 +316,6 @@ describe('handleMigrateCommand', () => {
       JSON.stringify([{ id: 'existing-app', createdAt: 1000 }]),
       'utf-8',
     );
-
     await expect(
       handleMigrateCommand(
         ['migrate', '--app=nonexistent-app'],
@@ -321,5 +325,74 @@ describe('handleMigrateCommand', () => {
     ).rejects.toMatchObject({
       code: TetherServerErrorCode.NotFound,
     });
+  });
+
+  it('should migrate SQLite databases with nested user directory structures', async () => {
+    const require = createRequire(import.meta.url);
+    const { DatabaseSync } = require('node:sqlite') as {
+      DatabaseSync: new (path: string) => DatabaseSync;
+    };
+    const appsDbPath = path.join(tmpDir, 'apps.sqlite');
+    const appsDb = new DatabaseSync(appsDbPath);
+    appsDb.exec(`
+      CREATE TABLE apps (id TEXT PRIMARY KEY, created_at INTEGER);
+      CREATE TABLE tables (app_id TEXT, name TEXT, created_at INTEGER, PRIMARY KEY (app_id, name));
+      INSERT INTO apps (id, created_at) VALUES ('nested-app', 1000);
+      INSERT INTO tables (app_id, name, created_at) VALUES ('nested-app', 'nested_table', 1000);
+    `);
+    appsDb.close();
+    const nestedUserDir = path.join(
+      tmpDir,
+      'nested-app',
+      'bucket1',
+      'subfolder',
+    );
+    await fs.mkdir(nestedUserDir, { recursive: true });
+    const userDbPath = path.join(nestedUserDir, 'nested-user.sqlite');
+    const userDb = new DatabaseSync(userDbPath);
+    userDb.exec(`
+      CREATE TABLE records (table_name TEXT, id TEXT, version INTEGER, timestamp INTEGER, client_id TEXT, deleted INTEGER, data TEXT, PRIMARY KEY (table_name, id));
+      CREATE TABLE changelog (seq INTEGER PRIMARY KEY, table_name TEXT, id TEXT, op TEXT, version INTEGER, timestamp INTEGER, client_id TEXT, deleted INTEGER, data TEXT);
+      INSERT INTO records VALUES ('nested_table', 'n1', 1, 1000, 'c1', 0, '{"data":123}');
+    `);
+    userDb.close();
+    const result = await handleMigrateCommand(['migrate'], 'sqlite', tmpDir);
+    expect(result.migratedUsers).toBe(1);
+    expect(result.migratedRecords).toBe(1);
+  });
+
+  it('should migrate File database discovering unmanifested tables and handling existing tables.json', async () => {
+    const appsJsonPath = path.join(tmpDir, 'apps.json');
+    await fs.writeFile(
+      appsJsonPath,
+      JSON.stringify([{ id: 'unmanifested-app', createdAt: 1000 }]),
+      'utf-8',
+    );
+    const tablesJsonPath = path.join(tmpDir, 'tables.json');
+    await fs.writeFile(tablesJsonPath, 'invalid json content', 'utf-8');
+    const appDir = path.join(tmpDir, 'unmanifested-app');
+    const userDir = path.join(appDir, 'users', 'b1', 'u1', 'tables');
+    await fs.mkdir(userDir, { recursive: true });
+    await fs.writeFile(
+      path.join(userDir, 'extra_table.json'),
+      JSON.stringify([
+        {
+          id: 'e1',
+          version: 1,
+          timestamp: 1000,
+          clientId: 'c1',
+          deleted: false,
+          data: {},
+        },
+      ]),
+      'utf-8',
+    );
+    const result = await handleMigrateCommand(
+      ['migrate'],
+      StorageType.File,
+      tmpDir,
+    );
+    expect(result.migratedTables).toBe(1);
+    expect(result.migratedUsers).toBe(1);
   });
 });

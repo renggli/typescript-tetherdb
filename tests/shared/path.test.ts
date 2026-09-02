@@ -5,6 +5,7 @@ describe('normalizeHttpPath', () => {
   it('should normalize empty and root paths to empty string', () => {
     expect(normalizeHttpPath('')).toBe('');
     expect(normalizeHttpPath('/')).toBe('');
+    expect(normalizeHttpPath('//')).toBe('');
   });
 
   it('should ensure leading slash and remove trailing slashes', () => {

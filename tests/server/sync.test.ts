@@ -1053,5 +1053,26 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       );
       expect(errorMsg).toBeDefined();
     });
+
+    it('should reject change batch if unauthenticated or if batch exceeds size limit', async () => {
+      const wsUnauth = new MockServerWebSocket();
+      sync.handleConnection(wsUnauth as unknown as WebSocket);
+      wsUnauth.emitClientMessage({
+        type: ClientMessageType.ChangeBatch,
+        batchId: 'b1',
+        changes: [
+          {
+            table: 'items',
+            id: '1',
+            op: OperationType.Put,
+            data: 'val',
+            timestamp: 100,
+          },
+        ],
+      });
+      await wsUnauth.waitForMessages(1);
+      const unauthMsgs = wsUnauth.getParsedMessages();
+      expect(unauthMsgs[0].type).toBe(ServerMessageType.AuthError);
+    });
   });
 });

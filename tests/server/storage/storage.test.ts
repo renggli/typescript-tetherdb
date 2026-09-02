@@ -437,12 +437,20 @@ function runStorageTestSuite(createStorage: () => Storage) {
         },
       ]);
     }
-
     await storage.prune(2);
-
-    // Request from sequence 1 (which was pruned)
     const res = await storage.getChangesSince(user, 1);
     expect(res.requiresSnapshot).toBe(true);
     expect(res.changes).toHaveLength(0);
+  });
+
+  it('should invalidate session tokens when password changes or user is deleted', async () => {
+    const user = await storage.createUser('token_user', 'old_password');
+    const token = await user.createToken();
+    expect(await storage.getUserByToken(token)).toBeDefined();
+    await user.changePassword('new_password');
+    expect(await storage.getUserByToken(token)).toBeUndefined();
+    const token2 = await user.createToken();
+    await user.delete();
+    expect(await storage.getUserByToken(token2)).toBeUndefined();
   });
 }

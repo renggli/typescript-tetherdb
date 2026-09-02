@@ -188,4 +188,20 @@ describe('AdminTarget (LocalAdminTarget & AdminClient)', () => {
     expect(() => decodeAdminToken('invalid-token')).toThrow();
     expect(() => decodeAdminToken('')).toThrow();
   });
+
+  it('should throw NotFound on non-existent resources in LocalAdminTarget and support close', async () => {
+    await expect(
+      localTarget.updateTable('non_existent', { maxRecords: 10 }),
+    ).rejects.toThrow(/Table "non_existent" not found/);
+    await expect(localTarget.deleteTable('non_existent')).rejects.toThrow(
+      /Table "non_existent" not found/,
+    );
+    await expect(localTarget.deleteUser('non_existent_id')).rejects.toThrow(
+      /User "non_existent_id" not found/,
+    );
+    await expect(localTarget.getRecords('non_existent')).rejects.toThrow(
+      /Table "non_existent" not found/,
+    );
+    await localTarget.close();
+  });
 });

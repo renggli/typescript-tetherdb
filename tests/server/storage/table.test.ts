@@ -61,10 +61,21 @@ describe('Table', () => {
     await table.updateSettings({
       permissions: { read: Permission.Everybody },
       maxRecords: 50,
+      maxRecordSizeBytes: 1024,
+      maxHistoryEntries: 100,
     });
-
     expect(table.settings.permissions.read).toBe(Permission.Everybody);
     expect(table.settings.maxRecords).toBe(50);
+    expect(table.settings.maxRecordSizeBytes).toBe(1024);
+    expect(table.settings.maxHistoryEntries).toBe(100);
+    await table.updateSettings({
+      maxRecords: 0,
+      maxRecordSizeBytes: 0,
+      maxHistoryEntries: 0,
+    });
+    expect(table.settings.maxRecords).toBeUndefined();
+    expect(table.settings.maxRecordSizeBytes).toBeUndefined();
+    expect(table.settings.maxHistoryEntries).toBeUndefined();
   });
 
   it('retrieves and sanitizes single and all records with userName', async () => {

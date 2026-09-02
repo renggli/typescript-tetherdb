@@ -436,17 +436,60 @@ describe('Auth', () => {
     it('should transition to SignedOut and clear credentials on applyRemoteAuth', () => {
       const auth = new Auth(storage, mockSync as unknown as Sync);
       auth.applyRemoteAuth(AuthStatus.SignedIn, 'bob', 'remote-token-xyz');
-
       const statuses: AuthStatus[] = [];
       auth.onStatusChange.register((s) => statuses.push(s));
-
       auth.applyRemoteAuth(AuthStatus.SignedOut);
-
       expect(auth.status).toBe(AuthStatus.SignedOut);
       expect(auth.userName).toBeUndefined();
       expect(auth.token).toBeUndefined();
       expect(statuses).toEqual([AuthStatus.SignedOut]);
       expect(mockSync.logout).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('LocalStorage Session Support', () => {
+    const originalWindow = (globalThis as unknown as { window?: unknown })
+      .window;
+    let mockStorageMap: Map<string, string>;
+
+    beforeEach(() => {
+      mockStorageMap = new Map();
+      (globalThis as unknown as { window: unknown }).window = {
+        localStorage: {
+          getItem: (k: string) => mockStorageMap.get(k) ?? null,
+          setItem: (k: string, v: string) => {
+            mockStorageMap.set(k, v);
+          },
+          removeItem: (k: string) => {
+            mockStorageMap.delete(k);
+          },
+        },
+      };
+    });
+
+    afterEach(() => {
+      (globalThis as unknown as { window: unknown }).window = originalWindow;
+    });
+
+    it('should save session to localStorage and update on token refresh', async () => {
+      mockSync.login.mockResolvedValueOnce({
+        userName: 'dave',
+        token: 'dave-token',
+      });
+      const auth = new Auth(storage, mockSync as unknown as Sync);
+      await auth.login({ userName: 'dave', password: 'pwd', remember: true });
+      expect(mockStorageMap.size).toBe(1);
+      await auth.handleTokenRefresh('dave-refreshed-token');
+      expect(auth.token).toBe('dave-refreshed-token');
+      await auth.logout();
+      expect(mockStorageMap.size).toBe(0);
+    });
+
+    it('should handle corrupt localStorage data gracefully', async () => {
+      mockStorageMap.set(`tether:${storage.name}:auth`, 'invalid-json{');
+      const auth = new Auth(storage, mockSync as unknown as Sync);
+      await auth.restoreSession();
+      expect(auth.status).toBe(AuthStatus.SignedOut);
     });
   });
 });

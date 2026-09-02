@@ -495,4 +495,87 @@ describe('TetherClient', () => {
       expect(eventsInClient2).toHaveLength(0);
     });
   });
+
+  describe('Lifecycle & Leader Election', () => {
+    it('should initialize client, restore session and clear data', async () => {
+      const dbName = `init-test-${Math.random().toString(36).substring(2, 8)}`;
+      const client = new TetherClient(dbName);
+      clientsToClose.push(client);
+      await client.init();
+      expect(client.authStatus).toBe(AuthStatus.SignedOut);
+      await client.table('items').put('1', { text: 'hello' });
+      expect(await client.table('items').get('1')).toEqual({ text: 'hello' });
+      await client.clear();
+      expect(await client.table('items').get('1')).toBeUndefined();
+    });
+
+    it('should acquire leader lock when navigator.locks is available', async () => {
+      const dbName = `locks-test-${Math.random().toString(36).substring(2, 8)}`;
+      let requestedLock = false;
+      const originalDescriptor = Object.getOwnPropertyDescriptor(
+        globalThis,
+        'navigator',
+      );
+      Object.defineProperty(globalThis, 'navigator', {
+        value: {
+          locks: {
+            request: vi
+              .fn()
+              .mockImplementation(
+                async (
+                  _name: string,
+                  _options: unknown,
+                  callback: () => Promise<void>,
+                ) => {
+                  requestedLock = true;
+                  return callback();
+                },
+              ),
+          },
+        },
+        configurable: true,
+        writable: true,
+      });
+      try {
+        const client = new TetherClient(dbName);
+        clientsToClose.push(client);
+        await client.init();
+        expect(requestedLock).toBe(true);
+        await client.close();
+      } finally {
+        if (originalDescriptor) {
+          Object.defineProperty(globalThis, 'navigator', originalDescriptor);
+        }
+      }
+    });
+
+    it('should handle leader election lock rejection errors gracefully', async () => {
+      const dbName = `locks-err-${Math.random().toString(36).substring(2, 8)}`;
+      const originalDescriptor = Object.getOwnPropertyDescriptor(
+        globalThis,
+        'navigator',
+      );
+      Object.defineProperty(globalThis, 'navigator', {
+        value: {
+          locks: {
+            request: vi
+              .fn()
+              .mockRejectedValue(new Error('Lock request rejected')),
+          },
+        },
+        configurable: true,
+        writable: true,
+      });
+      try {
+        const client = new TetherClient(dbName);
+        clientsToClose.push(client);
+        await client.init();
+        await client.close();
+      } finally {
+        if (originalDescriptor) {
+          Object.defineProperty(globalThis, 'navigator', originalDescriptor);
+        }
+      }
+    });
+  });
 });

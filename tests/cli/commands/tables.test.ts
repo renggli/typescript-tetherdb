@@ -233,4 +233,45 @@ describe('handleTablesCommand', () => {
       expect((err as Error).message).toContain('Unknown tables action');
     }
   });
+
+  it('should validate invalid permission modes and invalid numeric limits', async () => {
+    await expect(
+      handleTablesCommand(target, [
+        'tables',
+        'add',
+        'bad_mode',
+        '--mode=nonexistent_mode',
+      ]),
+    ).rejects.toThrow(TetherServerError);
+    await expect(
+      handleTablesCommand(target, [
+        'tables',
+        'add',
+        'bad_num',
+        '--max-records=invalid',
+      ]),
+    ).rejects.toThrow(TetherServerError);
+    await expect(
+      handleTablesCommand(target, [
+        'tables',
+        'add',
+        'bad_negative',
+        '--max-size=-10',
+      ]),
+    ).rejects.toThrow(TetherServerError);
+    await handleTablesCommand(target, [
+      'tables',
+      'add',
+      'mode_aliases',
+      '--mode=public',
+      '--max-records=0',
+      '--max-size=none',
+      '--max-history=default',
+    ]);
+    const table = await storage.getTable('mode_aliases');
+    expect(table).toBeDefined();
+    testLogger.clear();
+    await handleTablesCommand(target, ['tables']);
+    expect(testLogger.hasMessage(/Tables \(/)).toBe(true);
+  });
 });

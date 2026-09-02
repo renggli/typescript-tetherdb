@@ -839,5 +839,31 @@ describe('TetherServer Standalone Lifecycle & Error Mapping', () => {
       expect(clientIp).toBe('203.0.113.195');
       await server.close();
     });
+
+    it('should attach to an already listening HTTP server and forward middleware errors', async () => {
+      const server = new TetherServer();
+      const mockListeningHttpServer = {
+        listening: true,
+        address: () => ({ port: 9876, address: '127.0.0.1' }),
+        once: vi.fn(),
+        on: vi.fn(),
+      } as unknown as http.Server;
+      server.attach(mockListeningHttpServer);
+      const middleware = server.createMiddleware();
+      let errorPassedToNext: unknown;
+      vi.spyOn(server, 'handleHttpRequest').mockRejectedValueOnce(
+        new Error('Middleware error'),
+      );
+      middleware(
+        {} as http.IncomingMessage,
+        {} as http.ServerResponse,
+        (err) => {
+          errorPassedToNext = err;
+        },
+      );
+      await new Promise((r) => setTimeout(r, 10));
+      expect(errorPassedToNext).toBeInstanceOf(Error);
+      await server.close();
+    });
   });
 });

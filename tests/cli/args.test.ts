@@ -131,9 +131,7 @@ describe('parseCliArgs', () => {
 
   it('should throw an error on unknown flags starting with dash or invalid backend', () => {
     expect(() => parseCliArgs(['--unknown-flag'])).toThrow(TetherServerError);
-
     expect(() => parseCliArgs(['-b', 'invalid'])).toThrow(TetherServerError);
-
     try {
       parseCliArgs(['--unknown-option']);
     } catch (err) {
@@ -144,5 +142,21 @@ describe('parseCliArgs', () => {
         'Unknown or invalid option: "--unknown-option"',
       );
     }
+  });
+
+  it('should handle backend=memory and space separated flags with missing values', () => {
+    const memBackend = parseCliArgs(['--backend=memory']);
+    expect(memBackend.backend).toBe(StorageType.Memory);
+    const memSpaceBackend = parseCliArgs(['--backend', 'memory']);
+    expect(memSpaceBackend.backend).toBe(StorageType.Memory);
+    const tokenFlag = parseCliArgs(['--token', 'secret']);
+    expect(tokenFlag.token).toBe('secret');
+    const emptyPort = parseCliArgs(['-p']);
+    expect(Number.isNaN(emptyPort.port)).toBe(true);
+    const emptyHost = parseCliArgs(['-H']);
+    expect(emptyHost.host).toBe('0.0.0.0');
+    const emptyDir = parseCliArgs(['-d']);
+    expect(emptyDir.dir).toBe('.data');
+    expect(() => parseCliArgs(['-b'])).toThrow(TetherServerError);
   });
 });

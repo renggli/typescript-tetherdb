@@ -148,4 +148,19 @@ describe('handleRecordsCommand', () => {
       );
     }
   });
+
+  it('should handle missing table error when no table name is passed and put with empty payload', async () => {
+    await expect(handleRecordsCommand(target, ['records'])).rejects.toThrow(
+      TetherServerError,
+    );
+    await handleRecordsCommand(target, [
+      'records',
+      'put',
+      'tasks',
+      'empty-record',
+    ]);
+    expect(
+      testLogger.hasMessage('Put record "empty-record" in table "tasks"'),
+    ).toBe(true);
+  });
 });

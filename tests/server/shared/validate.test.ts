@@ -11,6 +11,7 @@ import {
   MIN_PASSWORD_LENGTH,
   MIN_USER_NAME_LENGTH,
   normalizeUserName,
+  validateClientId,
   validateIdentifier,
   validatePassword,
   validateRecordId,
@@ -243,11 +244,20 @@ describe('Validation', () => {
     });
 
     it('should reject timestamps that exceed the maximum allowable future drift', () => {
-      const farFuture = Date.now() + 10 * 60 * 1000; // 10 minutes in future (> 5 min limit)
+      const farFuture = Date.now() + 10 * 60 * 1000;
       expect(() => validateTimestamp(farFuture)).toThrow(TetherServerError);
       expect(() => validateTimestamp(farFuture)).toThrow(
         'Timestamp drift exceeds maximum allowable threshold',
       );
+    });
+  });
+
+  describe('validateClientId', () => {
+    it('should accept valid client identifiers and reject invalid ones', () => {
+      expect(validateClientId('client-device-123')).toBe('client-device-123');
+      expect(validateClientId('c1')).toBe('c1');
+      expect(() => validateClientId('../invalid')).toThrow(TetherServerError);
+      expect(() => validateClientId('')).toThrow(TetherServerError);
     });
   });
 });

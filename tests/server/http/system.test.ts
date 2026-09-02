@@ -62,12 +62,25 @@ describe('handleReady', () => {
     } as unknown as Storage;
 
     const { req, res, getStatusCode, getParsedPayload } = createMockHttp();
-
     await handleReady(req, res, brokenStorage, true, null);
     expect(getStatusCode()).toBe(503);
     const parsed = getParsedPayload<{ status: string; error: string }>();
     expect(parsed.status).toBe('unready');
     expect(parsed.error).toBe('Database disk full');
+  });
+
+  it('should handle non-Error exceptions gracefully in handleReady', async () => {
+    const nonErrorStorage = {
+      getTables: async () => {
+        throw 'Non-error string rejection';
+      },
+    } as unknown as Storage;
+    const { req, res, getStatusCode, getParsedPayload } = createMockHttp();
+    await handleReady(req, res, nonErrorStorage, true, null);
+    expect(getStatusCode()).toBe(503);
+    const parsed = getParsedPayload<{ status: string; error: string }>();
+    expect(parsed.status).toBe('unready');
+    expect(parsed.error).toBe('Storage unavailable');
   });
 });
 
