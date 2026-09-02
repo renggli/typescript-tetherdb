@@ -31,7 +31,8 @@ export function isPermissionAllowed(
     case Permission.Owner:
       return (
         user !== undefined &&
-        (recordUserId !== undefined ? recordUserId === user.userId : true)
+        recordUserId !== undefined &&
+        recordUserId === user.userId
       );
     case Permission.Nobody:
       return false;

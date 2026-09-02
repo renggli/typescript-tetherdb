@@ -47,7 +47,7 @@ describe('Security Filter & Fattening Pipeline', () => {
         false,
       );
       expect(isPermissionAllowed(Permission.Owner, alice, undefined)).toBe(
-        true,
+        false,
       );
     });
 
