@@ -453,3 +453,62 @@ function isSnapshotRequired(
 ): boolean {
   return (fromSeq < minSeq && minSeq > 0) || fromSeq > currentSeq;
 }
+
+/**
+ * Constructs updated internal stored record and change record for an applied change.
+ *
+ * @param change - Incoming change operation.
+ * @param existing - Existing stored record if present.
+ * @param user - Current authenticated user (if any).
+ * @param assignedSeq - Assigned sequence number for this change.
+ * @param cloneData - Whether to structuredClone change data payload (defaults to false).
+ * @returns Object containing the updated stored record and applied change record.
+ */
+export function createAppliedRecords(
+  change: ChangeRecord,
+  existing: InternalStoredRecord | undefined,
+  user: User | undefined,
+  assignedSeq: number,
+  cloneData = false,
+): {
+  updatedRecord: InternalStoredRecord;
+  appliedChange: InternalChangeRecord;
+} {
+  const isDeleted = change.op === OperationType.Delete;
+  const nextVersion = (existing?.version ?? 0) + 1;
+  const userId = isDeleted
+    ? existing?.userId
+    : existing && !existing.deleted
+      ? existing.userId
+      : user?.userId;
+
+  const data = isDeleted
+    ? undefined
+    : cloneData && change.data !== undefined
+      ? structuredClone(change.data)
+      : change.data;
+
+  const updatedRecord: InternalStoredRecord = {
+    id: change.id,
+    version: nextVersion,
+    timestamp: change.timestamp,
+    clientId: change.clientId,
+    deleted: isDeleted,
+    data: data ?? null,
+    userId,
+  };
+
+  const appliedChange: InternalChangeRecord = {
+    seq: assignedSeq,
+    table: change.table,
+    id: change.id,
+    op: change.op,
+    version: nextVersion,
+    timestamp: change.timestamp,
+    clientId: change.clientId,
+    data,
+    userId,
+  };
+
+  return { updatedRecord, appliedChange };
+}

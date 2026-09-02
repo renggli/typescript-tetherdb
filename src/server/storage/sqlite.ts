@@ -26,6 +26,7 @@ import {
   validateUserName,
 } from '../shared/validate.js';
 import {
+  createAppliedRecords,
   type MaintenanceResult,
   Storage,
   type StorageOptions,
@@ -458,24 +459,23 @@ export class SqliteStorage extends Storage {
         const shouldApply = !existing || shouldOverwrite(change, existing);
 
         if (shouldApply) {
-          const nextVersion = (existing?.version ?? 0) + 1;
-          const isDeleted = change.op === OperationType.Delete ? 1 : 0;
-          const dataStr =
-            change.op === OperationType.Delete
-              ? null
-              : JSON.stringify(change.data ?? null);
-          const userId =
-            change.op === OperationType.Delete
-              ? (existing?.userId ?? null)
-              : existing && !existing.deleted
-                ? (existing.userId ?? null)
-                : (user?.userId ?? null);
+          const { updatedRecord, appliedChange } = createAppliedRecords(
+            change,
+            existing,
+            user,
+            0,
+          );
+          const isDeleted = updatedRecord.deleted ? 1 : 0;
+          const dataStr = updatedRecord.deleted
+            ? null
+            : JSON.stringify(updatedRecord.data);
+          const userId = updatedRecord.userId ?? null;
 
           if (existingRow) {
             dbHandle.stmtUpdateRecord.run(
-              nextVersion,
-              change.timestamp,
-              change.clientId ?? null,
+              updatedRecord.version,
+              updatedRecord.timestamp,
+              updatedRecord.clientId ?? null,
               isDeleted,
               dataStr,
               userId,
@@ -488,9 +488,9 @@ export class SqliteStorage extends Storage {
               tableName,
               effectiveUserId,
               recordId,
-              nextVersion,
-              change.timestamp,
-              change.clientId ?? null,
+              updatedRecord.version,
+              updatedRecord.timestamp,
+              updatedRecord.clientId ?? null,
               isDeleted,
               dataStr,
               userId,
@@ -502,9 +502,9 @@ export class SqliteStorage extends Storage {
             effectiveUserId,
             recordId,
             change.op,
-            nextVersion,
-            change.timestamp,
-            change.clientId ?? null,
+            updatedRecord.version,
+            updatedRecord.timestamp,
+            updatedRecord.clientId ?? null,
             isDeleted,
             dataStr,
             userId,
@@ -512,18 +512,9 @@ export class SqliteStorage extends Storage {
 
           const assignedSeq = Number(res.lastInsertRowid);
           newSeq = assignedSeq;
+          appliedChange.seq = assignedSeq;
 
-          appliedList.push({
-            seq: assignedSeq,
-            table: tableName,
-            id: recordId,
-            op: change.op,
-            version: nextVersion,
-            timestamp: change.timestamp,
-            clientId: change.clientId,
-            data: change.op === OperationType.Delete ? undefined : change.data,
-            userId: userId ?? undefined,
-          });
+          appliedList.push(appliedChange);
         }
       }
 

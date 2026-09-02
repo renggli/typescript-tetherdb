@@ -21,6 +21,7 @@ import {
   validateUserName,
 } from '../shared/validate.js';
 import {
+  createAppliedRecords,
   type MaintenanceResult,
   Storage,
   type StorageOptions,
@@ -375,45 +376,13 @@ export class MemoryStorage extends Storage {
 
       if (shouldApply) {
         this.globalSeq++;
-        const assignedSeq = this.globalSeq;
-        const isDeleted = change.op === OperationType.Delete;
-        const nextVersion = (existing?.version ?? 0) + 1;
-        const userId =
-          change.op === OperationType.Delete
-            ? existing?.userId
-            : existing && !existing.deleted
-              ? existing.userId
-              : user?.userId;
-
-        const clonedData =
-          isDeleted || change.data === undefined
-            ? null
-            : structuredClone(change.data);
-
-        const updatedRecord: InternalStoredRecord = {
-          id: change.id,
-          version: nextVersion,
-          timestamp: change.timestamp,
-          clientId: change.clientId,
-          deleted: isDeleted,
-          data: clonedData,
-          userId,
-        };
-
-        const appliedChange: InternalChangeRecord = {
-          seq: assignedSeq,
-          table: change.table,
-          id: change.id,
-          op: change.op,
-          version: nextVersion,
-          timestamp: change.timestamp,
-          clientId: change.clientId,
-          data:
-            isDeleted || change.data === undefined
-              ? undefined
-              : structuredClone(change.data),
-          userId,
-        };
+        const { updatedRecord, appliedChange } = createAppliedRecords(
+          change,
+          existing,
+          user,
+          this.globalSeq,
+          true,
+        );
 
         targetMap.set(recordId, updatedRecord);
         stagedApplied.push(appliedChange);

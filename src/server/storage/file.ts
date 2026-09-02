@@ -25,6 +25,7 @@ import {
   validateUserName,
 } from '../shared/validate.js';
 import {
+  createAppliedRecords,
   type MaintenanceResult,
   Storage,
   type StorageOptions,
@@ -348,37 +349,12 @@ export class FileStorage extends Storage {
             if (shouldApply) {
               meta.currentSeq++;
               if (meta.minSeq === 0) meta.minSeq = 1;
-              const assignedSeq = meta.currentSeq;
-              const isDeleted = change.op === OperationType.Delete;
-              const nextVersion = (existing?.version ?? 0) + 1;
-              const userId =
-                change.op === OperationType.Delete
-                  ? existing?.userId
-                  : existing && !existing.deleted
-                    ? existing.userId
-                    : user?.userId;
-
-              const updatedRecord: InternalStoredRecord = {
-                id: change.id,
-                version: nextVersion,
-                timestamp: change.timestamp,
-                clientId: change.clientId,
-                deleted: isDeleted,
-                data: isDeleted ? null : (change.data ?? null),
-                userId,
-              };
-
-              const appliedChange: InternalChangeRecord = {
-                seq: assignedSeq,
-                table: change.table,
-                id: change.id,
-                op: change.op,
-                version: nextVersion,
-                timestamp: change.timestamp,
-                clientId: change.clientId,
-                data: isDeleted ? undefined : change.data,
-                userId,
-              };
+              const { updatedRecord, appliedChange } = createAppliedRecords(
+                change,
+                existing,
+                user,
+                meta.currentSeq,
+              );
 
               map.set(change.id, updatedRecord);
               appliedList.push(appliedChange);
