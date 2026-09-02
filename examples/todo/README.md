@@ -43,8 +43,9 @@ Open **http://localhost:3002** in your browser.
 
 ## Testing Collaboration
 
-1. Open **http://localhost:3002** across multiple browser windows or tabs.
-2. Start adding tasks as an offline guest with local IndexedDB storage.
-3. Register a new user account (or sign in) to attach live WebSocket sync and stream changes across tabs in real time.
-4. Sign out to test data isolation (signing out clears the synced list and returns to local guest mode).
-5. Toggle offline mode in DevTools Network tab to test local-first task creation and automatic synchronization reconciliation upon reconnection.
+1. Open **http://localhost:3002** across multiple browser tabs to test real-time cross-tab synchronization.
+2. Start adding tasks as an offline guest with local IndexedDB storage. Sibling tabs immediately reflect mutations in real-time.
+3. Register a new user account (or sign in) in any tab. Notice how all open tabs seamlessly synchronize the authenticated session and connect live WebSocket sync.
+4. Open an incognito / private browsing window to test concurrent multi-tenant data isolation.
+5. Sign out to test data isolation (signing out clears the synced list and returns to local guest mode across all tabs).
+6. Toggle offline mode in DevTools Network tab to test local-first task creation and automatic synchronization reconciliation upon reconnection.

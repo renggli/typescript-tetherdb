@@ -49,8 +49,9 @@ Open **<http://localhost:3001>** in your browser.
 
 ## Testing Collaboration
 
-1. Open **<http://localhost:3001>** in multiple browser tabs or windows.
-2. Sign in as `alice` in one tab and `bob` or `charlie` in another using the quick sign-in buttons (default password: `password123`).
-3. Publish a new post or reply to an existing thread; observe real-time updates and score changes across all tabs.
-4. Try editing or deleting posts to verify that only the owner of each post has permission to modify it.
-5. Go offline to test offline drafting and automatic sync catch-up when reconnecting.
+1. Open **<http://localhost:3001>** across multiple browser tabs to test real-time cross-tab synchronization.
+2. Sign in as `alice` (default password: `password123`). Notice how all open tabs immediately synchronize authentication state.
+3. Open an incognito / private browsing window (or separate profile) and sign in as `bob` or `charlie` to test multi-user collaboration.
+4. Publish a new post or reply to an existing thread; observe real-time updates and score changes across all tabs and users.
+5. Try editing or deleting posts to verify that only the owner of each post has permission to modify it.
+6. Go offline in one window to test offline drafting and automatic sync catch-up when reconnecting.
