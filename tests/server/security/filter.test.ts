@@ -254,5 +254,55 @@ describe('Security Filter & Fattening Pipeline', () => {
       expect(filtered).toHaveLength(1);
       expect(filtered[0].table).toBe('private');
     });
+
+    it('denies authenticated user from reading unattributed records under Permission.Owner', async () => {
+      const storage = new MemoryStorage();
+      const user = await storage.createUser('alice', 'Password123!');
+      const resolver = new UserResolver(storage);
+      const table = await storage.createTable('vault', {
+        permissions: {
+          read: Permission.Owner,
+          create: Permission.Authenticated,
+          update: Permission.Owner,
+          delete: Permission.Owner,
+        },
+      });
+
+      const unattributedRecord: InternalStoredRecord = {
+        id: 'rec-1',
+        version: 1,
+        timestamp: 1000,
+        deleted: false,
+        data: { secret: 'supersecret' },
+        userId: undefined,
+      };
+
+      expect(table.canRead(user, unattributedRecord)).toBe(false);
+      expect(table.canUpdate(user, unattributedRecord)).toBe(false);
+      expect(table.canDelete(user, unattributedRecord)).toBe(false);
+
+      const snapshot = await filterAndSanitizeSnapshot([table], user, resolver);
+      expect(snapshot).toHaveLength(0);
+
+      const rawChanges: InternalChangeRecord[] = [
+        {
+          seq: 1,
+          table: 'vault',
+          id: 'rec-1',
+          op: OperationType.Put,
+          version: 1,
+          timestamp: 1000,
+          data: { secret: 'supersecret' },
+          userId: undefined,
+        },
+      ];
+      const sanitized = await filterAndSanitizeChanges(
+        rawChanges,
+        user,
+        () => table,
+        resolver,
+      );
+      expect(sanitized).toHaveLength(0);
+    });
   });
 });

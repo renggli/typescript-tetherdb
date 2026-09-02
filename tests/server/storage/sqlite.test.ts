@@ -5,7 +5,11 @@ import { TetherServerErrorCode } from '../../../src/server/errors.js';
 import { acquireServerLock } from '../../../src/server/shared/lock.js';
 import { SqliteStorage } from '../../../src/server/storage/sqlite.js';
 import { StorageType } from '../../../src/server/storage/storage.js';
-import { OperationType } from '../../../src/shared/types.js';
+import {
+  OperationType,
+  Permission,
+  PUBLIC_READ_WRITE_PERMISSIONS,
+} from '../../../src/shared/types.js';
 import { type FileBasedStorageContext, sqliteStorage } from './matrix.js';
 
 describe('SqliteStorage', () => {
@@ -388,5 +392,57 @@ describe('SqliteStorage', () => {
     ).rejects.toMatchObject({
       code: TetherServerErrorCode.NotFound,
     });
+  });
+
+  it('should atomically delete table, its records, and changelog', async () => {
+    const table = await context.backend.createTable('posts_del', {
+      permissions: PUBLIC_READ_WRITE_PERMISSIONS,
+    });
+
+    await context.backend.applyChanges(undefined, [
+      {
+        table: 'posts_del',
+        id: 'p1',
+        op: OperationType.Put,
+        data: { text: 'test post' },
+        timestamp: 1000,
+      },
+    ]);
+
+    expect(await table.getRecord(undefined, 'p1')).toBeDefined();
+
+    const deleted = context.backend.deleteTable('posts_del');
+    expect(deleted).toBe(true);
+
+    expect(await context.backend.getTable('posts_del')).toBeUndefined();
+    expect(context.backend.deleteTable('posts_del')).toBe(false);
+  });
+
+  it('should atomically delete user and cascade removal to records and changelog', async () => {
+    const user = await context.backend.createUser('alice_del', 'Password123!');
+    await context.backend.createTable('notes_del', {
+      permissions: {
+        read: Permission.Everybody,
+        create: Permission.Authenticated,
+        update: Permission.Owner,
+        delete: Permission.Owner,
+      },
+    });
+
+    await context.backend.applyChanges(user, [
+      {
+        table: 'notes_del',
+        id: 'n1',
+        op: OperationType.Put,
+        data: { text: 'alice note' },
+        timestamp: 1000,
+      },
+    ]);
+
+    const deleted = context.backend.deleteUser(user.userId);
+    expect(deleted).toBe(true);
+
+    expect(await context.backend.getUser(user.userId)).toBeUndefined();
+    expect(context.backend.deleteUser(user.userId)).toBe(false);
   });
 });

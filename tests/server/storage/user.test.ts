@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createSessionToken } from '../../../src/server/shared/crypto.js';
 import { MemoryStorage } from '../../../src/server/storage/memory.js';
 
 describe('User', () => {
@@ -56,5 +57,17 @@ describe('User', () => {
     expect(await user.verifyToken(token)).toBe(true);
     await user.changePassword('updated_pass456');
     expect(await user.verifyToken(token)).toBe(false);
+  });
+
+  it('rejects tokens generated without pwd claim for accounts with a password', async () => {
+    const storage = new MemoryStorage();
+    const user = await storage.createUser('alice_pwd', 'Password123!');
+    const tokenWithoutPwd = createSessionToken(
+      user.userId,
+      user.userName,
+      storage.secret,
+      3600,
+    );
+    expect(await user.verifyToken(tokenWithoutPwd)).toBe(false);
   });
 });

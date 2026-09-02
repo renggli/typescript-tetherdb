@@ -150,4 +150,81 @@ describe('Table', () => {
     expect(deleted).toBe(true);
     expect(await storage.getTable('temp')).toBeUndefined();
   });
+
+  it('assigns new creator userId on tombstone resurrection and denies previous owner', async () => {
+    const storage = new MemoryStorage();
+    const alice = await storage.createUser('alice', 'pass123');
+    const bob = await storage.createUser('bob', 'pass123');
+
+    const table = await storage.createTable('articles', {
+      permissions: {
+        read: Permission.Everybody,
+        create: Permission.Authenticated,
+        update: Permission.Owner,
+        delete: Permission.Owner,
+      },
+    });
+
+    // Alice creates article-1
+    await storage.applyChanges(alice, [
+      {
+        table: table.name,
+        id: 'art-1',
+        op: OperationType.Put,
+        data: { title: 'Alice Post' },
+        timestamp: 1000,
+      },
+    ]);
+
+    // Alice deletes article-1
+    await storage.applyChanges(alice, [
+      {
+        table: table.name,
+        id: 'art-1',
+        op: OperationType.Delete,
+        timestamp: 2000,
+      },
+    ]);
+
+    // Bob resurrects article-1
+    await storage.applyChanges(bob, [
+      {
+        table: table.name,
+        id: 'art-1',
+        op: OperationType.Put,
+        data: { title: 'Bob Post' },
+        timestamp: 3000,
+      },
+    ]);
+
+    const record = await table.getRecord(undefined, 'art-1');
+    expect(record?.userName).toBe('bob');
+    expect(record?.data).toEqual({ title: 'Bob Post' });
+
+    // Bob can update his resurrected record
+    await expect(
+      storage.applyChanges(bob, [
+        {
+          table: table.name,
+          id: 'art-1',
+          op: OperationType.Put,
+          data: { title: 'Bob Updated' },
+          timestamp: 4000,
+        },
+      ]),
+    ).resolves.toBeDefined();
+
+    // Alice cannot update Bob's record
+    await expect(
+      storage.applyChanges(alice, [
+        {
+          table: table.name,
+          id: 'art-1',
+          op: OperationType.Put,
+          data: { title: 'Alice Hijack' },
+          timestamp: 5000,
+        },
+      ]),
+    ).rejects.toThrow();
+  });
 });

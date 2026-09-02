@@ -7,6 +7,7 @@ import { Sync } from '../../src/server/sync.js';
 import {
   ClientMessageType,
   OperationType,
+  Permission,
   PROTOCOL_VERSION,
   PUBLIC_READ_WRITE_PERMISSIONS,
   type ServerMessage,
@@ -1073,6 +1074,168 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       await wsUnauth.waitForMessages(1);
       const unauthMsgs = wsUnauth.getParsedMessages();
       expect(unauthMsgs[0].type).toBe(ServerMessageType.AuthError);
+    });
+
+    it('should maintain auth timeout active across failed login attempts until valid auth or timeout', async () => {
+      const shortTimeoutSync = new Sync(storage, {
+        authTimeoutMs: 50,
+      });
+      const ws = new MockServerWebSocket();
+      shortTimeoutSync.handleConnection(ws as unknown as WebSocket);
+
+      ws.emitClientMessage({
+        type: ClientMessageType.Login,
+        userName: 'nonexistent',
+        password: 'wrongpassword',
+        requestId: 'req-1',
+      });
+
+      await ws.waitForMessages(1);
+      const msgs = ws.getParsedMessages();
+      expect(msgs[0].type).toBe(ServerMessageType.AuthError);
+
+      await ws.waitForClose(500);
+      expect(ws.isClosed).toBe(true);
+      const timeoutMsg = ws.getParsedMessages()[1] as { message: string };
+      expect(timeoutMsg.message).toBe('Authentication timeout');
+    });
+
+    it('should terminate connection when queued message byte limit is exceeded', async () => {
+      const ws = new MockServerWebSocket();
+      sync.handleConnection(ws as unknown as WebSocket);
+
+      const hugePayload = 'X'.repeat(11 * 1024 * 1024);
+      ws.emit('message', hugePayload);
+
+      await ws.waitForClose(1000);
+      expect(ws.isClosed).toBe(true);
+    });
+
+    it('should sanitize change.clientId with authenticated connection clientId in handleChangeBatchMessage', async () => {
+      const ws = new MockServerWebSocket();
+      const table = await storage.createTable('audit_logs', {
+        permissions: {
+          read: Permission.Everybody,
+          create: Permission.Everybody,
+          update: Permission.Everybody,
+          delete: Permission.Everybody,
+        },
+      });
+
+      sync.handleConnection(ws as unknown as WebSocket);
+      ws.emitClientMessage({
+        type: ClientMessageType.Auth,
+        clientId: 'genuine_client_123',
+      });
+
+      await ws.waitForMessages(2);
+
+      ws.emitClientMessage({
+        type: ClientMessageType.ChangeBatch,
+        batchId: 'batch1',
+        changes: [
+          {
+            table: table.name,
+            id: 'log1',
+            op: OperationType.Put,
+            clientId: 'spoofed_client_id_zzzzz',
+            data: { event: 'test' },
+            timestamp: 1000,
+          },
+        ],
+      });
+
+      await ws.waitForMessages(3);
+      const record = await table.getRecord(undefined, 'log1');
+      expect(record?.clientId).toBe('genuine_client_123');
+    });
+
+    it('should broadcast changes to peer connection even when sharing the same clientId string', async () => {
+      const wsA = new MockServerWebSocket();
+      const wsB = new MockServerWebSocket();
+
+      const table = await storage.createTable('shared_feed', {
+        permissions: {
+          read: Permission.Everybody,
+          create: Permission.Everybody,
+          update: Permission.Everybody,
+          delete: Permission.Everybody,
+        },
+      });
+
+      sync.handleConnection(wsA as unknown as WebSocket);
+      sync.handleConnection(wsB as unknown as WebSocket);
+
+      wsA.emitClientMessage({
+        type: ClientMessageType.Auth,
+        clientId: 'shared_client_id_1',
+      });
+      wsB.emitClientMessage({
+        type: ClientMessageType.Auth,
+        clientId: 'shared_client_id_1',
+      });
+
+      await wsA.waitForMessages(2);
+      await wsB.waitForMessages(2);
+
+      wsA.emitClientMessage({
+        type: ClientMessageType.ChangeBatch,
+        batchId: 'b1',
+        changes: [
+          {
+            table: table.name,
+            id: 'item1',
+            op: OperationType.Put,
+            data: { title: 'Broadcast test' },
+            timestamp: 1000,
+          },
+        ],
+      });
+
+      await wsA.waitForMessages(3);
+      await wsB.waitForMessages(3);
+      const broadcastMsg = wsB.getParsedMessages()[2] as {
+        type: ServerMessageType;
+        changes: Array<{ id: string }>;
+      };
+      expect(broadcastMsg.type).toBe(ServerMessageType.BroadcastChanges);
+      expect(broadcastMsg.changes[0].id).toBe('item1');
+    });
+
+    it('should permit re-authentication on the same WebSocket connection when concurrency limit is 1', async () => {
+      const limitedSync = new Sync(storage, {
+        maxConcurrentConnectionsPerUser: 1,
+      });
+      const ws = new MockServerWebSocket();
+      const user = await storage.createUser('alice_reauth', 'Password123!');
+      const token = await user.createToken();
+
+      limitedSync.handleConnection(ws as unknown as WebSocket);
+
+      // 1st Auth
+      ws.emitClientMessage({
+        type: ClientMessageType.Auth,
+        token,
+        clientId: 'client_1',
+      });
+
+      await ws.waitForMessages(2);
+      expect(ws.getParsedMessages()[0].type).toBe(
+        ServerMessageType.AuthSuccess,
+      );
+
+      // 2nd Auth on same socket (e.g. token refresh)
+      ws.emitClientMessage({
+        type: ClientMessageType.Auth,
+        token,
+        clientId: 'client_1',
+      });
+
+      await ws.waitForMessages(4);
+      expect(ws.getParsedMessages()[2].type).toBe(
+        ServerMessageType.AuthSuccess,
+      );
+      expect(ws.isClosed).toBe(false);
     });
   });
 });

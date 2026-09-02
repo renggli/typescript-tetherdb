@@ -440,4 +440,44 @@ describe('FileStorage', () => {
       code: TetherServerErrorCode.NotFound,
     });
   });
+
+  it('should clean up chained lock references from locks map in withLock once resolved', async () => {
+    await context.backend.createTable('lock_cleanup_table');
+    // @ts-expect-error accessing private locks map for verification
+    const locksMap = context.backend.locks as Map<string, unknown>;
+    expect(locksMap.has('__tables__')).toBe(false);
+  });
+
+  it('should recover from corrupt JSONL lines without dropping subsequent valid changes', async () => {
+    const table = await context.backend.createTable('shared_notes', {
+      permissions: PUBLIC_READ_WRITE_PERMISSIONS,
+    });
+
+    await context.backend.applyChanges(undefined, [
+      {
+        table: table.name,
+        id: 'n1',
+        op: OperationType.Put,
+        data: { text: 'one' },
+        timestamp: 100,
+      },
+      {
+        table: table.name,
+        id: 'n2',
+        op: OperationType.Put,
+        data: { text: 'two' },
+        timestamp: 200,
+      },
+    ]);
+
+    const syncFile = path.join(context.dir, 'shared', 'sync.jsonl');
+    const content = await fs.readFile(syncFile, 'utf-8');
+    const lines = content.split('\n').filter(Boolean);
+
+    const corruptContent = `${lines[0]}\n{corrupted-json-line\n${lines[1]}\n`;
+    await fs.writeFile(syncFile, corruptContent, 'utf-8');
+
+    const { rawChanges } = await context.backend.getRawChangesSince(0);
+    expect(rawChanges.map((c) => c.id)).toEqual(['n1', 'n2']);
+  });
 });

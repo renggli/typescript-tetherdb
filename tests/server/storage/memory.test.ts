@@ -3,7 +3,11 @@ import {
   TetherServerError,
   TetherServerErrorCode,
 } from '../../../src/server/errors.js';
-import { type ChangeRecord, OperationType } from '../../../src/shared/types.js';
+import {
+  type ChangeRecord,
+  OperationType,
+  PUBLIC_READ_WRITE_PERMISSIONS,
+} from '../../../src/shared/types.js';
 import { memoryStorage } from './matrix.js';
 
 describe('MemoryStorage', () => {
@@ -269,6 +273,35 @@ describe('MemoryStorage', () => {
       expect(await backend.deleteUser('non_existent')).toBe(false);
       const emptyResult = await backend.applyChanges(u1, []);
       expect(emptyResult.applied).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('should deep-clone data payload to prevent external in-memory object mutation from corrupting state', async () => {
+    const { backend, cleanup } = await memoryStorage.createBackend();
+    try {
+      const table = await backend.createTable('configs', {
+        permissions: PUBLIC_READ_WRITE_PERMISSIONS,
+      });
+      const payload = { settings: { theme: 'dark', count: 1 } };
+      await backend.applyChanges(undefined, [
+        {
+          table: table.name,
+          id: 'c1',
+          op: OperationType.Put,
+          data: payload,
+          timestamp: 1000,
+        },
+      ]);
+
+      payload.settings.theme = 'light';
+      payload.settings.count = 999;
+
+      const record = await table.getRecord(undefined, 'c1');
+      expect(record?.data).toEqual({
+        settings: { theme: 'dark', count: 1 },
+      });
     } finally {
       await cleanup();
     }

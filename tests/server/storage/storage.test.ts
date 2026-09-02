@@ -3,7 +3,11 @@ import {
   TetherServerError,
   TetherServerErrorCode,
 } from '../../../src/server/errors.js';
-import type { Storage } from '../../../src/server/storage/storage.js';
+import { createSessionToken } from '../../../src/server/shared/crypto.js';
+import {
+  type Storage,
+  validateBatchChanges,
+} from '../../../src/server/storage/storage.js';
 import {
   type ChangeRecord,
   OperationType,
@@ -452,5 +456,46 @@ function runStorageTestSuite(createStorage: () => Storage) {
     const token2 = await user.createToken();
     await user.delete();
     expect(await storage.getUserByToken(token2)).toBeUndefined();
+  });
+
+  it('should reject tokens without pwd claim or with outdated hash when user has passwordHash', async () => {
+    const user = await storage.createUser('alice_pwd_claim', 'Password123!');
+    const passwordHash = await storage.getUserPasswordHash(user.userId);
+    expect(passwordHash).toBeTypeOf('string');
+
+    const tokenWithoutPwd = createSessionToken(
+      user.userId,
+      user.userName,
+      storage.secret,
+      3600,
+    );
+    const validToken = createSessionToken(
+      user.userId,
+      user.userName,
+      storage.secret,
+      3600,
+      passwordHash ?? '',
+    );
+
+    expect(await storage.getUserByToken(tokenWithoutPwd)).toBeUndefined();
+    expect(await storage.getUserByToken(validToken)).toBeDefined();
+  });
+
+  it('should validate change.clientId in validateBatchChanges if provided', async () => {
+    await storage.createTable('items_val');
+    const badChanges: ChangeRecord[] = [
+      {
+        table: 'items_val',
+        id: 'i1',
+        op: OperationType.Put,
+        clientId: '../traversal_bad_id',
+        data: {},
+        timestamp: 1000,
+      },
+    ];
+
+    await expect(validateBatchChanges(storage, badChanges)).rejects.toThrow(
+      TetherServerError,
+    );
   });
 }
