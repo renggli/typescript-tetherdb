@@ -399,10 +399,7 @@ async function init(): Promise<void> {
     );
   });
 
-  // 4. Initialize client & restore any active session
-  await db.init();
-
-  // 5. Initial UI rendering
+  // 4. Initial UI rendering
   updateUserUI();
   updateSyncStatusUI(db.syncStatus);
   await renderTodos();

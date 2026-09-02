@@ -110,6 +110,14 @@ export class Auth {
   constructor(storage: Storage, sync: Sync) {
     this.storage = storage;
     this.sync = sync;
+
+    const localSession = getLocalStorageSession(this.storage.name);
+    if (localSession?.token && localSession.userName) {
+      this.currentUserName = localSession.userName;
+      this.currentToken = localSession.token;
+      this.currentAuthStatus = AuthStatus.SignedIn;
+    }
+
     this.autoRestorePromise = this.restoreSession();
   }
 
@@ -139,6 +147,10 @@ export class Auth {
    */
   async restoreSession(): Promise<void> {
     try {
+      if (this.currentAuthStatus === AuthStatus.SignedIn) {
+        return;
+      }
+
       const localSession = getLocalStorageSession(this.storage.name);
       if (localSession?.token && localSession.userName) {
         this.currentUserName = localSession.userName;

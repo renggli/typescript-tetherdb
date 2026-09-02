@@ -491,7 +491,6 @@ describe('TetherClient', () => {
       const dbName = `init-test-${Math.random().toString(36).substring(2, 8)}`;
       const client = new TetherClient(dbName);
       clientsToClose.push(client);
-      await client.init();
       expect(client.authStatus).toBe(AuthStatus.SignedOut);
       await client.table('items').put('1', { text: 'hello' });
       expect(await client.table('items').get('1')).toEqual({ text: 'hello' });
@@ -529,7 +528,6 @@ describe('TetherClient', () => {
       try {
         const client = new TetherClient(dbName);
         clientsToClose.push(client);
-        await client.init();
         expect(requestedLock).toBe(true);
         await client.close();
       } finally {
@@ -559,7 +557,6 @@ describe('TetherClient', () => {
       try {
         const client = new TetherClient(dbName);
         clientsToClose.push(client);
-        await client.init();
         await client.close();
       } finally {
         if (originalDescriptor) {

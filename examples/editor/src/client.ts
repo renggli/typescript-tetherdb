@@ -806,10 +806,7 @@ async function init(): Promise<void> {
   db.onSyncStatusChange.register(updateSyncStatusUI);
   updateSyncStatusUI(db.syncStatus);
 
-  // 4. Initialize client sync connection
-  await db.init();
-
-  // 5. Load initial records
+  // 4. Load initial records
   const initialLines = await docTable.getAllWithMetadata();
   for (const item of initialLines) {
     documentLines.set(item.id, {

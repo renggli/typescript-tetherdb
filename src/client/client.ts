@@ -160,17 +160,18 @@ export class TetherClient {
       }
       this.onError.publish(err);
     });
+
+    // If session was synchronously restored from localStorage, configure user and sync.
+    if (this.auth.status === AuthStatus.SignedIn && this.auth.token) {
+      this.storage.setCurrentUser(this.auth.userName);
+      this.sync.connect(this.auth.token);
+      this.sync.schedulePush(0);
+    }
+
+    this.startLeaderElection();
   }
 
   // -- Lifecycle ------------------------------------------------------------
-
-  /**
-   * Restores any active authenticated session and begins leader election.
-   */
-  async init(): Promise<void> {
-    await this.auth.restoreSession();
-    this.startLeaderElection();
-  }
 
   /**
    * Disconnects active connections, cancels retry timers, and closes IndexedDB handles.

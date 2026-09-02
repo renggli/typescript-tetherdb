@@ -1449,8 +1449,7 @@ async function init(): Promise<void> {
     logMutation('Sync', `SyncStatus: ${SyncStatus[status]}`);
   });
 
-  // 6. Connect & Initialize
-  await db.init();
+  // 6. Initial render
   updateAuthUI();
   updateSyncStatusUI(db.syncStatus);
   await renderCommunities();
