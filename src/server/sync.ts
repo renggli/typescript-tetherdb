@@ -244,7 +244,6 @@ export class Sync {
     msg: AuthClientMessage,
   ): Promise<void> {
     const ip = this.webSocketToIp.get(webSocket) ?? '127.0.0.1';
-    this.clearPendingAuthTimer(webSocket);
 
     if (msg.protocolVersion !== PROTOCOL_VERSION) {
       this.rateLimiter?.recordFailure(ip);
@@ -306,6 +305,7 @@ export class Sync {
 
     this.webSocketToClient.set(webSocket, client);
     this.clients.add(client);
+    this.clearPendingAuthTimer(webSocket);
 
     const currentSeq = await this.storage.getCurrentSeq(user);
     const refreshedToken = user ? await user.createToken() : undefined;
@@ -326,7 +326,6 @@ export class Sync {
     msg: RegisterClientMessage,
   ): Promise<void> {
     const ip = this.webSocketToIp.get(webSocket) ?? '127.0.0.1';
-    this.clearPendingAuthTimer(webSocket);
 
     if (!this.allowRegistration) {
       this.send(webSocket, {
@@ -399,7 +398,6 @@ export class Sync {
     msg: LoginClientMessage,
   ): Promise<void> {
     const ip = this.webSocketToIp.get(webSocket) ?? '127.0.0.1';
-    this.clearPendingAuthTimer(webSocket);
 
     let user: User | undefined;
 
@@ -740,6 +738,7 @@ export class Sync {
     } else {
       client.user = user;
     }
+    this.clearPendingAuthTimer(webSocket);
 
     const currentSeq = await this.storage.getCurrentSeq(user);
     const token = await user.createToken();
