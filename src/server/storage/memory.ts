@@ -165,6 +165,34 @@ export class MemoryStorage extends Storage {
     this.users.delete(safeUserId);
     this.usersByUserName.delete(data.userName);
     this.userStates.delete(safeUserId);
+
+    const now = Date.now();
+    for (const [tableName, map] of this.sharedState.tables.entries()) {
+      for (const [id, rec] of map.entries()) {
+        if (rec.userId === safeUserId && !rec.deleted) {
+          this.globalSeq++;
+          const nextVersion = rec.version + 1;
+          const updated: InternalStoredRecord = {
+            ...rec,
+            version: nextVersion,
+            timestamp: now,
+            deleted: true,
+            data: null,
+          };
+          map.set(id, updated);
+          this.sharedState.changelog.push({
+            seq: this.globalSeq,
+            table: tableName,
+            id,
+            op: OperationType.Delete,
+            version: nextVersion,
+            timestamp: now,
+            clientId: rec.clientId,
+            userId: safeUserId,
+          });
+        }
+      }
+    }
     return true;
   }
 

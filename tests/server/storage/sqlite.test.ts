@@ -445,4 +445,41 @@ describe('SqliteStorage', () => {
     expect(await context.backend.getUser(user.userId)).toBeUndefined();
     expect(context.backend.deleteUser(user.userId)).toBe(false);
   });
+
+  it('should emit changelog deletion tombstones for shared records when user is deleted', async () => {
+    const user = await context.backend.createUser('author_del', 'Password123!');
+    const table = await context.backend.createTable('shared_feed', {
+      permissions: PUBLIC_READ_WRITE_PERMISSIONS,
+    });
+
+    await context.backend.applyChanges(user, [
+      {
+        table: 'shared_feed',
+        id: 'msg-1',
+        op: OperationType.Put,
+        data: { text: 'hello world' },
+        timestamp: 1000,
+        clientId: 'c1',
+      },
+    ]);
+
+    const beforeDelete = await context.backend.getRawChangesSince(0);
+    expect(beforeDelete.rawChanges).toHaveLength(1);
+    expect(beforeDelete.rawChanges[0].id).toBe('msg-1');
+    expect(beforeDelete.rawChanges[0].op).toBe(OperationType.Put);
+
+    // Delete user
+    const deleted = context.backend.deleteUser(user.userId);
+    expect(deleted).toBe(true);
+
+    // Subsequent sync from seq 1 should receive the delete operation
+    const afterDelete = await context.backend.getChangesSince(undefined, 1);
+    expect(afterDelete.changes).toHaveLength(1);
+    expect(afterDelete.changes[0].id).toBe('msg-1');
+    expect(afterDelete.changes[0].op).toBe(OperationType.Delete);
+
+    // Record should be deleted from table
+    const record = await table.getRecord(undefined, 'msg-1');
+    expect(record).toBeUndefined();
+  });
 });

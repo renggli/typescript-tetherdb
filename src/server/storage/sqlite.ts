@@ -897,12 +897,66 @@ export class SqliteStorage extends Storage {
     if (this.tablesHandle) {
       this.tablesHandle.db.exec('BEGIN IMMEDIATE;');
       try {
+        const sharedRecords = this.tablesHandle.db
+          .prepare(
+            "SELECT table_name, id, version, timestamp, client_id FROM records WHERE partition = '__shared__' AND user_id = ? AND deleted = 0",
+          )
+          .all(safeUserId) as Array<{
+          table_name: string;
+          id: string;
+          version: number;
+          timestamp: number;
+          client_id: string | null;
+        }>;
+
+        const now = Date.now();
+        let currentSeq = 0;
+        const metaRow = this.tablesHandle.stmtGetMeta.get() as
+          | { current_seq: number; min_seq: number }
+          | undefined;
+        currentSeq = metaRow?.current_seq ?? 0;
+        const minSeq = metaRow && metaRow.min_seq > 0 ? metaRow.min_seq : 1;
+
+        for (const rec of sharedRecords) {
+          const nextVersion = rec.version + 1;
+          this.tablesHandle.stmtUpdateRecord.run(
+            nextVersion,
+            now,
+            rec.client_id ?? null,
+            1,
+            null,
+            safeUserId,
+            rec.table_name,
+            '__shared__',
+            rec.id,
+          );
+
+          const res = this.tablesHandle.stmtInsertChangelog.run(
+            rec.table_name,
+            '__shared__',
+            rec.id,
+            OperationType.Delete,
+            nextVersion,
+            now,
+            rec.client_id ?? null,
+            1,
+            null,
+            safeUserId,
+          ) as { lastInsertRowid: number | bigint };
+
+          currentSeq = Number(res.lastInsertRowid);
+        }
+
+        if (currentSeq > (metaRow?.current_seq ?? 0)) {
+          this.tablesHandle.stmtSetMeta.run(currentSeq, minSeq);
+        }
+
         this.tablesHandle.db
-          .prepare('DELETE FROM records WHERE partition = ? OR user_id = ?')
-          .run(safeUserId, safeUserId);
+          .prepare('DELETE FROM records WHERE partition = ?')
+          .run(safeUserId);
         this.tablesHandle.db
-          .prepare('DELETE FROM changelog WHERE partition = ? OR user_id = ?')
-          .run(safeUserId, safeUserId);
+          .prepare('DELETE FROM changelog WHERE partition = ?')
+          .run(safeUserId);
         this.tablesHandle.db.exec('COMMIT;');
       } catch (err) {
         this.tablesHandle.db.exec('ROLLBACK;');

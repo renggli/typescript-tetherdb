@@ -630,6 +630,70 @@ export class FileStorage extends Storage {
         deleted = true;
       }
 
+      // Emit deletion tombstones for shared records
+      await this.withLock('__shared__', async () => {
+        const sharedDir = this.resolvePartitionDir('__shared__');
+        const tables = await this.getTables();
+        const now = Date.now();
+        const newChangelogLines: string[] = [];
+        let modified = false;
+        const meta = await this.readGlobalMeta();
+
+        for (const table of tables) {
+          const map = await this.readTableRecords('__shared__', table.name);
+          let tableModified = false;
+          for (const [id, rec] of map.entries()) {
+            if (rec.userId === safeUserId && !rec.deleted) {
+              meta.currentSeq++;
+              if (meta.minSeq === 0) meta.minSeq = 1;
+              const nextVersion = rec.version + 1;
+              const updatedRec: InternalStoredRecord = {
+                ...rec,
+                version: nextVersion,
+                timestamp: now,
+                deleted: true,
+                data: null,
+              };
+              map.set(id, updatedRec);
+              const changeRec: InternalChangeRecord = {
+                seq: meta.currentSeq,
+                table: table.name,
+                id,
+                op: OperationType.Delete,
+                version: nextVersion,
+                timestamp: now,
+                clientId: rec.clientId,
+                userId: safeUserId,
+              };
+              newChangelogLines.push(JSON.stringify(changeRec));
+              tableModified = true;
+              modified = true;
+            }
+          }
+          if (tableModified) {
+            const recordsFile = path.join(
+              sharedDir,
+              table.name,
+              'records.json',
+            );
+            await writeFileAtomic(
+              recordsFile,
+              JSON.stringify(Array.from(map.values()), null, 2),
+            );
+          }
+        }
+
+        if (modified) {
+          const syncFile = path.join(sharedDir, 'sync.jsonl');
+          await fs.appendFile(
+            syncFile,
+            `${newChangelogLines.join('\n')}\n`,
+            'utf-8',
+          );
+          await this.writeGlobalMeta(meta);
+        }
+      });
+
       const bucket = getUserBucket(safeUserId);
       const userDir = path.join(this.baseDir, 'users', bucket, safeUserId);
       try {
