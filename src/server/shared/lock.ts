@@ -122,23 +122,6 @@ export function acquireServerLock(
   fs.mkdirSync(baseDir, { recursive: true });
   const lockPath = path.join(baseDir, 'server.lock');
 
-  const existing = readServerLock(baseDir);
-  if (existing && existing.pid !== process.pid) {
-    throw new TetherServerError(
-      TetherServerErrorCode.AlreadyExists,
-      'A TetherDB server is already running on this data directory',
-    );
-  }
-
-  // If a stale lockfile exists from a dead process, remove it
-  if (fs.existsSync(lockPath)) {
-    try {
-      fs.unlinkSync(lockPath);
-    } catch {
-      // Ignore
-    }
-  }
-
   const adminSecret =
     details.adminSecret ?? crypto.randomBytes(32).toString('hex');
 
@@ -152,25 +135,37 @@ export function acquireServerLock(
   };
 
   const payload = JSON.stringify(info, null, 2);
+
   try {
-    fs.writeFileSync(lockPath, payload, {
-      encoding: 'utf-8',
-      mode: 0o600,
-      flag: existing?.pid === process.pid ? 'w' : 'wx',
-    });
+    const fd = fs.openSync(lockPath, 'wx', 0o600);
+    fs.writeFileSync(fd, payload, 'utf-8');
+    fs.closeSync(fd);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
-      const active = readServerLock(baseDir);
-      if (active && active.pid !== process.pid) {
+      const existing = readServerLock(baseDir);
+      if (existing && existing.pid !== process.pid) {
         throw new TetherServerError(
           TetherServerErrorCode.AlreadyExists,
           'A TetherDB server is already running on this data directory',
         );
       }
-      fs.writeFileSync(lockPath, payload, {
-        encoding: 'utf-8',
-        mode: 0o600,
-      });
+      if (existing?.pid === process.pid) {
+        fs.writeFileSync(lockPath, payload, {
+          encoding: 'utf-8',
+          mode: 0o600,
+        });
+      } else {
+        try {
+          const fd = fs.openSync(lockPath, 'wx', 0o600);
+          fs.writeFileSync(fd, payload, 'utf-8');
+          fs.closeSync(fd);
+        } catch {
+          throw new TetherServerError(
+            TetherServerErrorCode.AlreadyExists,
+            'A TetherDB server is already running on this data directory',
+          );
+        }
+      }
     } else {
       throw err;
     }

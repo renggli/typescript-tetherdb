@@ -369,4 +369,30 @@ describe('ServerLock', () => {
     expect(handle.info.pid).toBe(process.pid);
     handle.release();
   });
+
+  it('should prevent concurrent lock acquisition via atomic wx creation', async () => {
+    const parentPid = process.ppid;
+    if (!isProcessAlive(parentPid)) return;
+
+    const lockFile = path.join(tmpDir, 'server.lock');
+    await fs.writeFile(
+      lockFile,
+      JSON.stringify({
+        pid: parentPid,
+        port: 8080,
+        host: '127.0.0.1',
+        type: StorageType.Sqlite,
+        startedAt: Date.now(),
+      }),
+      { mode: 0o600 },
+    );
+
+    expect(() =>
+      acquireServerLock(tmpDir, {
+        port: 8082,
+        host: '127.0.0.1',
+        type: StorageType.Sqlite,
+      }),
+    ).toThrow(TetherServerError);
+  });
 });
