@@ -258,9 +258,13 @@ export class FileStorage extends Storage {
             .map((l) => l.trim())
             .filter(Boolean);
           for (const line of lines) {
-            const rec = JSON.parse(line) as InternalChangeRecord;
-            if (rec.seq > fromSeq) {
-              allChanges.push(rec);
+            try {
+              const rec = JSON.parse(line) as InternalChangeRecord;
+              if (rec.seq > fromSeq) {
+                allChanges.push(rec);
+              }
+            } catch {
+              // Ignore corrupt or incomplete line and proceed
             }
           }
         } catch {}
