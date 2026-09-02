@@ -179,6 +179,7 @@ export class TetherServer {
   private readonly onCloseCallback?: () => void | Promise<void>;
 
   private _httpServer: http.Server | null = null;
+  private attachedHttpServer: http.Server | null = null;
   private _webSocketServer: WebSocketServer | null = null;
   private lockHandle: ServerLockHandle | null = null;
 
@@ -293,13 +294,16 @@ export class TetherServer {
    * Generates a self-contained base64url admin connection token.
    *
    * @param host - Optional host override (e.g. '127.0.0.1').
+   * @param port - Optional port override.
    * @returns Base64url-encoded admin token string.
    */
-  getAdminToken(host?: string): string {
+  getAdminToken(host?: string, port?: number): string {
     let boundHost = host ?? '127.0.0.1';
-    let boundPort = 8080;
-    if (this._httpServer) {
-      const addr = this._httpServer.address();
+    let boundPort = port ?? 8080;
+    const httpServer = this._httpServer ?? this.attachedHttpServer;
+    if (httpServer && port === undefined) {
+      const addr =
+        typeof httpServer.address === 'function' ? httpServer.address() : null;
       if (typeof addr === 'object' && addr) {
         boundPort = addr.port;
         if (!host) {
@@ -392,10 +396,12 @@ export class TetherServer {
         }
         this._httpServer.close((err) => {
           this._httpServer = null;
+          this.attachedHttpServer = null;
           if (err) reject(err);
           else resolve();
         });
       } else {
+        this.attachedHttpServer = null;
         resolve();
       }
     });
@@ -407,6 +413,7 @@ export class TetherServer {
    * @param server - The HTTP server instance to attach to.
    */
   attach(server: http.Server): void {
+    this.attachedHttpServer = server;
     if (!this._webSocketServer) {
       this._webSocketServer = new WebSocketServer({
         noServer: true,

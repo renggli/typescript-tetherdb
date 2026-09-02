@@ -56,7 +56,10 @@ describe('handleServeCommand', () => {
     );
     expect(running).toBeDefined();
     expect(testLogger.hasMessage('HTTP API:')).toBe(true);
-    expect(testLogger.hasMessage('sqlite (/tmp/test-db)')).toBe(true);
+    expect(testLogger.hasMessage('Storage:')).toBe(true);
+    expect(testLogger.hasMessage('sqlite')).toBe(true);
+    expect(testLogger.hasMessage('Directory:')).toBe(true);
+    expect(testLogger.hasMessage(path.resolve('/tmp/test-db'))).toBe(true);
     await running.close();
     await storage.close?.();
   });

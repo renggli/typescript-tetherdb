@@ -38,10 +38,6 @@ export async function handleServeCommand(
   const hostLabel = resolvedHost.includes(':')
     ? `[${resolvedHost}]`
     : resolvedHost;
-  const storageInfo =
-    backend === StorageType.Memory
-      ? 'in-memory (ephemeral)'
-      : `${backend} (${path.resolve(dir)})`;
   const httpUrl = `http://${hostLabel}:${running.port}${running.server.httpPath}`;
   const wsUrl = `ws://${hostLabel}:${running.port}${running.server.webSocketPath}`;
 
@@ -53,11 +49,15 @@ export async function handleServeCommand(
     `  ${ANSI_COLOR_1}➜${ANSI_RESET}  ${ANSI_BOLD}WebSocket:${ANSI_RESET}    ${ANSI_CYAN}${wsUrl}${ANSI_RESET}`,
   );
   console.log(
-    `  ${ANSI_COLOR_1}➜${ANSI_RESET}  ${ANSI_BOLD}Storage:${ANSI_RESET}      ${storageInfo}`,
+    `  ${ANSI_COLOR_1}➜${ANSI_RESET}  ${ANSI_BOLD}Storage:${ANSI_RESET}      ${backend}`,
   );
   if (backend === StorageType.Memory) {
     console.log(
       `  ${ANSI_COLOR_1}➜${ANSI_RESET}  ${ANSI_BOLD}Admin Token:${ANSI_RESET}  ${ANSI_DIM}${running.adminToken}${ANSI_RESET}`,
+    );
+  } else {
+    console.log(
+      `  ${ANSI_COLOR_1}➜${ANSI_RESET}  ${ANSI_BOLD}Directory:${ANSI_RESET}    ${path.resolve(dir)}`,
     );
   }
   console.log('');

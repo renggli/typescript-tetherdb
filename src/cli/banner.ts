@@ -1,17 +1,25 @@
-/**
- * ASCII logo and brand styling for TetherDB CLI matching the application color gradient (#0284c7 → #6366f1).
- */
+import {
+  ANSI_COLOR_1,
+  ANSI_COLOR_2,
+  ANSI_COLOR_3,
+  ANSI_COLOR_4,
+  ANSI_COLOR_5,
+  ANSI_MUTED,
+  ANSI_RESET,
+} from '../shared/ansi.js';
 
-export const ANSI_COLOR_1 = '\x1b[38;2;2;132;199m'; // #0284c7 (Sky Blue)
-const ANSI_COLOR_2 = '\x1b[38;2;26;125;209m';
-const ANSI_COLOR_3 = '\x1b[38;2;50;117;220m';
-const ANSI_COLOR_4 = '\x1b[38;2;75;110;230m';
-const ANSI_COLOR_5 = '\x1b[38;2;99;102;241m'; // #6366f1 (Indigo)
-const ANSI_MUTED = '\x1b[38;2;129;140;248m';
-export const ANSI_BOLD = '\x1b[1m';
-export const ANSI_DIM = '\x1b[2m';
-export const ANSI_CYAN = '\x1b[36m';
-export const ANSI_RESET = '\x1b[0m';
+export {
+  ANSI_BOLD,
+  ANSI_COLOR_1,
+  ANSI_COLOR_2,
+  ANSI_COLOR_3,
+  ANSI_COLOR_4,
+  ANSI_COLOR_5,
+  ANSI_CYAN,
+  ANSI_DIM,
+  ANSI_MUTED,
+  ANSI_RESET,
+} from '../shared/ansi.js';
 
 /**
  * Returns the styled ASCII banner for TetherDB CLI.

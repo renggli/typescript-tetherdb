@@ -263,4 +263,95 @@ describe('tetherPlugin (Vite Dev Server Integration)', () => {
       await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     }
   });
+
+  it('should print storage info and admin token on printUrls with MemoryStorage', async () => {
+    const logs: string[] = [];
+    vite = await createViteServer({
+      server: {
+        host: '127.0.0.1',
+        port: 0,
+      },
+      plugins: [
+        tetherPlugin({
+          tables: ['todos'],
+        }),
+      ],
+      customLogger: {
+        info(msg) {
+          logs.push(msg);
+        },
+        warn() {},
+        warnOnce() {},
+        error() {},
+        clearScreen() {},
+        hasErrorLogged() {
+          return false;
+        },
+        hasWarned: false,
+      },
+    });
+
+    await vite.listen();
+    vite.printUrls();
+
+    expect(
+      logs.some((l) => l.includes('Storage:') && l.includes('memory')),
+    ).toBe(true);
+    expect(logs.some((l) => l.includes('Admin Token:'))).toBe(true);
+  });
+
+  it('should print storage directory on printUrls with disk storage', async () => {
+    const tmpDir = path.join(
+      os.tmpdir(),
+      `tetherdb-vite-print-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    );
+    await fs.mkdir(tmpDir, { recursive: true });
+
+    try {
+      const logs: string[] = [];
+      const storage = new SqliteStorage({ baseDir: tmpDir });
+      vite = await createViteServer({
+        server: {
+          host: '127.0.0.1',
+          port: 0,
+        },
+        plugins: [
+          tetherPlugin({
+            storage,
+            tables: ['todos'],
+          }),
+        ],
+        customLogger: {
+          info(msg) {
+            logs.push(msg);
+          },
+          warn() {},
+          warnOnce() {},
+          error() {},
+          clearScreen() {},
+          hasErrorLogged() {
+            return false;
+          },
+          hasWarned: false,
+        },
+      });
+
+      await vite.listen();
+      vite.printUrls();
+
+      expect(
+        logs.some((l) => l.includes('Storage:') && l.includes('sqlite')),
+      ).toBe(true);
+      expect(
+        logs.some((l) => l.includes('Directory:') && l.includes(tmpDir)),
+      ).toBe(true);
+      expect(logs.some((l) => l.includes('Admin Token:'))).toBe(false);
+    } finally {
+      if (vite) {
+        await vite.close().catch(() => {});
+        vite = null;
+      }
+      await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    }
+  });
 });
