@@ -14,6 +14,7 @@ import type {
 import { verifySessionToken } from '../shared/crypto.js';
 import {
   calculateByteSize,
+  validateClientId,
   validateRecordId,
   validateTableName,
   validateTimestamp,
@@ -424,6 +425,9 @@ export async function validateBatchChanges(
     const tableName = validateTableName(change.table);
     validateRecordId(change.id);
     validateTimestamp(change.timestamp);
+    if (change.clientId !== undefined) {
+      validateClientId(change.clientId);
+    }
 
     const table = await storage.getTable(tableName);
     if (!table) {

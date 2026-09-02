@@ -574,9 +574,14 @@ export class Sync {
 
     const batchId = validateIdentifier(msg.batchId, 'batchId');
 
+    const sanitizedChanges = msg.changes.map((change) => ({
+      ...change,
+      clientId: client.clientId,
+    }));
+
     const { applied, newSeq } = await this.storage.applyChanges(
       client.user,
-      msg.changes,
+      sanitizedChanges,
     );
 
     // Acknowledge to sender
