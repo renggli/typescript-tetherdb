@@ -84,6 +84,15 @@ export class TetherClient {
       });
     });
 
+    // Broadcast remote sync arrivals to sibling tabs so their UI updates immediately.
+    this.sync.onRemoteChangeBatch.register(({ tableName, events }) => {
+      this.tabChannel.broadcast({
+        type: 'change',
+        table: tableName,
+        events,
+      });
+    });
+
     // Handle cross-tab messages from sibling tabs.
     this.tabChannel.onMessage.register((msg) => {
       if (msg.type === 'change') {

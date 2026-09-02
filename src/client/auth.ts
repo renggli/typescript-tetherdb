@@ -216,8 +216,8 @@ export class Auth {
       this.currentUserName = data.userName;
       this.currentToken = data.token;
 
-      if (dataMode === DataMode.Clear) {
-        await this.applyDataMode(DataMode.Clear);
+      if (dataMode === DataMode.Clear || dataMode === DataMode.Remote) {
+        await this.applyDataMode(dataMode);
       }
       await this.updateStoredAuth(options.remember ?? false, data);
 

@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AuthStatus,
+  DataMode,
   SyncStatus,
   TetherClient,
   TetherClientError,
   TetherClientErrorCode,
 } from '../../src/client/index.js';
 import type { WebSocketConstructor } from '../../src/client/sync.js';
+import { OperationType, ServerMessageType } from '../../src/shared/types.js';
 import { waitForCondition } from '../helpers.js';
 
 class MockWebSocket {
@@ -483,6 +485,270 @@ describe('TetherClient', () => {
       // Let event loop settle and verify client2 received no events
       await new Promise<void>((resolve) => setTimeout(resolve, 30));
       expect(eventsInClient2).toHaveLength(0);
+    });
+
+    it('should propagate remote server snapshot to sibling tabs when signing in', async () => {
+      const dbName = `multitab-snapshot-${Math.random().toString(36).substring(2, 8)}`;
+      const tabA = new TetherClient(dbName, {
+        webSocketClass: MockWebSocket as unknown as WebSocketConstructor,
+      });
+      const tabB = new TetherClient(dbName, {
+        webSocketClass: MockWebSocket as unknown as WebSocketConstructor,
+      });
+      clientsToClose.push(tabA, tabB);
+
+      const todosB = tabB.table<{ title: string }>('todos');
+      const eventsReceivedByB: unknown[] = [];
+      todosB.onChange.register((events) => {
+        eventsReceivedByB.push(...events);
+      });
+
+      // Mock login on Tab A
+      vi.spyOn(tabA.sync, 'login').mockResolvedValueOnce({
+        userName: 'alice',
+        token: 'token-alice-123',
+      });
+      await tabA.login({ userName: 'alice', password: 'password123' });
+
+      // Tab A receives server snapshot containing Alice's todos
+      // @ts-expect-error - trigger server snapshot on Tab A sync
+      await tabA.sync.handleServerMessage({
+        type: ServerMessageType.SyncSnapshot,
+        seq: 5,
+        snapshot: [
+          {
+            table: 'todos',
+            id: 'todo-1',
+            data: { title: 'Write tests' },
+            timestamp: 1000,
+            version: 1,
+            clientId: 'remote-client',
+            userName: 'alice',
+          },
+          {
+            table: 'todos',
+            id: 'todo-2',
+            data: { title: 'Ship feature' },
+            timestamp: 1001,
+            version: 1,
+            clientId: 'remote-client',
+            userName: 'alice',
+          },
+        ],
+      });
+
+      // Tab B's table.onChange should receive both snapshot items via TabChannel
+      await waitForCondition(() => eventsReceivedByB.length === 2);
+      expect(eventsReceivedByB).toMatchObject([
+        {
+          id: 'todo-1',
+          op: 'put',
+          data: { title: 'Write tests' },
+          isRemote: true,
+        },
+        {
+          id: 'todo-2',
+          op: 'put',
+          data: { title: 'Ship feature' },
+          isRemote: true,
+        },
+      ]);
+
+      // Tab B can read the loaded state from its local table
+      expect(await todosB.get('todo-1')).toEqual({ title: 'Write tests' });
+      expect(await todosB.get('todo-2')).toEqual({ title: 'Ship feature' });
+    });
+
+    it('should propagate live server broadcast changes from Tab A to Tab B', async () => {
+      const dbName = `multitab-broadcast-${Math.random().toString(36).substring(2, 8)}`;
+      const tabA = new TetherClient(dbName, {
+        webSocketClass: MockWebSocket as unknown as WebSocketConstructor,
+      });
+      const tabB = new TetherClient(dbName, {
+        webSocketClass: MockWebSocket as unknown as WebSocketConstructor,
+      });
+      clientsToClose.push(tabA, tabB);
+
+      const notesB = tabB.table<{ text: string }>('notes');
+      const eventsReceivedByB: unknown[] = [];
+      notesB.onChange.register((events) => {
+        eventsReceivedByB.push(...events);
+      });
+
+      // @ts-expect-error - trigger server broadcast on Tab A
+      await tabA.sync.handleServerMessage({
+        type: ServerMessageType.BroadcastChanges,
+        seq: 12,
+        changes: [
+          {
+            table: 'notes',
+            id: 'note-1',
+            op: OperationType.Put,
+            data: { text: 'Live update from collaborator' },
+            timestamp: 2000,
+            version: 1,
+            clientId: 'collaborator-client',
+            userName: 'bob',
+          },
+        ],
+      });
+
+      await waitForCondition(() => eventsReceivedByB.length === 1);
+      expect(eventsReceivedByB[0]).toMatchObject({
+        id: 'note-1',
+        op: 'put',
+        data: { text: 'Live update from collaborator' },
+        isRemote: true,
+      });
+      expect(await notesB.get('note-1')).toEqual({
+        text: 'Live update from collaborator',
+      });
+    });
+
+    it('should wipe local data on logout with DataMode.Clear across all tabs', async () => {
+      const dbName = `multitab-logout-clear-${Math.random().toString(36).substring(2, 8)}`;
+      const tabA = new TetherClient(dbName, {
+        webSocketClass: MockWebSocket as unknown as WebSocketConstructor,
+      });
+      const tabB = new TetherClient(dbName, {
+        webSocketClass: MockWebSocket as unknown as WebSocketConstructor,
+      });
+      clientsToClose.push(tabA, tabB);
+
+      // Populate local records
+      await tabA.table('items').put('item-1', { title: 'Local Item 1' });
+      expect(await tabB.table('items').get('item-1')).toEqual({
+        title: 'Local Item 1',
+      });
+
+      const eventsInB: unknown[] = [];
+      tabB.table('items').onChange.register((events) => {
+        eventsInB.push(...events);
+      });
+
+      // Sign in simulation
+      // @ts-expect-error - apply session
+      tabA.auth.applyRemoteAuth(AuthStatus.SignedIn, 'alice', 'token-alice');
+      // @ts-expect-error - apply session
+      tabB.auth.applyRemoteAuth(AuthStatus.SignedIn, 'alice', 'token-alice');
+
+      // Logout with DataMode.Clear
+      vi.spyOn(tabA.sync, 'logout').mockResolvedValueOnce(undefined);
+      await tabA.logout({ dataMode: DataMode.Clear });
+
+      expect(tabA.authStatus).toBe(AuthStatus.SignedOut);
+      await waitForCondition(() => tabB.authStatus === AuthStatus.SignedOut);
+
+      // Records cleared in Tab A and Tab B
+      expect(await tabA.table('items').get('item-1')).toBeUndefined();
+      expect(await tabB.table('items').get('item-1')).toBeUndefined();
+
+      // Tab B receives delete events
+      await waitForCondition(() => eventsInB.length > 0);
+      expect(eventsInB).toContainEqual(
+        expect.objectContaining({
+          id: 'item-1',
+          op: 'delete',
+        }),
+      );
+    });
+
+    it('should preserve local data on register with DataMode.Local', async () => {
+      const dbName = `multitab-register-local-${Math.random().toString(36).substring(2, 8)}`;
+      const tabA = new TetherClient(dbName, {
+        webSocketClass: MockWebSocket as unknown as WebSocketConstructor,
+      });
+      const tabB = new TetherClient(dbName, {
+        webSocketClass: MockWebSocket as unknown as WebSocketConstructor,
+      });
+      clientsToClose.push(tabA, tabB);
+
+      // Local guest data
+      await tabA.table('tasks').put('task-1', { name: 'Guest task' });
+
+      vi.spyOn(tabA.sync, 'register').mockResolvedValueOnce({
+        userName: 'newuser',
+        token: 'token-newuser',
+      });
+
+      await tabA.register({
+        userName: 'newuser',
+        password: 'password123',
+        dataMode: DataMode.Local,
+      });
+
+      expect(tabA.authStatus).toBe(AuthStatus.SignedIn);
+      await waitForCondition(() => tabB.authStatus === AuthStatus.SignedIn);
+
+      // Data preserved in both tabs
+      expect(await tabA.table('tasks').get('task-1')).toEqual({
+        name: 'Guest task',
+      });
+      expect(await tabB.table('tasks').get('task-1')).toEqual({
+        name: 'Guest task',
+      });
+    });
+
+    it('should merge remote snapshot with local data on login with DataMode.Merge', async () => {
+      const dbName = `multitab-login-merge-${Math.random().toString(36).substring(2, 8)}`;
+      const tabA = new TetherClient(dbName, {
+        webSocketClass: MockWebSocket as unknown as WebSocketConstructor,
+      });
+      const tabB = new TetherClient(dbName, {
+        webSocketClass: MockWebSocket as unknown as WebSocketConstructor,
+      });
+      clientsToClose.push(tabA, tabB);
+
+      // Tab A puts local record with older timestamp
+      await tabA.table('items').put('item-local', { val: 'local-only' });
+
+      vi.spyOn(tabA.sync, 'login').mockResolvedValueOnce({
+        userName: 'alice',
+        token: 'token-alice',
+      });
+
+      await tabA.login({
+        userName: 'alice',
+        password: 'password123',
+        dataMode: DataMode.Merge,
+      });
+
+      // Server snapshot arrives with server item
+      // @ts-expect-error - trigger snapshot
+      await tabA.sync.handleServerMessage({
+        type: ServerMessageType.SyncSnapshot,
+        seq: 1,
+        snapshot: [
+          {
+            table: 'items',
+            id: 'item-server',
+            data: { val: 'server-only' },
+            timestamp: Date.now(),
+            version: 1,
+            clientId: 'remote-client',
+            userName: 'alice',
+          },
+        ],
+      });
+
+      await waitForCondition(async () => {
+        const item = await tabB.table('items').get('item-server');
+        return item !== undefined;
+      });
+
+      // Both local and server items exist in Tab A and Tab B
+      expect(await tabA.table('items').get('item-local')).toEqual({
+        val: 'local-only',
+      });
+      expect(await tabA.table('items').get('item-server')).toEqual({
+        val: 'server-only',
+      });
+      expect(await tabB.table('items').get('item-local')).toEqual({
+        val: 'local-only',
+      });
+      expect(await tabB.table('items').get('item-server')).toEqual({
+        val: 'server-only',
+      });
     });
   });
 

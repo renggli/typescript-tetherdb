@@ -11,6 +11,7 @@ import {
 import { TetherClientError, TetherClientErrorCode } from '../errors.js';
 import { EventRegistry } from '../shared/event.js';
 import type { Storage } from '../storage.js';
+import type { TableChangeEvent } from '../table.js';
 import { ConnectionManager } from './connection.js';
 import { type SyncOptions, SyncStatus } from './types.js';
 
@@ -27,6 +28,11 @@ export class Sync {
   readonly onError = new EventRegistry<TetherClientError>();
   /** Reactive event registry triggered whenever the server provides a refreshed session token. */
   readonly onTokenRefresh = new EventRegistry<string>();
+  /** Reactive event registry triggered whenever remote changes from the server are applied to local tables. */
+  readonly onRemoteChangeBatch = new EventRegistry<{
+    tableName: string;
+    events: TableChangeEvent[];
+  }>();
 
   private token?: string;
   private storage: Storage;
@@ -536,6 +542,7 @@ export class Sync {
     for (const [tableName, events] of tableEvents.entries()) {
       const table = this.storage.table(tableName);
       table.notifyRemoteChanges(events);
+      this.onRemoteChangeBatch.publish({ tableName, events });
     }
   }
 }

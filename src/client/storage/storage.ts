@@ -8,7 +8,7 @@ import {
 import type { Index, IndexQueryOptions } from '../indexed.js';
 import { EventRegistry } from '../shared/event.js';
 import { randomUUID } from '../shared/id.js';
-import { Table } from '../table.js';
+import { Table, type TableChangeEvent } from '../table.js';
 import { openIndexedDatabase, upgradeIndexedDatabase } from './database.js';
 import {
   collectFromCursor,
@@ -644,12 +644,43 @@ export class Storage {
    */
   async clearTables(clearOutbox = true): Promise<void> {
     return this.withDatabase(async (db) => {
+      const userTableNames = Array.from(db.objectStoreNames).filter(
+        (name) => name !== META_STORE && name !== OUTBOX_STORE,
+      );
+
+      const tableKeys = new Map<string, string[]>();
+      if (userTableNames.length > 0) {
+        const txRead = db.transaction(userTableNames, 'readonly');
+        for (const name of userTableNames) {
+          const store = txRead.objectStore(name);
+          const req = store.getAllKeys();
+          const keys = await promisifyRequest<IDBValidKey[]>(req);
+          if (keys && keys.length > 0) {
+            tableKeys.set(name, keys.map(String));
+          }
+        }
+        await promisifyTransaction(txRead);
+      }
+
       const storeNames = Array.from(db.objectStoreNames).filter((name) => {
         if (name === META_STORE) return false;
         if (name === OUTBOX_STORE && !clearOutbox) return false;
         return true;
       });
       await this.clearStores(db, storeNames);
+
+      for (const [tableName, keys] of tableKeys.entries()) {
+        const events: TableChangeEvent[] = keys.map((id) => ({
+          id,
+          op: OperationType.Delete,
+          isRemote: true,
+        }));
+        this.table(tableName).notifyRemoteChanges(events);
+        this.onLocalChangeBatch.publish({
+          tableName,
+          mutations: events.map((e) => ({ id: e.id, op: e.op })),
+        });
+      }
     });
   }
 
