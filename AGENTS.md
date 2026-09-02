@@ -43,7 +43,7 @@ The codebase is organized into five decoupled layers with clear subpath exports:
 
 - **Shared / Protocol (`src/shared/`)**:
   - Internal module (not exported publicly).
-  - Single source of truth for protocol message schemas, data structures, logical clocks, and path normalization shared internally across client and server.
+  - Single source of truth for protocol message schemas, data structures, logical clocks, event registries, and path normalization shared internally across client and server.
   - Pure TypeScript with zero runtime dependencies.
 - **Client Layer (`src/client/`)**:
   - Exported as `tetherdb/client`.
@@ -60,7 +60,7 @@ The codebase is organized into five decoupled layers with clear subpath exports:
   - **Storage (`storage/`)**: Storage abstraction (`storage.ts`), with implementations for in-memory testing (`memory.ts`), per-user filesystem directories (`file.ts`), and SQLite (`sqlite.ts`), unified table (`table.ts`) and user (`user.ts`).
   - **Security (`security/`)**: Centralized authorization and response fattening pipeline (`filter.ts`), caching user resolver (`resolver.ts`), and internal schemas (`types.ts`).
   - **Locking (`shared/lock.ts`)**: Exclusive server process lockfile management (`server.lock`) and stale PID crash recovery.
-  - **Authentication (`shared/crypto.ts`)**: Internal token signing, password hashing, and persistent keyfile management.
+  - **Authentication & Rate Limiting (`shared/`)**: Internal token signing, password hashing, persistent keyfile management (`crypto.ts`), sliding-window rate limiters (`rate-limiter.ts`), and input validation helpers (`validate.ts`).
   - **Sync (`sync.ts`)**: Internal WebSocket connection hub and broadcast engine.
 - **CLI Layer (`src/cli/`)**:
   - Exported as `tetherdb/cli` (`runCli`).
