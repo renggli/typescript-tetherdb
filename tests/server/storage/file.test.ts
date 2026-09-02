@@ -76,7 +76,7 @@ describe('FileStorage', () => {
     const bucket = user.userId.slice(0, 2);
     const userDir = path.join(context.dir, 'users', bucket, user.userId);
     const tableFile = path.join(userDir, 'settings', 'records.json');
-    const metaFile = path.join(userDir, 'meta.json');
+    const metaFile = path.join(context.dir, 'meta.json');
     const syncFile = path.join(userDir, 'sync.jsonl');
     const tablesFile = path.join(context.dir, 'tables.json');
     const usersFile = path.join(context.dir, 'users.json');
@@ -479,5 +479,64 @@ describe('FileStorage', () => {
 
     const { rawChanges } = await context.backend.getRawChangesSince(0);
     expect(rawChanges.map((c) => c.id)).toEqual(['n1', 'n2']);
+  });
+
+  it('should assign strictly monotonic unique sequence numbers across shared and user-private partitions', async () => {
+    const user = await context.backend.createUser('seq_user', 'pass');
+    await context.backend.createTable('shared_tbl', {
+      permissions: PUBLIC_READ_WRITE_PERMISSIONS,
+    });
+    await context.backend.createTable('private_tbl'); // USER_PRIVATE_PERMISSIONS default
+
+    // 1. Mutation in shared table
+    await context.backend.applyChanges(undefined, [
+      {
+        table: 'shared_tbl',
+        id: 's1',
+        op: OperationType.Put,
+        data: 'shared_val_1',
+        timestamp: 100,
+        clientId: 'c1',
+      },
+    ]);
+
+    // 2. Mutation in private table for user
+    await context.backend.applyChanges(user, [
+      {
+        table: 'private_tbl',
+        id: 'p1',
+        op: OperationType.Put,
+        data: 'private_val_1',
+        timestamp: 101,
+        clientId: 'c1',
+      },
+    ]);
+
+    // 3. Another mutation in shared table
+    await context.backend.applyChanges(undefined, [
+      {
+        table: 'shared_tbl',
+        id: 's2',
+        op: OperationType.Put,
+        data: 'shared_val_2',
+        timestamp: 102,
+        clientId: 'c1',
+      },
+    ]);
+
+    const { rawChanges, currentSeq } = await context.backend.getRawChangesSince(
+      0,
+      user,
+    );
+    expect(rawChanges).toHaveLength(3);
+    const seqs = rawChanges.map((c) => c.seq);
+    // Sequences must be strictly monotonic: [1, 2, 3] with currentSeq: 3
+    expect(seqs).toEqual([1, 2, 3]);
+    expect(currentSeq).toBe(3);
+
+    // Querying diff from fromSeq = 1 should return records 2 and 3
+    const diff1 = await context.backend.getRawChangesSince(1, user);
+    expect(diff1.rawChanges).toHaveLength(2);
+    expect(diff1.rawChanges.map((c) => c.id)).toEqual(['p1', 's2']);
   });
 });

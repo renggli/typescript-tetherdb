@@ -229,27 +229,13 @@ export class FileStorage extends Storage {
     const partitions: string[] = ['__shared__'];
     if (user) partitions.push(user.userId);
 
-    let maxCurrentSeq = 0;
-    let minSeq = 0;
+    const meta = await this.readGlobalMeta();
     const allChanges: InternalChangeRecord[] = [];
 
     for (const partitionId of partitions) {
       await this.withLock(partitionId, async () => {
         const partitionDir = this.resolvePartitionDir(partitionId);
-        const metaFile = path.join(partitionDir, 'meta.json');
         const syncFile = path.join(partitionDir, 'sync.jsonl');
-
-        try {
-          const metaContent = await fs.readFile(metaFile, 'utf-8');
-          const meta = JSON.parse(metaContent) as {
-            currentSeq: number;
-            minSeq: number;
-          };
-          maxCurrentSeq = Math.max(maxCurrentSeq, meta.currentSeq);
-          minSeq = Math.max(minSeq, meta.minSeq);
-        } catch {
-          return;
-        }
 
         try {
           const content = await fs.readFile(syncFile, 'utf-8');
@@ -272,7 +258,11 @@ export class FileStorage extends Storage {
     }
 
     allChanges.sort((a, b) => a.seq - b.seq);
-    return { rawChanges: allChanges, currentSeq: maxCurrentSeq, minSeq };
+    return {
+      rawChanges: allChanges,
+      currentSeq: meta.currentSeq,
+      minSeq: meta.minSeq,
+    };
   }
 
   async applyChanges(
@@ -290,7 +280,7 @@ export class FileStorage extends Storage {
     // Phase 2: Lock and apply changes
     return this.withLock('__apply_changes__', async () => {
       const appliedList: InternalChangeRecord[] = [];
-      let maxNewSeq = 0;
+      const meta = await this.readGlobalMeta();
 
       // Group changes by partition
       const partitionChanges = new Map<string, ChangeRecord[]>();
@@ -318,16 +308,7 @@ export class FileStorage extends Storage {
       for (const [partitionId, pChanges] of partitionChanges.entries()) {
         await this.withLock(partitionId, async () => {
           const partitionDir = this.resolvePartitionDir(partitionId);
-          const metaFile = path.join(partitionDir, 'meta.json');
           const syncFile = path.join(partitionDir, 'sync.jsonl');
-
-          let meta = { currentSeq: 0, minSeq: 0 };
-          try {
-            const metaContent = await fs.readFile(metaFile, 'utf-8');
-            meta = JSON.parse(metaContent);
-          } catch {
-            // Initialize new partition
-          }
 
           const tableMaps = new Map<
             string,
@@ -421,7 +402,6 @@ export class FileStorage extends Storage {
               map.set(change.id, updatedRecord);
               appliedList.push(appliedChange);
               newChangelogLines.push(JSON.stringify(appliedChange));
-              maxNewSeq = Math.max(maxNewSeq, assignedSeq);
             }
           }
 
@@ -444,17 +424,24 @@ export class FileStorage extends Storage {
             await fs.mkdir(partitionDir, { recursive: true });
             await fs.appendFile(syncFile, appendContent, 'utf-8');
           }
-
-          // Save updated meta
-          await writeFileAtomic(metaFile, JSON.stringify(meta, null, 2));
-
-          // Auto-pruning
-          await this.prunePartitionSyncFile(
-            partitionDir,
-            defaultMaxHistory,
-            defaultMaxHistory + 50,
-          );
         });
+      }
+
+      if (appliedList.length > 0) {
+        await this.writeGlobalMeta(meta);
+
+        // Auto-pruning
+        if (meta.currentSeq > 0) {
+          const targetMinSeq = Math.max(
+            1,
+            meta.currentSeq - defaultMaxHistory + 1,
+          );
+          if (targetMinSeq > (meta.minSeq || 1) + 50) {
+            await this.pruneAllPartitions(targetMinSeq);
+            meta.minSeq = targetMinSeq;
+            await this.writeGlobalMeta(meta);
+          }
+        }
       }
 
       const resolver = new UserResolver(this);
@@ -474,28 +461,13 @@ export class FileStorage extends Storage {
         });
       }
 
-      return { applied: publicApplied, newSeq: maxNewSeq };
+      return { applied: publicApplied, newSeq: meta.currentSeq };
     });
   }
 
-  async getCurrentSeq(user?: User): Promise<number> {
-    const partitions: string[] = ['__shared__'];
-    if (user) partitions.push(user.userId);
-    let maxSeq = 0;
-
-    for (const partitionId of partitions) {
-      const partitionDir = this.resolvePartitionDir(partitionId);
-      const metaFile = path.join(partitionDir, 'meta.json');
-      try {
-        const metaContent = await fs.readFile(metaFile, 'utf-8');
-        const meta = JSON.parse(metaContent) as { currentSeq: number };
-        maxSeq = Math.max(maxSeq, meta.currentSeq);
-      } catch {
-        // Ignore
-      }
-    }
-
-    return maxSeq;
+  async getCurrentSeq(_user?: User): Promise<number> {
+    const meta = await this.readGlobalMeta();
+    return meta.currentSeq;
   }
 
   async checkpoint(): Promise<MaintenanceResult> {
@@ -514,16 +486,16 @@ export class FileStorage extends Storage {
 
   async prune(keepCount?: number): Promise<MaintenanceResult> {
     const keep = keepCount ?? this.options.maxHistoryEntries ?? 1000;
-    const users = await this.getUsers();
-    const partitions = ['__shared__', ...users.map((u) => u.userId)];
+    const meta = await this.readGlobalMeta();
     let totalPruned = 0;
 
-    for (const partitionId of partitions) {
-      await this.withLock(partitionId, async () => {
-        const partitionDir = this.resolvePartitionDir(partitionId);
-        const pruned = await this.prunePartitionSyncFile(partitionDir, keep);
-        totalPruned += pruned;
-      });
+    if (meta.currentSeq > 0) {
+      const targetMinSeq = Math.max(1, meta.currentSeq - keep + 1);
+      if (targetMinSeq > meta.minSeq) {
+        totalPruned = await this.pruneAllPartitions(targetMinSeq);
+        meta.minSeq = targetMinSeq;
+        await this.writeGlobalMeta(meta);
+      }
     }
 
     return {
@@ -717,44 +689,90 @@ export class FileStorage extends Storage {
     return path.join(this.baseDir, 'users', bucket, effectiveUserId);
   }
 
+  private get metaFile(): string {
+    return path.join(this.baseDir, 'meta.json');
+  }
+
+  private async readGlobalMeta(): Promise<{
+    currentSeq: number;
+    minSeq: number;
+  }> {
+    try {
+      const content = await fs.readFile(this.metaFile, 'utf-8');
+      const meta = JSON.parse(content) as {
+        currentSeq: number;
+        minSeq: number;
+      };
+      return {
+        currentSeq: Number.isFinite(meta.currentSeq) ? meta.currentSeq : 0,
+        minSeq: Number.isFinite(meta.minSeq) ? meta.minSeq : 0,
+      };
+    } catch {
+      return { currentSeq: 0, minSeq: 0 };
+    }
+  }
+
+  private async writeGlobalMeta(meta: {
+    currentSeq: number;
+    minSeq: number;
+  }): Promise<void> {
+    await writeFileAtomic(this.metaFile, JSON.stringify(meta, null, 2));
+  }
+
+  private async pruneAllPartitions(targetMinSeq: number): Promise<number> {
+    const users = await this.getUsers();
+    const partitions = ['__shared__', ...users.map((u) => u.userId)];
+    let totalPruned = 0;
+
+    for (const partitionId of partitions) {
+      await this.withLock(partitionId, async () => {
+        const partitionDir = this.resolvePartitionDir(partitionId);
+        const pruned = await this.prunePartitionSyncFile(
+          partitionDir,
+          targetMinSeq,
+        );
+        totalPruned += pruned;
+      });
+    }
+    return totalPruned;
+  }
+
   private async prunePartitionSyncFile(
     partitionDir: string,
-    maxHistory: number,
-    threshold = maxHistory,
+    targetMinSeq: number,
   ): Promise<number> {
     try {
       const syncFile = path.join(partitionDir, 'sync.jsonl');
-      const metaFile = path.join(partitionDir, 'meta.json');
-
       const content = await fs.readFile(syncFile, 'utf-8');
       const lines = content
         .split('\n')
         .map((l) => l.trim())
         .filter(Boolean);
 
-      if (lines.length > threshold) {
-        const pruneCount = lines.length - maxHistory;
-        const keptLines = lines.slice(pruneCount);
-        const firstKept = JSON.parse(keptLines[0]) as { seq: number };
-        await writeFileAtomic(syncFile, `${keptLines.join('\n')}\n`);
-
+      const keptLines: string[] = [];
+      let prunedCount = 0;
+      for (const line of lines) {
         try {
-          const metaContent = await fs.readFile(metaFile, 'utf-8');
-          const meta = JSON.parse(metaContent) as {
-            currentSeq: number;
-            minSeq: number;
-          };
-          meta.minSeq = firstKept.seq;
-          await writeFileAtomic(metaFile, JSON.stringify(meta, null, 2));
+          const rec = JSON.parse(line) as { seq: number };
+          if (rec.seq >= targetMinSeq) {
+            keptLines.push(line);
+          } else {
+            prunedCount++;
+          }
         } catch {
-          // Ignore
+          // Keep unparseable lines or drop
         }
-        return pruneCount;
       }
+
+      if (prunedCount > 0) {
+        const newContent =
+          keptLines.length > 0 ? `${keptLines.join('\n')}\n` : '';
+        await writeFileAtomic(syncFile, newContent);
+      }
+      return prunedCount;
     } catch {
-      // Ignore
+      return 0;
     }
-    return 0;
   }
 
   private async readUsersFile(): Promise<Map<string, FileUserData>> {
