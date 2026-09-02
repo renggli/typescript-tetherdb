@@ -90,14 +90,16 @@ describe.each(storageDescriptors)(
       const clientAlice = createClient();
       const clientBob = createClient();
 
-      await clientAlice.register({
+      const regAlice = await clientAlice.register({
         userName: 'alice_sec',
         password: 'Password123!',
       });
-      await clientBob.register({
+      expect(regAlice).toBe(true);
+      const regBob = await clientBob.register({
         userName: 'bob_sec',
         password: 'Password123!',
       });
+      expect(regBob).toBe(true);
 
       await waitForCondition(
         () => clientAlice.authStatus === AuthStatus.SignedIn,

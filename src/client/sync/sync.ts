@@ -276,12 +276,18 @@ export class Sync {
 
       this.pendingBatches.set(batchId, localIds);
 
-      this.send({
-        type: ClientMessageType.ChangeBatch,
-        clientId: this.clientId,
-        batchId,
-        changes,
-      });
+      const sent = this.connection.send(
+        JSON.stringify({
+          type: ClientMessageType.ChangeBatch,
+          clientId: this.clientId,
+          batchId,
+          changes,
+        }),
+      );
+      if (!sent) {
+        this.pendingBatches.delete(batchId);
+        this.schedulePush(200);
+      }
     } catch (err) {
       this.onError.publish(
         new TetherClientError(
@@ -358,8 +364,14 @@ export class Sync {
   private async sendAuth(): Promise<void> {
     this.pendingBatches.clear();
     try {
+      if (!this.token && this.pendingRequests.size > 0) {
+        return;
+      }
       const lastSyncSeq =
         (await this.storage.getMeta<number>('lastSyncSeq')) ?? 0;
+      if (!this.token && this.pendingRequests.size > 0) {
+        return;
+      }
       this.send({
         type: ClientMessageType.Auth,
         protocolVersion: PROTOCOL_VERSION,

@@ -282,6 +282,9 @@ export class Sync {
         webSocket.close();
         return;
       }
+    } else {
+      const existingClient = this.webSocketToClient.get(webSocket);
+      user = existingClient?.user;
     }
 
     if (
