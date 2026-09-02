@@ -1,4 +1,5 @@
 import { shouldOverwrite } from '../../shared/clock.js';
+import { EventRegistry } from '../../shared/event.js';
 import {
   type ChangeRecord,
   OperationType,
@@ -6,7 +7,6 @@ import {
   type StoredRecord,
 } from '../../shared/types.js';
 import type { Index, IndexQueryOptions } from '../indexed.js';
-import { EventRegistry } from '../shared/event.js';
 import { randomUUID } from '../shared/id.js';
 import { Table, type TableChangeEvent } from '../table.js';
 import { openIndexedDatabase, upgradeIndexedDatabase } from './database.js';

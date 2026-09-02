@@ -51,6 +51,7 @@ export interface TetherPluginOptions extends TetherServerOptions {
  */
 export function tetherPlugin(options: TetherPluginOptions = {}): Plugin {
   let tetherServer: TetherServer | null = null;
+  let isViteClosing = false;
 
   async function setupServer(
     server: ViteDevServer | PreviewServer,
@@ -59,6 +60,22 @@ export function tetherPlugin(options: TetherPluginOptions = {}): Plugin {
       storage: options.storage ?? new MemoryStorage(),
       logger: options.logger ?? false,
       ...options,
+      onClose: async () => {
+        await options.onClose?.();
+        if (!isViteClosing) {
+          isViteClosing = true;
+          try {
+            (
+              server.httpServer as unknown as {
+                closeAllConnections?: () => void;
+              }
+            )?.closeAllConnections?.();
+          } catch {
+            // Ignore close errors
+          }
+          await server.close();
+        }
+      },
     });
 
     if (options.users) {
@@ -84,6 +101,7 @@ export function tetherPlugin(options: TetherPluginOptions = {}): Plugin {
     if (server.httpServer) {
       tetherServer.attach(server.httpServer as unknown as http.Server);
       server.httpServer.on('close', () => {
+        isViteClosing = true;
         tetherServer?.close().catch(() => {
           // Ignore close errors during server shutdown
         });
@@ -98,6 +116,7 @@ export function tetherPlugin(options: TetherPluginOptions = {}): Plugin {
     configureServer: setupServer,
     configurePreviewServer: setupServer,
     async closeBundle() {
+      isViteClosing = true;
       if (tetherServer) {
         await tetherServer.close();
         tetherServer = null;

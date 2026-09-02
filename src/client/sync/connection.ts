@@ -1,5 +1,5 @@
+import { EventRegistry } from '../../shared/event.js';
 import { TetherClientError, TetherClientErrorCode } from '../errors.js';
-import { EventRegistry } from '../shared/event.js';
 import type { SyncOptions, WebSocketConstructor } from './types.js';
 
 export enum SyncStatus {

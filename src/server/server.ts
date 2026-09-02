@@ -86,6 +86,8 @@ export interface TetherServerOptions {
   trustProxy?: boolean;
   /** Optional custom logger instance, or `false` to silence internal server logs (defaults to `console`). */
   logger?: TetherLogger | false;
+  /** Optional callback invoked when the server is closing or stopped. */
+  onClose?: () => void | Promise<void>;
 }
 
 /**
@@ -174,6 +176,7 @@ export class TetherServer {
   private readonly adminSecret: string;
   private readonly maxPayloadBytes: number;
   private readonly baseDir?: string;
+  private readonly onCloseCallback?: () => void | Promise<void>;
 
   private _httpServer: http.Server | null = null;
   private _webSocketServer: WebSocketServer | null = null;
@@ -187,6 +190,7 @@ export class TetherServer {
   constructor(options: TetherServerOptions = {}) {
     this.storage = options.storage ?? new MemoryStorage();
     this.baseDir = options.baseDir;
+    this.onCloseCallback = options.onClose;
     this.httpPath = normalizeHttpPath(options.httpPath ?? '');
     this.webSocketPath =
       options.webSocketPath ??
@@ -362,6 +366,11 @@ export class TetherServer {
     if (this.lockHandle) {
       this.lockHandle.release();
       this.lockHandle = null;
+    }
+    try {
+      await this.onCloseCallback?.();
+    } catch {
+      // Ignore onClose errors during server shutdown
     }
     return new Promise<void>((resolve, reject) => {
       if (this._webSocketServer) {

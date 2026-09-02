@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { EventRegistry } from '../../../src/client/shared/event.js';
-import { testLogger } from '../../logger.js';
+import { EventRegistry } from '../../src/shared/event.js';
+import { testLogger } from '../logger.js';
 
 describe('EventRegistry', () => {
   it('should register listeners and dispatch events', () => {

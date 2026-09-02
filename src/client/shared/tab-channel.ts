@@ -1,6 +1,6 @@
+import { EventRegistry } from '../../shared/event.js';
 import { TETHER_PREFIX } from '../storage/utils.js';
 import type { TableChangeEvent } from '../table.js';
-import { EventRegistry } from './event.js';
 
 /**
  * Cross-tab message broadcast over a named BroadcastChannel.

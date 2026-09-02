@@ -1,3 +1,4 @@
+import { EventRegistry } from '../shared/event.js';
 import {
   Auth,
   AuthStatus,
@@ -6,7 +7,6 @@ import {
   type RegisterOptions,
 } from './auth.js';
 import { type TetherClientError, TetherClientErrorCode } from './errors.js';
-import { EventRegistry } from './shared/event.js';
 import { TabChannel } from './shared/tab-channel.js';
 import { Storage } from './storage/storage.js';
 import { TETHER_PREFIX } from './storage/utils.js';

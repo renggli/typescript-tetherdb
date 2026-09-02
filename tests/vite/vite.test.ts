@@ -209,4 +209,58 @@ describe('tetherPlugin (Vite Dev Server Integration)', () => {
       await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     }
   });
+
+  it('should shut down Vite server when stopped via admin stop endpoint', async () => {
+    const tmpDir = path.join(
+      os.tmpdir(),
+      `tetherdb-vite-stop-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    );
+    await fs.mkdir(tmpDir, { recursive: true });
+
+    try {
+      const storage = new SqliteStorage({ baseDir: tmpDir });
+      vite = await createViteServer({
+        server: {
+          host: '127.0.0.1',
+          port: 0,
+        },
+        plugins: [
+          tetherPlugin({
+            storage,
+            tables: ['todos'],
+          }),
+        ],
+      });
+
+      await vite.listen();
+
+      const lock = readServerLock(tmpDir);
+      expect(lock).not.toBeNull();
+      expect(lock?.adminSecret).toBeDefined();
+
+      const stopRes = await fetch(`http://127.0.0.1:${lock?.port}/admin/stop`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${lock?.adminSecret}`,
+        },
+      });
+      expect(stopRes.status).toBe(200);
+
+      for (let i = 0; i < 50; i++) {
+        if (!vite?.httpServer?.listening) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+
+      expect(vite.httpServer?.listening).toBeFalsy();
+      const lockAfterStop = readServerLock(tmpDir);
+      expect(lockAfterStop).toBeNull();
+      vite = null;
+    } finally {
+      if (vite) {
+        await vite.close().catch(() => {});
+        vite = null;
+      }
+      await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    }
+  });
 });

@@ -1,10 +1,10 @@
+import { EventRegistry } from '../shared/event.js';
 import {
   type ChangeRecord,
   OperationType,
   type StoredRecord,
 } from '../shared/types.js';
 import { Index, type IndexOptions } from './indexed.js';
-import { EventRegistry } from './shared/event.js';
 import type { LocalMutationItem, Storage } from './storage/storage.js';
 
 /**

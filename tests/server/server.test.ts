@@ -865,5 +865,29 @@ describe('TetherServer Standalone Lifecycle & Error Mapping', () => {
       expect(errorPassedToNext).toBeInstanceOf(Error);
       await server.close();
     });
+
+    it('should invoke onClose callback when server closes', async () => {
+      let closed = false;
+      const server = new TetherServer({
+        onClose: () => {
+          closed = true;
+        },
+      });
+      await server.listen(0, '127.0.0.1');
+      expect(closed).toBe(false);
+
+      await server.close();
+      expect(closed).toBe(true);
+    });
+
+    it('should swallow errors from onClose callback and complete close cleanly', async () => {
+      const server = new TetherServer({
+        onClose: () => {
+          throw new Error('Callback failure');
+        },
+      });
+      await server.listen(0, '127.0.0.1');
+      await expect(server.close()).resolves.toBeUndefined();
+    });
   });
 });
