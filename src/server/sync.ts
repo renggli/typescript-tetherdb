@@ -593,12 +593,7 @@ export class Sync {
 
     // Broadcast applied changes to other active clients who have access to the modified tables
     if (applied.length > 0) {
-      await this.broadcastChanges(
-        client.clientId,
-        client.user,
-        applied,
-        newSeq,
-      );
+      await this.broadcastChanges(webSocket, client.user, applied, newSeq);
     }
   }
 
@@ -693,15 +688,17 @@ export class Sync {
   }
 
   private async broadcastChanges(
-    senderClientId: string,
+    senderWebSocket: WebSocket,
     senderUser: User | undefined,
     changes: ChangeRecord[],
     seq: number,
   ): Promise<void> {
+    const senderClient = this.webSocketToClient.get(senderWebSocket);
+    const senderClientId = senderClient?.clientId ?? 'client_anon';
     const tableCache = new Map<string, Table | undefined>();
 
     for (const client of this.clients) {
-      if (client.clientId === senderClientId) continue;
+      if (client.webSocket === senderWebSocket) continue;
 
       const clientChanges: ChangeRecord[] = [];
       for (const change of changes) {
