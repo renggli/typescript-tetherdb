@@ -5,7 +5,7 @@ import {
 } from '../shared/types.js';
 import { Index, type IndexOptions } from './indexed.js';
 import { EventRegistry } from './shared/event.js';
-import type { LocalMutationItem, Storage } from './storage.js';
+import type { LocalMutationItem, Storage } from './storage/storage.js';
 
 /**
  * Event describing a mutation (insert, update, delete) on a table record.

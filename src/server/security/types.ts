@@ -47,14 +47,3 @@ export interface InternalChangeRecord<T = unknown> {
   /** Internal author user identifier. */
   userId?: string;
 }
-
-/**
- * Internal snapshot record representation combining table identifier and internal record fields.
- *
- * @typeParam T - Payload data type.
- */
-export interface InternalSnapshotRecord<T = unknown>
-  extends InternalStoredRecord<T> {
-  /** Target table name. */
-  table: string;
-}

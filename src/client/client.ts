@@ -8,9 +8,10 @@ import {
 import { type TetherClientError, TetherClientErrorCode } from './errors.js';
 import { EventRegistry } from './shared/event.js';
 import { TabChannel } from './shared/tab-channel.js';
+import { Storage } from './storage/storage.js';
 import { TETHER_PREFIX } from './storage/utils.js';
-import { Storage } from './storage.js';
-import { Sync, type SyncStatus, type WebSocketConstructor } from './sync.js';
+import { Sync } from './sync/sync.js';
+import type { SyncStatus, WebSocketConstructor } from './sync/types.js';
 import type { Table } from './table.js';
 
 /**

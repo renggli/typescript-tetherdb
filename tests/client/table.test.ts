@@ -5,7 +5,7 @@ import {
   type Table,
   type TableChangeEvent,
 } from '../../src/client/index.js';
-import { Storage } from '../../src/client/storage.js';
+import { Storage } from '../../src/client/storage/storage.js';
 import { OperationType } from '../../src/shared/types.js';
 
 interface TestItem {

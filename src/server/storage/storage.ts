@@ -1,4 +1,3 @@
-import * as crypto from 'node:crypto';
 import {
   type ChangeRecord,
   OperationType,
@@ -185,17 +184,7 @@ export abstract class Storage {
     if (!payload) return undefined;
     const user = await this.getUser(payload.userId);
     if (!user) return undefined;
-    const passwordHash = await this.getUserPasswordHash(user.userId);
-    if (passwordHash) {
-      const expectedPwd = crypto
-        .createHash('sha256')
-        .update(passwordHash)
-        .digest('hex')
-        .slice(0, 16);
-      if (!payload.pwd || payload.pwd !== expectedPwd) {
-        return undefined;
-      }
-    }
+    if (!(await user.verifyToken(token))) return undefined;
     return user;
   }
 
@@ -457,7 +446,7 @@ export async function validateBatchChanges(
  * @param currentSeq - Current server sequence number.
  * @returns True if full snapshot sync is required.
  */
-export function isSnapshotRequired(
+function isSnapshotRequired(
   fromSeq: number,
   minSeq: number,
   currentSeq: number,

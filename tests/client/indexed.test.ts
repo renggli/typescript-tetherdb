@@ -5,7 +5,7 @@ import {
   IndexRange,
   type Table,
 } from '../../src/client/index.js';
-import { Storage } from '../../src/client/storage.js';
+import { Storage } from '../../src/client/storage/storage.js';
 
 interface UserProfile {
   username: string;

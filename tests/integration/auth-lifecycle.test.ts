@@ -8,7 +8,7 @@ import {
   TetherClient,
   type TetherClientOptions,
 } from '../../src/client/index.js';
-import { Storage } from '../../src/client/storage.js';
+import { Storage } from '../../src/client/storage/storage.js';
 import { type RunningServer, startServer } from '../../src/server/index.js';
 import { randomDbName, waitForCondition } from '../helpers.js';
 import {

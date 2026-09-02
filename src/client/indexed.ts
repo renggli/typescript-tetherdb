@@ -1,5 +1,5 @@
 import type { StoredRecord } from '../shared/types.js';
-import type { Storage } from './storage.js';
+import type { Storage } from './storage/storage.js';
 import type { Table } from './table.js';
 
 /**

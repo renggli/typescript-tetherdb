@@ -330,26 +330,7 @@ export class FileStorage extends Storage {
 
             const existing = map.get(change.id);
             if (!options?.skipPermissionCheck) {
-              if (change.op === OperationType.Delete) {
-                if (!table.canDelete(user, existing)) {
-                  throw new TetherServerError(
-                    TetherServerErrorCode.Forbidden,
-                    `User does not have delete access to record "${change.id}" in table "${tableName}"`,
-                  );
-                }
-              } else if (!existing || existing.deleted) {
-                if (!table.canCreate(user)) {
-                  throw new TetherServerError(
-                    TetherServerErrorCode.Forbidden,
-                    `User does not have create access to table "${tableName}"`,
-                  );
-                }
-              } else if (!table.canUpdate(user, existing)) {
-                throw new TetherServerError(
-                  TetherServerErrorCode.Forbidden,
-                  `User does not have update access to record "${change.id}" in table "${tableName}"`,
-                );
-              }
+              table.assertCanApplyChange(user, change, existing);
             }
 
             if (
@@ -405,7 +386,15 @@ export class FileStorage extends Storage {
             }
           }
 
-          // Save records per table
+          if (newChangelogLines.length > 0) {
+            await fs.mkdir(partitionDir, { recursive: true });
+            await fs.appendFile(
+              syncFile,
+              `${newChangelogLines.join('\n')}\n`,
+              'utf-8',
+            );
+          }
+
           for (const [tableName, map] of tableMaps.entries()) {
             const recordsFile = path.join(
               partitionDir,
@@ -417,26 +406,16 @@ export class FileStorage extends Storage {
               JSON.stringify(Array.from(map.values()), null, 2),
             );
           }
-
-          // Append to sync.jsonl
-          if (newChangelogLines.length > 0) {
-            const appendContent = `${newChangelogLines.join('\n')}\n`;
-            await fs.mkdir(partitionDir, { recursive: true });
-            await fs.appendFile(syncFile, appendContent, 'utf-8');
-          }
         });
       }
 
-      if (appliedList.length > 0) {
-        await this.writeGlobalMeta(meta);
+      await this.writeGlobalMeta(meta);
 
-        // Auto-pruning
-        if (meta.currentSeq > 0) {
-          const targetMinSeq = Math.max(
-            1,
-            meta.currentSeq - defaultMaxHistory + 1,
-          );
-          if (targetMinSeq > (meta.minSeq || 1) + 50) {
+      // Compaction
+      if (defaultMaxHistory > 0) {
+        const targetMinSeq = meta.currentSeq - defaultMaxHistory;
+        if (targetMinSeq > meta.minSeq) {
+          if (meta.currentSeq - meta.minSeq > defaultMaxHistory + 50) {
             await this.pruneAllPartitions(targetMinSeq);
             meta.minSeq = targetMinSeq;
             await this.writeGlobalMeta(meta);
@@ -445,21 +424,10 @@ export class FileStorage extends Storage {
       }
 
       const resolver = new UserResolver(this);
-      const publicApplied: ChangeRecord[] = [];
-      for (const applied of appliedList) {
-        const userName = await resolver.resolveUserName(applied.userId, user);
-        publicApplied.push({
-          table: applied.table,
-          id: applied.id,
-          op: applied.op,
-          data: applied.data,
-          version: applied.version,
-          seq: applied.seq,
-          timestamp: applied.timestamp,
-          clientId: applied.clientId,
-          userName,
-        });
-      }
+      const publicApplied = await resolver.resolvePublicChanges(
+        appliedList,
+        user,
+      );
 
       return { applied: publicApplied, newSeq: meta.currentSeq };
     });
@@ -888,15 +856,13 @@ export class FileStorage extends Storage {
 
 // -- Utility Functions --------------------------------------------------------
 
-export { assertNoActiveServerLock };
-
 /**
  * Writes data atomically to a file using a unique temp file and atomic rename.
  *
  * @param filePath - The destination file path.
  * @param content - File content to write.
  */
-export async function writeFileAtomic(
+async function writeFileAtomic(
   filePath: string,
   content: string,
 ): Promise<void> {

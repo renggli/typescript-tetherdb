@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Storage } from '../../../src/client/storage.js';
+import { Storage } from '../../../src/client/storage/storage.js';
 import { type ChangeRecord, OperationType } from '../../../src/shared/types.js';
 
 describe('Storage', () => {

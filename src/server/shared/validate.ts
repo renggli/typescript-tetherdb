@@ -20,7 +20,7 @@ export const MIN_PASSWORD_LENGTH = 4;
 export const MAX_PASSWORD_LENGTH = 512;
 
 /** Maximum allowable future timestamp drift in milliseconds (5 minutes). */
-export const MAX_FUTURE_TIMESTAMP_DRIFT_MS = 5 * 60 * 1000;
+const MAX_FUTURE_TIMESTAMP_DRIFT_MS = 5 * 60 * 1000;
 
 /**
  * Validates a change timestamp, ensuring it is a valid finite epoch number

@@ -6,7 +6,7 @@ import {
   TetherClient,
   type TetherClientOptions,
 } from '../../src/client/index.js';
-import type { Storage } from '../../src/client/storage.js';
+import type { Storage } from '../../src/client/storage/storage.js';
 import { TetherServer } from '../../src/server/server.js';
 import { delay, randomDbName, waitForCondition } from '../helpers.js';
 import {

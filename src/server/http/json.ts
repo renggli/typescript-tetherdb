@@ -3,7 +3,7 @@ import { TetherServerError, TetherServerErrorCode } from '../errors.js';
 import { type CorsOptions, getCorsHeaders } from './cors.js';
 
 /** Maximum payload size allowed for standard JSON requests (1MB). */
-export const DEFAULT_MAX_PAYLOAD_BYTES = 1024 * 1024;
+const DEFAULT_MAX_PAYLOAD_BYTES = 1024 * 1024;
 
 /**
  * Sends a JSON HTTP response with appropriate Content-Type and CORS headers.

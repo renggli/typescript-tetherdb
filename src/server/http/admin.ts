@@ -24,7 +24,7 @@ export interface AdminRouteContext {
  * @param expectedSecret - Configured administrative secret token.
  * @throws TetherServerError if token is invalid or missing.
  */
-export function assertAdminAuth(
+function assertAdminAuth(
   req: http.IncomingMessage,
   expectedSecret: string,
 ): void {

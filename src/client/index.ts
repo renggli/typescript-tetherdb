@@ -33,7 +33,7 @@ export {
 export {
   SyncStatus,
   type WebSocketConstructor,
-} from './sync.js';
+} from './sync/types.js';
 export {
   Table,
   type TableChangeEvent,

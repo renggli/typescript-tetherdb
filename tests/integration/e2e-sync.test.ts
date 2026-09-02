@@ -4,7 +4,7 @@ import {
   TetherClient,
   type TetherClientOptions,
 } from '../../src/client/client.js';
-import { SyncStatus } from '../../src/client/sync.js';
+import { SyncStatus } from '../../src/client/sync/types.js';
 
 import { TetherServer } from '../../src/server/server.js';
 import { OperationType } from '../../src/shared/types.js';

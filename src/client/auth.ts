@@ -1,8 +1,8 @@
 import { TetherClientError, TetherClientErrorCode } from './errors.js';
 import { EventRegistry } from './shared/event.js';
+import type { Storage } from './storage/storage.js';
 import { TETHER_PREFIX } from './storage/utils.js';
-import type { Storage } from './storage.js';
-import type { Sync } from './sync.js';
+import type { Sync } from './sync/sync.js';
 
 /**
  * Data reconciliation and persistence strategy for auth and session operations.

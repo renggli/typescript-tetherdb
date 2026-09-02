@@ -3,12 +3,12 @@ import {
   TetherClientError,
   TetherClientErrorCode,
 } from '../../../src/client/errors.js';
-import { Storage } from '../../../src/client/storage.js';
+import { Storage } from '../../../src/client/storage/storage.js';
+import { Sync } from '../../../src/client/sync/sync.js';
 import {
-  Sync,
   SyncStatus,
   type WebSocketConstructor,
-} from '../../../src/client/sync.js';
+} from '../../../src/client/sync/types.js';
 import {
   type ClientMessage,
   ClientMessageType,

@@ -10,7 +10,7 @@ import {
 } from '../../shared/types.js';
 import { TetherClientError, TetherClientErrorCode } from '../errors.js';
 import { EventRegistry } from '../shared/event.js';
-import type { Storage } from '../storage.js';
+import type { Storage } from '../storage/storage.js';
 import type { TableChangeEvent } from '../table.js';
 import { ConnectionManager } from './connection.js';
 import { type SyncOptions, SyncStatus } from './types.js';

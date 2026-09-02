@@ -8,12 +8,7 @@ import {
 import { readServerLock } from '../server/shared/lock.js';
 import { createBackend, StorageType } from './backend.js';
 
-export {
-  AdminClient,
-  type AdminTarget,
-  LocalAdminTarget,
-  type ResolvedAdminContext,
-};
+export { type AdminTarget, LocalAdminTarget, type ResolvedAdminContext };
 
 /**
  * Resolves the appropriate administration target for CLI operations.

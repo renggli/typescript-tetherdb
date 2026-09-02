@@ -284,21 +284,17 @@ export class Sync {
       }
     }
 
-    if (user) {
-      let userCount = 0;
-      for (const c of this.clients) {
-        if (c.user?.userId === user.userId && c.webSocket !== webSocket) {
-          userCount++;
-        }
-      }
-      if (userCount >= this.maxConcurrentConnectionsPerUser) {
-        this.send(webSocket, {
-          type: ServerMessageType.AuthError,
-          message: 'Maximum concurrent connections exceeded for this user',
-        });
-        webSocket.close();
-        return;
-      }
+    if (
+      user &&
+      this.countUserConnections(user.userId, webSocket) >=
+        this.maxConcurrentConnectionsPerUser
+    ) {
+      this.send(webSocket, {
+        type: ServerMessageType.AuthError,
+        message: 'Maximum concurrent connections exceeded for this user',
+      });
+      webSocket.close();
+      return;
     }
 
     this.rateLimiter?.reset(ip);
@@ -500,21 +496,17 @@ export class Sync {
       return;
     }
 
-    if (user) {
-      let userCount = 0;
-      for (const c of this.clients) {
-        if (c.user?.userId === user.userId && c.webSocket !== webSocket) {
-          userCount++;
-        }
-      }
-      if (userCount >= this.maxConcurrentConnectionsPerUser) {
-        this.send(webSocket, {
-          type: ServerMessageType.AuthError,
-          requestId: msg.requestId,
-          message: 'Maximum concurrent connections exceeded for this user',
-        });
-        return;
-      }
+    if (
+      user &&
+      this.countUserConnections(user.userId, webSocket) >=
+        this.maxConcurrentConnectionsPerUser
+    ) {
+      this.send(webSocket, {
+        type: ServerMessageType.AuthError,
+        requestId: msg.requestId,
+        message: 'Maximum concurrent connections exceeded for this user',
+      });
+      return;
     }
 
     await this.completeAuthentication(webSocket, user, msg.requestId);
@@ -779,6 +771,16 @@ export class Sync {
     });
 
     await this.performSync(client, 0, client.tables);
+  }
+
+  private countUserConnections(userId: string, excludeWs?: WebSocket): number {
+    let count = 0;
+    for (const c of this.clients) {
+      if (c.user?.userId === userId && c.webSocket !== excludeWs) {
+        count++;
+      }
+    }
+    return count;
   }
 }
 

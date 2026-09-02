@@ -9,8 +9,8 @@ import {
   TetherClientError,
   TetherClientErrorCode,
 } from '../../src/client/errors.js';
-import { Storage } from '../../src/client/storage.js';
-import type { Sync } from '../../src/client/sync.js';
+import { Storage } from '../../src/client/storage/storage.js';
+import type { Sync } from '../../src/client/sync/sync.js';
 
 describe('Auth', () => {
   let storage: Storage;

@@ -357,26 +357,7 @@ export class MemoryStorage extends Storage {
 
       const existing = targetMap.get(recordId);
       if (!options?.skipPermissionCheck) {
-        if (change.op === OperationType.Delete) {
-          if (!table.canDelete(user, existing)) {
-            throw new TetherServerError(
-              TetherServerErrorCode.Forbidden,
-              `User does not have delete access to record "${change.id}" in table "${tableName}"`,
-            );
-          }
-        } else if (!existing || existing.deleted) {
-          if (!table.canCreate(user)) {
-            throw new TetherServerError(
-              TetherServerErrorCode.Forbidden,
-              `User does not have create access to table "${tableName}"`,
-            );
-          }
-        } else if (!table.canUpdate(user, existing)) {
-          throw new TetherServerError(
-            TetherServerErrorCode.Forbidden,
-            `User does not have update access to record "${change.id}" in table "${tableName}"`,
-          );
-        }
+        table.assertCanApplyChange(user, change, existing);
       }
 
       if (
@@ -483,21 +464,10 @@ export class MemoryStorage extends Storage {
     }
 
     const resolver = new UserResolver(this);
-    const publicApplied: ChangeRecord[] = [];
-    for (const applied of stagedApplied) {
-      const userName = await resolver.resolveUserName(applied.userId, user);
-      publicApplied.push({
-        table: applied.table,
-        id: applied.id,
-        op: applied.op,
-        data: applied.data,
-        version: applied.version,
-        seq: applied.seq,
-        timestamp: applied.timestamp,
-        clientId: applied.clientId,
-        userName,
-      });
-    }
+    const publicApplied = await resolver.resolvePublicChanges(
+      stagedApplied,
+      user,
+    );
 
     return { applied: publicApplied, newSeq: this.globalSeq };
   }

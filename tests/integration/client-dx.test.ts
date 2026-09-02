@@ -7,8 +7,8 @@ import {
   SyncStatus,
   TetherClient,
 } from '../../src/client/index.js';
-import { Storage } from '../../src/client/storage.js';
-import { Sync } from '../../src/client/sync.js';
+import { Storage } from '../../src/client/storage/storage.js';
+import { Sync } from '../../src/client/sync/sync.js';
 import { TetherServer } from '../../src/server/server.js';
 import { waitForCondition } from '../helpers.js';
 import {

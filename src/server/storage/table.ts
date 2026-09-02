@@ -9,6 +9,7 @@ import {
   type TableRow,
   type TableSettings,
 } from '../../shared/types.js';
+import { TetherServerError, TetherServerErrorCode } from '../errors.js';
 import {
   isPermissionAllowed,
   sanitizeStoredRecord,
@@ -17,8 +18,6 @@ import { UserResolver } from '../security/resolver.js';
 import type { InternalStoredRecord } from '../security/types.js';
 import type { Storage } from './storage.js';
 import type { User } from './user.js';
-
-export { DEFAULT_TABLE_PERMISSIONS };
 
 /**
  * Options for applying mutation changes to storage.
@@ -149,6 +148,42 @@ export class Table {
           existing.userId,
         )
       : this.canAccess(this.settings.permissions.delete, user);
+  }
+
+  /**
+   * Asserts that a user has permission to apply the specified change to an existing (or new) record.
+   *
+   * @param user - Target user handle.
+   * @param change - Change record being applied.
+   * @param existing - Existing stored record, if any.
+   * @throws TetherServerError with Forbidden code if unauthorized.
+   */
+  assertCanApplyChange(
+    user: User | undefined,
+    change: { op: OperationType; id: string; table?: string },
+    existing?: InternalStoredRecord,
+  ): void {
+    const tableName = change.table ?? this.name;
+    if (change.op === OperationType.Delete) {
+      if (!this.canDelete(user, existing)) {
+        throw new TetherServerError(
+          TetherServerErrorCode.Forbidden,
+          `User does not have delete access to record "${change.id}" in table "${tableName}"`,
+        );
+      }
+    } else if (!existing || existing.deleted) {
+      if (!this.canCreate(user)) {
+        throw new TetherServerError(
+          TetherServerErrorCode.Forbidden,
+          `User does not have create access to table "${tableName}"`,
+        );
+      }
+    } else if (!this.canUpdate(user, existing)) {
+      throw new TetherServerError(
+        TetherServerErrorCode.Forbidden,
+        `User does not have update access to record "${change.id}" in table "${tableName}"`,
+      );
+    }
   }
 
   /**

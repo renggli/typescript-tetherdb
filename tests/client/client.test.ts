@@ -6,8 +6,8 @@ import {
   TetherClient,
   TetherClientError,
   TetherClientErrorCode,
+  type WebSocketConstructor,
 } from '../../src/client/index.js';
-import type { WebSocketConstructor } from '../../src/client/sync.js';
 import { OperationType, ServerMessageType } from '../../src/shared/types.js';
 import { waitForCondition } from '../helpers.js';
 

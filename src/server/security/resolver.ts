@@ -1,5 +1,7 @@
+import type { ChangeRecord } from '../../shared/types.js';
 import type { Storage } from '../storage/storage.js';
 import type { User } from '../storage/user.js';
+import type { InternalChangeRecord } from './types.js';
 
 /**
  * In-memory caching resolver mapping user IDs to usernames during batch operations.
@@ -53,5 +55,34 @@ export class UserResolver {
     }
 
     return undefined;
+  }
+
+  /**
+   * Converts internal change records into public change records, resolving author usernames.
+   *
+   * @param changes - Array of internal change records.
+   * @param fallbackUser - Optional authenticated user context.
+   * @returns Array of public ChangeRecord items.
+   */
+  async resolvePublicChanges(
+    changes: InternalChangeRecord[],
+    fallbackUser?: User,
+  ): Promise<ChangeRecord[]> {
+    const publicApplied: ChangeRecord[] = [];
+    for (const applied of changes) {
+      const userName = await this.resolveUserName(applied.userId, fallbackUser);
+      publicApplied.push({
+        table: applied.table,
+        id: applied.id,
+        op: applied.op,
+        data: applied.data,
+        version: applied.version,
+        seq: applied.seq,
+        timestamp: applied.timestamp,
+        clientId: applied.clientId,
+        userName,
+      });
+    }
+    return publicApplied;
   }
 }

@@ -295,29 +295,13 @@ export class SqliteStorage extends Storage {
     const safeId = validateRecordId(id);
     const dbHandle = this.getTablesDb();
 
-    const row = dbHandle.stmtGetRecord.get(tableName, partition, safeId) as
-      | {
-          id: string;
-          version: number;
-          timestamp: number;
-          client_id: string | null;
-          deleted: number;
-          data: string | null;
-          user_id: string | null;
-        }
-      | undefined;
+    const row = dbHandle.stmtGetRecord.get(
+      tableName,
+      partition,
+      safeId,
+    ) as unknown as SqliteRecordRow | undefined;
 
-    if (!row) return undefined;
-
-    return {
-      id: row.id,
-      version: row.version,
-      timestamp: row.timestamp,
-      clientId: row.client_id ?? undefined,
-      deleted: Boolean(row.deleted),
-      data: parseJsonData(row.data),
-      userId: row.user_id ?? undefined,
-    };
+    return row ? rowToInternalStoredRecord(row, safeId) : undefined;
   }
 
   async getRawRecords(
@@ -328,27 +312,9 @@ export class SqliteStorage extends Storage {
     const rows = dbHandle.stmtGetSnapshotByTable.all(
       tableName,
       partition,
-    ) as Array<{
-      table_name: string;
-      partition: string;
-      id: string;
-      version: number;
-      timestamp: number;
-      client_id: string | null;
-      deleted: number;
-      data: string | null;
-      user_id: string | null;
-    }>;
+    ) as unknown as SqliteRecordRow[];
 
-    return rows.map((row) => ({
-      id: row.id,
-      version: row.version,
-      timestamp: row.timestamp,
-      clientId: row.client_id ?? undefined,
-      deleted: Boolean(row.deleted),
-      data: parseJsonData(row.data),
-      userId: row.user_id ?? undefined,
-    }));
+    return rows.map((row) => rowToInternalStoredRecord(row));
   }
 
   async getRawChangesSince(
@@ -463,50 +429,14 @@ export class SqliteStorage extends Storage {
           tableName,
           effectiveUserId,
           recordId,
-        ) as
-          | {
-              version: number;
-              timestamp: number;
-              client_id: string;
-              deleted: number;
-              data?: string | null;
-              user_id?: string | null;
-            }
-          | undefined;
+        ) as unknown as SqliteRecordRow | undefined;
 
         const existing: InternalStoredRecord | undefined = existingRow
-          ? {
-              id: recordId,
-              version: existingRow.version,
-              timestamp: existingRow.timestamp,
-              clientId: existingRow.client_id,
-              deleted: Boolean(existingRow.deleted),
-              data: parseJsonData(existingRow.data ?? null),
-              userId: existingRow.user_id ?? undefined,
-            }
+          ? rowToInternalStoredRecord(existingRow, recordId)
           : undefined;
 
         if (!options?.skipPermissionCheck) {
-          if (change.op === OperationType.Delete) {
-            if (!table.canDelete(user, existing)) {
-              throw new TetherServerError(
-                TetherServerErrorCode.Forbidden,
-                `User does not have delete access to record "${change.id}" in table "${tableName}"`,
-              );
-            }
-          } else if (!existing || existing.deleted) {
-            if (!table.canCreate(user)) {
-              throw new TetherServerError(
-                TetherServerErrorCode.Forbidden,
-                `User does not have create access to table "${tableName}"`,
-              );
-            }
-          } else if (!table.canUpdate(user, existing)) {
-            throw new TetherServerError(
-              TetherServerErrorCode.Forbidden,
-              `User does not have update access to record "${change.id}" in table "${tableName}"`,
-            );
-          }
+          table.assertCanApplyChange(user, change, existing);
         }
 
         if (
@@ -632,21 +562,10 @@ export class SqliteStorage extends Storage {
     }
 
     const resolver = new UserResolver(this);
-    const publicApplied: ChangeRecord[] = [];
-    for (const applied of appliedList) {
-      const userName = await resolver.resolveUserName(applied.userId, user);
-      publicApplied.push({
-        table: applied.table,
-        id: applied.id,
-        op: applied.op,
-        data: applied.data,
-        version: applied.version,
-        seq: applied.seq,
-        timestamp: applied.timestamp,
-        clientId: applied.clientId,
-        userName,
-      });
-    }
+    const publicApplied = await resolver.resolvePublicChanges(
+      appliedList,
+      user,
+    );
 
     return { applied: publicApplied, newSeq };
   }
@@ -1002,6 +921,31 @@ function parseJsonData(raw: string | null): unknown {
   } catch {
     return raw;
   }
+}
+
+interface SqliteRecordRow {
+  id?: string;
+  version: number;
+  timestamp: number;
+  client_id?: string | null;
+  deleted: number | boolean;
+  data?: string | null;
+  user_id?: string | null;
+}
+
+function rowToInternalStoredRecord(
+  row: SqliteRecordRow,
+  defaultId?: string,
+): InternalStoredRecord {
+  return {
+    id: row.id ?? defaultId ?? '',
+    version: row.version,
+    timestamp: row.timestamp,
+    clientId: row.client_id ?? undefined,
+    deleted: Boolean(row.deleted),
+    data: parseJsonData(row.data ?? null),
+    userId: row.user_id ?? undefined,
+  };
 }
 
 function initUsersSchema(db: DatabaseSync): void {

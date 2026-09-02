@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 /** Default token expiration window in seconds (7 days). */
-export const DEFAULT_TOKEN_EXPIRES_IN = 7 * 24 * 60 * 60;
+const DEFAULT_TOKEN_EXPIRES_IN = 7 * 24 * 60 * 60;
 
 /**
  * Loads a persistent HMAC signing secret from `<baseDir>/.secret`, or generates and saves one
