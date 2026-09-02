@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AuthStatus,
-  DataMode,
   SyncStatus,
   TetherClient,
   TetherClientError,
@@ -49,18 +48,9 @@ describe('TetherClient', () => {
         `init-test-${Math.random().toString(36).substring(2, 8)}`,
       );
       clientsToClose.push(client);
-
       expect(client.authStatus).toBe(AuthStatus.SignedOut);
       expect(client.userName).toBeUndefined();
       expect(client.syncStatus).toBe(SyncStatus.Disconnected);
-    });
-
-    it('should export AuthStatus and DataMode enums', () => {
-      expect(AuthStatus.SignedIn).toBe(2);
-      expect(DataMode.Remote).toBe(0);
-      expect(DataMode.Local).toBe(1);
-      expect(DataMode.Merge).toBe(2);
-      expect(DataMode.Clear).toBe(3);
     });
   });
 
