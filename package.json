@@ -1,6 +1,6 @@
 {
   "name": "tetherdb",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Offline-first client-side IndexedDB with real-time two-way WebSocket sync and per-user server storage",
   "author": "Lukas Renggli <renggli@gmail.com>",
   "license": "MIT",
