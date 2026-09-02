@@ -104,11 +104,7 @@ export class Table {
    * @param user - Target user handle.
    */
   canCreate(user?: User): boolean {
-    const perm = this.settings.permissions.create;
-    if (perm === Permission.Owner) {
-      return user !== undefined;
-    }
-    return isPermissionAllowed(perm, user, undefined);
+    return this.canAccess(this.settings.permissions.create, user);
   }
 
   /**
@@ -118,18 +114,9 @@ export class Table {
    * @param record - Optional specific record to check.
    */
   canRead(user?: User, record?: InternalStoredRecord): boolean {
-    const perm = this.settings.permissions.read;
-    if (perm === Permission.Owner) {
-      if (!record) {
-        return user !== undefined;
-      }
-      return (
-        user !== undefined &&
-        record.userId !== undefined &&
-        record.userId === user.userId
-      );
-    }
-    return isPermissionAllowed(perm, user, record?.userId);
+    return record
+      ? isPermissionAllowed(this.settings.permissions.read, user, record.userId)
+      : this.canAccess(this.settings.permissions.read, user);
   }
 
   /**
@@ -139,18 +126,13 @@ export class Table {
    * @param existing - Existing record to update.
    */
   canUpdate(user?: User, existing?: InternalStoredRecord): boolean {
-    const perm = this.settings.permissions.update;
-    if (perm === Permission.Owner) {
-      if (!existing) {
-        return user !== undefined;
-      }
-      return (
-        user !== undefined &&
-        existing.userId !== undefined &&
-        existing.userId === user.userId
-      );
-    }
-    return isPermissionAllowed(perm, user, existing?.userId);
+    return existing
+      ? isPermissionAllowed(
+          this.settings.permissions.update,
+          user,
+          existing.userId,
+        )
+      : this.canAccess(this.settings.permissions.update, user);
   }
 
   /**
@@ -160,18 +142,13 @@ export class Table {
    * @param existing - Existing record to delete.
    */
   canDelete(user?: User, existing?: InternalStoredRecord): boolean {
-    const perm = this.settings.permissions.delete;
-    if (perm === Permission.Owner) {
-      if (!existing) {
-        return user !== undefined;
-      }
-      return (
-        user !== undefined &&
-        existing.userId !== undefined &&
-        existing.userId === user.userId
-      );
-    }
-    return isPermissionAllowed(perm, user, existing?.userId);
+    return existing
+      ? isPermissionAllowed(
+          this.settings.permissions.delete,
+          user,
+          existing.userId,
+        )
+      : this.canAccess(this.settings.permissions.delete, user);
   }
 
   /**
@@ -292,5 +269,14 @@ export class Table {
    */
   async delete(): Promise<boolean> {
     return this.storage.deleteTable(this.name);
+  }
+
+  // -- Private Helpers --------------------------------------------------------
+
+  private canAccess(permission: Permission, user?: User): boolean {
+    return (
+      permission === Permission.Everybody ||
+      (user !== undefined && permission !== Permission.Nobody)
+    );
   }
 }
