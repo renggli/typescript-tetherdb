@@ -104,11 +104,11 @@ export class Table {
    * @param user - Target user handle.
    */
   canCreate(user?: User): boolean {
-    return isPermissionAllowed(
-      this.settings.permissions.create,
-      user,
-      undefined,
-    );
+    const perm = this.settings.permissions.create;
+    if (perm === Permission.Owner) {
+      return user !== undefined;
+    }
+    return isPermissionAllowed(perm, user, undefined);
   }
 
   /**
@@ -119,8 +119,17 @@ export class Table {
    */
   canRead(user?: User, record?: InternalStoredRecord): boolean {
     const perm = this.settings.permissions.read;
-    const userId = record?.userId;
-    return isPermissionAllowed(perm, user, userId);
+    if (perm === Permission.Owner) {
+      if (!record) {
+        return user !== undefined;
+      }
+      return (
+        user !== undefined &&
+        record.userId !== undefined &&
+        record.userId === user.userId
+      );
+    }
+    return isPermissionAllowed(perm, user, record?.userId);
   }
 
   /**
@@ -132,9 +141,12 @@ export class Table {
   canUpdate(user?: User, existing?: InternalStoredRecord): boolean {
     const perm = this.settings.permissions.update;
     if (perm === Permission.Owner) {
+      if (!existing) {
+        return user !== undefined;
+      }
       return (
         user !== undefined &&
-        existing?.userId !== undefined &&
+        existing.userId !== undefined &&
         existing.userId === user.userId
       );
     }
@@ -150,9 +162,12 @@ export class Table {
   canDelete(user?: User, existing?: InternalStoredRecord): boolean {
     const perm = this.settings.permissions.delete;
     if (perm === Permission.Owner) {
+      if (!existing) {
+        return user !== undefined;
+      }
       return (
         user !== undefined &&
-        existing?.userId !== undefined &&
+        existing.userId !== undefined &&
         existing.userId === user.userId
       );
     }

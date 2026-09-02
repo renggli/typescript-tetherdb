@@ -4,9 +4,9 @@ import {
   TetherServerError,
   TetherServerErrorCode,
 } from '../../../server/errors.js';
+import type { InternalStoredRecord } from '../../../server/security/types.js';
 import { getUserBucket } from '../../../server/shared/validate.js';
 import { StorageType } from '../../../server/storage/storage.js';
-import type { StoredRecord } from '../../../shared/types.js';
 import type { MigrationResult } from '../migrate.js';
 import { backupFile, filterTargetApps } from './helpers.js';
 
@@ -137,7 +137,13 @@ export async function migrateFileStorage(
               'utf-8',
             );
             try {
-              const records = JSON.parse(rawContent) as StoredRecord[];
+              const rawRecords = JSON.parse(
+                rawContent,
+              ) as InternalStoredRecord[];
+              const records = rawRecords.map((r) => ({
+                ...r,
+                userId: r.userId ?? userId,
+              }));
               migratedRecords += records.length;
               const destTableDir = path.join(userDestDir, tableName);
               await fs.promises.mkdir(destTableDir, { recursive: true });
