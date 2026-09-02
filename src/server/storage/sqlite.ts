@@ -534,7 +534,12 @@ export class SqliteStorage extends Storage {
             change.op === OperationType.Delete
               ? null
               : JSON.stringify(change.data ?? null);
-          const userId = existing?.userId ?? user?.userId ?? null;
+          const userId =
+            change.op === OperationType.Delete
+              ? (existing?.userId ?? null)
+              : existing && !existing.deleted
+                ? (existing.userId ?? null)
+                : (user?.userId ?? null);
 
           if (existingRow) {
             dbHandle.stmtUpdateRecord.run(

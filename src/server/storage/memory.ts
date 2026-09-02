@@ -369,7 +369,12 @@ export class MemoryStorage extends Storage {
         const assignedSeq = this.globalSeq;
         const isDeleted = change.op === OperationType.Delete;
         const nextVersion = (existing?.version ?? 0) + 1;
-        const userId = existing?.userId ?? user?.userId;
+        const userId =
+          change.op === OperationType.Delete
+            ? existing?.userId
+            : existing && !existing.deleted
+              ? existing.userId
+              : user?.userId;
 
         const updatedRecord: InternalStoredRecord = {
           id: change.id,
