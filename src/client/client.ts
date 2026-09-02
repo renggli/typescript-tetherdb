@@ -85,7 +85,7 @@ export class TetherClient {
     });
 
     // Handle cross-tab messages from sibling tabs.
-    this.tabChannel.onMessage((msg) => {
+    this.tabChannel.onMessage.register((msg) => {
       if (msg.type === 'change') {
         this.storage.table(msg.table).notifyRemoteChanges(msg.events);
       } else if (msg.type === 'auth') {

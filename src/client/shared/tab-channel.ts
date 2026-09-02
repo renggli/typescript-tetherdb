@@ -1,5 +1,6 @@
 import { TETHER_PREFIX } from '../storage/utils.js';
 import type { TableChangeEvent } from '../table.js';
+import { EventRegistry } from './event.js';
 
 /**
  * Cross-tab message broadcast over a named BroadcastChannel.
@@ -22,9 +23,6 @@ export type TabMessage =
       events: TableChangeEvent[];
     };
 
-/** Callback invoked when a cross-tab message is received. */
-export type TabMessageHandler = (msg: TabMessage) => void;
-
 /**
  * Thin wrapper around `BroadcastChannel` that scopes cross-tab messages to a
  * specific TetherDB database name. Sibling tabs on the same database name
@@ -34,8 +32,10 @@ export type TabMessageHandler = (msg: TabMessage) => void;
  * (e.g. Node.js test environments or older browsers).
  */
 export class TabChannel {
+  /** Reactive event registry triggered whenever a message is received from a sibling tab. */
+  readonly onMessage = new EventRegistry<TabMessage>();
+
   private channel: BroadcastChannel | null = null;
-  private readonly handlers: Set<TabMessageHandler> = new Set();
 
   /**
    * Creates a new TabChannel scoped to the given database name.
@@ -46,14 +46,7 @@ export class TabChannel {
     if (typeof BroadcastChannel !== 'undefined') {
       this.channel = new BroadcastChannel(`${TETHER_PREFIX}${databaseName}`);
       this.channel.onmessage = (event: MessageEvent<TabMessage>) => {
-        const msg = event.data;
-        for (const handler of this.handlers) {
-          try {
-            handler(msg);
-          } catch (err) {
-            console.error('Unhandled TabChannel message error:', err);
-          }
-        }
+        this.onMessage.publish(event.data);
       };
     }
   }
@@ -75,24 +68,9 @@ export class TabChannel {
   }
 
   /**
-   * Registers a handler to be called whenever a cross-tab message is received.
-   * Returns an unsubscribe function.
-   *
-   * @param handler - Callback receiving the incoming tab message.
-   * @returns Unsubscribe function that removes the handler.
-   */
-  onMessage(handler: TabMessageHandler): () => void {
-    this.handlers.add(handler);
-    return () => {
-      this.handlers.delete(handler);
-    };
-  }
-
-  /**
-   * Closes the underlying BroadcastChannel and removes all message handlers.
+   * Closes the underlying BroadcastChannel.
    */
   destroy(): void {
-    this.handlers.clear();
     if (this.channel) {
       this.channel.onmessage = null;
       this.channel.close();

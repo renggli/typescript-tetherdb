@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { TabChannel } from '../../../src/client/shared/tab-channel.js';
 import { TETHER_PREFIX } from '../../../src/client/storage/utils.js';
 
@@ -16,7 +16,7 @@ describe('TabChannel', () => {
 
     it('registers and invokes message handlers for table changes', () => {
       const received: unknown[] = [];
-      channel.onMessage((msg) => received.push(msg));
+      channel.onMessage.register((msg) => received.push(msg));
 
       const bc = new BroadcastChannel(`${TETHER_PREFIX}test-db`);
       bc.postMessage({
@@ -37,7 +37,7 @@ describe('TabChannel', () => {
 
     it('registers and invokes message handlers for auth sign-in events', () => {
       const received: unknown[] = [];
-      channel.onMessage((msg) => received.push(msg));
+      channel.onMessage.register((msg) => received.push(msg));
 
       const bc = new BroadcastChannel(`${TETHER_PREFIX}test-db`);
       bc.postMessage({
@@ -64,7 +64,7 @@ describe('TabChannel', () => {
 
     it('registers and invokes message handlers for auth sign-out events', () => {
       const received: unknown[] = [];
-      channel.onMessage((msg) => received.push(msg));
+      channel.onMessage.register((msg) => received.push(msg));
 
       const bc = new BroadcastChannel(`${TETHER_PREFIX}test-db`);
       bc.postMessage({
@@ -87,7 +87,7 @@ describe('TabChannel', () => {
 
     it('unsubscribes a handler via the returned function', () => {
       const received: unknown[] = [];
-      const unsub = channel.onMessage((msg) => received.push(msg));
+      const unsub = channel.onMessage.register((msg) => received.push(msg));
       unsub();
 
       const bc = new BroadcastChannel(`${TETHER_PREFIX}test-db`);
@@ -121,7 +121,7 @@ describe('TabChannel', () => {
     it('broadcasts events to sibling channels on the same database name', () => {
       const receiver = new TabChannel('test-db');
       const received: unknown[] = [];
-      receiver.onMessage((msg) => received.push(msg));
+      receiver.onMessage.register((msg) => received.push(msg));
 
       channel.broadcast({
         type: 'change',
@@ -142,7 +142,7 @@ describe('TabChannel', () => {
     it('does not receive messages from a channel with a different database name', () => {
       const other = new TabChannel('other-db');
       const received: unknown[] = [];
-      channel.onMessage((msg) => received.push(msg));
+      channel.onMessage.register((msg) => received.push(msg));
 
       other.broadcast({
         type: 'change',
@@ -161,7 +161,7 @@ describe('TabChannel', () => {
 
     it('stops receiving messages after destroy()', () => {
       const received: unknown[] = [];
-      channel.onMessage((msg) => received.push(msg));
+      channel.onMessage.register((msg) => received.push(msg));
       channel.destroy();
 
       const bc = new BroadcastChannel(`${TETHER_PREFIX}test-db`);
@@ -214,12 +214,6 @@ describe('TabChannel', () => {
           events: [{ id: '1', op: 'put' }],
         });
       }).not.toThrow();
-    });
-
-    it('onMessage returns an unsubscribe function and does not throw', () => {
-      const unsub = channel.onMessage(vi.fn());
-      expect(typeof unsub).toBe('function');
-      expect(() => unsub()).not.toThrow();
     });
 
     it('destroy does not throw', () => {

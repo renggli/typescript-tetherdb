@@ -32,7 +32,8 @@ export class EventRegistry<T = void> {
    *
    * @param args - The event data payload (optional if payload type is void).
    */
-  publish(...args: T extends void ? [event?: T] : [event: T]): void {
+  // biome-ignore lint/suspicious/noConfusingVoidType: void is used for parameterless event registries
+  publish(...args: [T] extends [void] ? [event?: T] : [event: T]): void {
     const event = args[0] as T;
     for (const listener of this.listeners) {
       try {
