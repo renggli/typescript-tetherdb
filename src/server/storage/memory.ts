@@ -376,13 +376,18 @@ export class MemoryStorage extends Storage {
               ? existing.userId
               : user?.userId;
 
+        const clonedData =
+          isDeleted || change.data === undefined
+            ? null
+            : structuredClone(change.data);
+
         const updatedRecord: InternalStoredRecord = {
           id: change.id,
           version: nextVersion,
           timestamp: change.timestamp,
           clientId: change.clientId,
           deleted: isDeleted,
-          data: isDeleted ? null : (change.data ?? null),
+          data: clonedData,
           userId,
         };
 
@@ -394,7 +399,10 @@ export class MemoryStorage extends Storage {
           version: nextVersion,
           timestamp: change.timestamp,
           clientId: change.clientId,
-          data: isDeleted ? undefined : change.data,
+          data:
+            isDeleted || change.data === undefined
+              ? undefined
+              : structuredClone(change.data),
           userId,
         };
 
