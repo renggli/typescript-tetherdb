@@ -1,5 +1,6 @@
 import { TetherClientError, TetherClientErrorCode } from './errors.js';
 import { EventRegistry } from './shared/event.js';
+import { TETHER_PREFIX } from './storage/utils.js';
 import type { Storage } from './storage.js';
 import type { Sync } from './sync.js';
 
@@ -39,7 +40,7 @@ export interface RegisterOptions {
   userName: string;
   /** Account password (required). */
   password: string;
-  /** Persist session in IndexedDB for automatic login across sessions (default: false). */
+  /** Persist session in IndexedDB and localStorage for automatic login across sessions (default: false). */
   remember?: boolean;
   /** Local data handling mode (defaults to DataMode.Local when signed out, or DataMode.Clear when already signed in). */
   dataMode?: DataMode;
@@ -78,7 +79,7 @@ export interface AuthResult {
 }
 
 /**
- * Internal persisted session representation in IndexedDB metadata.
+ * Internal persisted session representation in IndexedDB metadata and localStorage.
  */
 export interface StoredAuthSession {
   userName: string;
@@ -93,8 +94,8 @@ export class Auth {
   /** Reactive event registry triggered whenever the authentication status changes. */
   readonly onStatusChange = new EventRegistry<AuthStatus>();
 
-  private storage: Storage;
-  private sync: Sync;
+  private readonly storage: Storage;
+  private readonly sync: Sync;
   private currentAuthStatus: AuthStatus = AuthStatus.SignedOut;
   private currentUserName?: string;
   private currentToken?: string;
@@ -134,10 +135,18 @@ export class Auth {
   }
 
   /**
-   * Restores any remembered session from IndexedDB metadata on startup.
+   * Restores any remembered session from localStorage or IndexedDB metadata on startup.
    */
   async restoreSession(): Promise<void> {
     try {
+      const localSession = getLocalStorageSession(this.storage.name);
+      if (localSession?.token && localSession.userName) {
+        this.currentUserName = localSession.userName;
+        this.currentToken = localSession.token;
+        this.setStatus(AuthStatus.SignedIn);
+        return;
+      }
+
       const session = await this.storage.getMeta<StoredAuthSession>('auth');
       if (session?.token && session.userName) {
         this.currentUserName = session.userName;
@@ -146,6 +155,26 @@ export class Auth {
       }
     } catch {
       // Ignored during initial background boot
+    }
+  }
+
+  /**
+   * Applies an authentication transition triggered remotely from a sibling tab.
+   * Updates in-memory state without initiating new network requests.
+   *
+   * @param status - The target AuthStatus.
+   * @param userName - Authenticated username (when status is SignedIn).
+   * @param token - Session token (when status is SignedIn).
+   */
+  applyRemoteAuth(status: AuthStatus, userName?: string, token?: string): void {
+    if (status === AuthStatus.SignedIn && token && userName) {
+      this.currentUserName = userName;
+      this.currentToken = token;
+      this.setStatus(AuthStatus.SignedIn);
+    } else if (status === AuthStatus.SignedOut) {
+      this.currentUserName = undefined;
+      this.currentToken = undefined;
+      this.setStatus(AuthStatus.SignedOut);
     }
   }
 
@@ -219,10 +248,16 @@ export class Auth {
           });
         }
       } else if (!token) {
-        const stored = await this.storage.getMeta<StoredAuthSession>('auth');
-        if (stored?.token) {
-          token = stored.token;
-          userName = stored.userName;
+        const localSession = getLocalStorageSession(this.storage.name);
+        if (localSession?.token) {
+          token = localSession.token;
+          userName = localSession.userName;
+        } else {
+          const stored = await this.storage.getMeta<StoredAuthSession>('auth');
+          if (stored?.token) {
+            token = stored.token;
+            userName = stored.userName;
+          }
         }
       }
 
@@ -263,6 +298,7 @@ export class Auth {
 
     await this.applyDataMode(options.dataMode ?? DataMode.Clear);
     await this.storage.deleteMeta('auth');
+    removeLocalStorageSession(this.storage.name);
 
     this.setStatus(AuthStatus.SignedOut);
     return true;
@@ -281,6 +317,12 @@ export class Auth {
         ...session,
         token,
       });
+      if (getLocalStorageSession(this.storage.name)) {
+        setLocalStorageSession(this.storage.name, {
+          ...session,
+          token,
+        });
+      }
     }
   }
 
@@ -293,6 +335,7 @@ export class Auth {
     this.currentUserName = undefined;
     this.currentToken = undefined;
     await this.storage.deleteMeta('auth');
+    removeLocalStorageSession(this.storage.name);
     this.setStatus(AuthStatus.SignedOut);
   }
 
@@ -314,8 +357,13 @@ export class Auth {
         token: auth.token,
         userName: auth.userName,
       });
+      setLocalStorageSession(this.storage.name, {
+        token: auth.token,
+        userName: auth.userName,
+      });
     } else {
       await this.storage.deleteMeta('auth');
+      removeLocalStorageSession(this.storage.name);
     }
   }
 
@@ -323,5 +371,65 @@ export class Auth {
     if (this.currentAuthStatus === status) return;
     this.currentAuthStatus = status;
     this.onStatusChange.publish(status);
+  }
+}
+
+// -- Storage Helpers -------------------------------------------------------
+
+function authStorageKey(databaseName: string): string {
+  return `${TETHER_PREFIX}${databaseName}:auth`;
+}
+
+function getStorage(): StorageArea | null {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      return window.localStorage;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+interface StorageArea {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+
+function getLocalStorageSession(
+  databaseName: string,
+): StoredAuthSession | null {
+  try {
+    const storage = getStorage();
+    if (!storage) return null;
+    const raw = storage.getItem(authStorageKey(databaseName));
+    if (!raw) return null;
+    return JSON.parse(raw) as StoredAuthSession;
+  } catch {
+    return null;
+  }
+}
+
+function setLocalStorageSession(
+  databaseName: string,
+  session: StoredAuthSession,
+): void {
+  try {
+    const storage = getStorage();
+    if (!storage) return;
+    storage.setItem(authStorageKey(databaseName), JSON.stringify(session));
+  } catch {
+    // Ignored in restricted environments
+  }
+}
+
+function removeLocalStorageSession(databaseName: string): void {
+  try {
+    const storage = getStorage();
+    if (!storage) return;
+    storage.removeItem(authStorageKey(databaseName));
+  } catch {
+    // Ignored in restricted environments
   }
 }

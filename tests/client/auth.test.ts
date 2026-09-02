@@ -417,4 +417,36 @@ describe('Auth', () => {
       expect(await storage.getMeta('auth')).toBeUndefined();
     });
   });
+
+  describe('Remote Cross-Tab Auth Synchronization', () => {
+    it('should transition to SignedIn and update credentials on applyRemoteAuth', () => {
+      const auth = new Auth(storage, mockSync as unknown as Sync);
+      const statuses: AuthStatus[] = [];
+      auth.onStatusChange.register((s) => statuses.push(s));
+
+      auth.applyRemoteAuth(AuthStatus.SignedIn, 'bob', 'remote-token-xyz');
+
+      expect(auth.status).toBe(AuthStatus.SignedIn);
+      expect(auth.userName).toBe('bob');
+      expect(auth.token).toBe('remote-token-xyz');
+      expect(statuses).toEqual([AuthStatus.SignedIn]);
+      expect(mockSync.login).not.toHaveBeenCalled();
+    });
+
+    it('should transition to SignedOut and clear credentials on applyRemoteAuth', () => {
+      const auth = new Auth(storage, mockSync as unknown as Sync);
+      auth.applyRemoteAuth(AuthStatus.SignedIn, 'bob', 'remote-token-xyz');
+
+      const statuses: AuthStatus[] = [];
+      auth.onStatusChange.register((s) => statuses.push(s));
+
+      auth.applyRemoteAuth(AuthStatus.SignedOut);
+
+      expect(auth.status).toBe(AuthStatus.SignedOut);
+      expect(auth.userName).toBeUndefined();
+      expect(auth.token).toBeUndefined();
+      expect(statuses).toEqual([AuthStatus.SignedOut]);
+      expect(mockSync.logout).not.toHaveBeenCalled();
+    });
+  });
 });

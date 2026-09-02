@@ -1,5 +1,6 @@
 import type { Index, IndexQueryOptions } from '../indexed.js';
 
+export const TETHER_PREFIX = 'tetherdb:';
 export const OUTBOX_STORE = '__tether_outbox';
 export const META_STORE = '__tether_meta';
 

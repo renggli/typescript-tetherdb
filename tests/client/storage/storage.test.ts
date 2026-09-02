@@ -215,6 +215,14 @@ describe('Storage', () => {
       expect(changeSpy).not.toHaveBeenCalled();
     });
 
+    it('should not fire onLocalChangeBatch on empty mutations', async () => {
+      const batchSpy = vi.fn();
+      storage.onLocalChangeBatch.register(batchSpy);
+
+      await storage.applyLocalChanges('todos', []);
+      expect(batchSpy).not.toHaveBeenCalled();
+    });
+
     it('should atomically store records, record outbox entries, and fire onLocalChange', async () => {
       const changeSpy = vi.fn();
       storage.onLocalChange.register(changeSpy);
@@ -265,6 +273,47 @@ describe('Storage', () => {
       const limitedOutbox = await storage.getPendingOutbox(1);
       expect(limitedOutbox).toHaveLength(1);
       expect(limitedOutbox[0].change.id).toBe('t1');
+    });
+
+    it('should fire onLocalChangeBatch with table name and mutation list', async () => {
+      const batches: unknown[] = [];
+      storage.onLocalChangeBatch.register((batch) => batches.push(batch));
+
+      await storage.applyLocalChanges('todos', [
+        {
+          id: 't1',
+          op: OperationType.Put,
+          data: { text: 'Buy milk' },
+          change: {
+            table: 'todos',
+            id: 't1',
+            op: OperationType.Put,
+            data: { text: 'Buy milk' },
+            timestamp: 1000,
+            clientId: storage.clientId,
+          },
+        },
+        {
+          id: 't2',
+          op: OperationType.Delete,
+          change: {
+            table: 'todos',
+            id: 't2',
+            op: OperationType.Delete,
+            timestamp: 1001,
+            clientId: storage.clientId,
+          },
+        },
+      ]);
+
+      expect(batches).toHaveLength(1);
+      expect(batches[0]).toMatchObject({
+        tableName: 'todos',
+        mutations: [
+          { id: 't1', op: OperationType.Put, data: { text: 'Buy milk' } },
+          { id: 't2', op: OperationType.Delete },
+        ],
+      });
     });
 
     it('should apply local delete operations and remove record from table store while queueing outbox entry', async () => {

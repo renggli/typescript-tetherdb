@@ -48,6 +48,17 @@ export interface LocalMutationItem<T = unknown> {
 }
 
 /**
+ * Payload emitted by `Storage.onLocalChangeBatch` after a batch of local
+ * mutations is atomically committed to IndexedDB.
+ */
+export interface LocalChangeBatch {
+  /** Name of the table that was mutated. */
+  tableName: string;
+  /** Ordered list of mutation operations committed in this batch. */
+  mutations: ReadonlyArray<{ id: string; op: OperationType; data?: unknown }>;
+}
+
+/**
  * Atomic transaction and local persistence manager wrapping IndexedDB.
  * Coordinates user table stores, pending outbox changelogs, and sync metadata.
  */
@@ -58,6 +69,12 @@ export class Storage {
   readonly clientId: string;
   /** Reactive event registry triggered when mutations are committed to the local database. */
   readonly onLocalChange = new EventRegistry<void>();
+  /**
+   * Reactive event registry triggered alongside `onLocalChange`, carrying the
+   * table name and mutation list so consumers can broadcast changes cross-tab
+   * without re-reading IndexedDB.
+   */
+  readonly onLocalChangeBatch = new EventRegistry<LocalChangeBatch>();
 
   private activeUserName?: string;
   private databasePromise: Promise<IDBDatabase> | null = null;
@@ -154,7 +171,9 @@ export class Storage {
    */
   async getDatabase(): Promise<IDBDatabase> {
     if (this.databasePromise) return this.databasePromise;
-    this.databasePromise = openIndexedDatabase(this.name).catch((err) => {
+    this.databasePromise = openIndexedDatabase(this.name, () => {
+      this.databasePromise = null;
+    }).catch((err) => {
       this.databasePromise = null;
       throw err;
     });
@@ -205,6 +224,9 @@ export class Storage {
         nextVersion,
         tableNames,
         this.registeredIndexes,
+        () => {
+          this.databasePromise = null;
+        },
       ).catch((err) => {
         this.databasePromise = null;
         throw err;
@@ -402,6 +424,10 @@ export class Storage {
       }
       await promisifyTransaction(tx);
       this.onLocalChange.publish();
+      this.onLocalChangeBatch.publish({
+        tableName,
+        mutations: mutations.map((m) => ({ id: m.id, op: m.op, data: m.data })),
+      });
       return records;
     });
   }

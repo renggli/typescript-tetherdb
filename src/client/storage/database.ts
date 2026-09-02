@@ -6,7 +6,10 @@ import {
   OUTBOX_STORE,
 } from './utils.js';
 
-export async function openIndexedDatabase(name: string): Promise<IDBDatabase> {
+export async function openIndexedDatabase(
+  name: string,
+  onVersionChange?: () => void,
+): Promise<IDBDatabase> {
   return new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(name);
     request.onupgradeneeded = () => {
@@ -14,12 +17,23 @@ export async function openIndexedDatabase(name: string): Promise<IDBDatabase> {
     };
     request.onsuccess = () => {
       const database = request.result;
+      database.onversionchange = () => {
+        database.close();
+        onVersionChange?.();
+      };
       if (
         !database.objectStoreNames.contains(OUTBOX_STORE) ||
         !database.objectStoreNames.contains(META_STORE)
       ) {
         const nextVersion = database.version + 1;
-        upgradeIndexedDatabase(name, database, nextVersion, [], new Map())
+        upgradeIndexedDatabase(
+          name,
+          database,
+          nextVersion,
+          [],
+          new Map(),
+          onVersionChange,
+        )
           .then(resolve)
           .catch(reject);
       } else {
@@ -27,6 +41,9 @@ export async function openIndexedDatabase(name: string): Promise<IDBDatabase> {
       }
     };
     request.onerror = () => reject(request.error);
+    request.onblocked = () => {
+      // Blocked while another tab has an older version open; onversionchange will release it.
+    };
   });
 }
 
@@ -36,6 +53,7 @@ export async function upgradeIndexedDatabase(
   nextVersion: number,
   newTables: string[],
   registeredIndexes: Map<string, Index[]>,
+  onVersionChange?: () => void,
 ): Promise<IDBDatabase> {
   currentDb.close();
   return new Promise<IDBDatabase>((resolve, reject) => {
@@ -81,8 +99,18 @@ export async function upgradeIndexedDatabase(
         }
       }
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const database = request.result;
+      database.onversionchange = () => {
+        database.close();
+        onVersionChange?.();
+      };
+      resolve(database);
+    };
     request.onerror = () => reject(request.error);
+    request.onblocked = () => {
+      // Blocked while another tab closes its connection; onversionchange will release it.
+    };
   });
 }
 

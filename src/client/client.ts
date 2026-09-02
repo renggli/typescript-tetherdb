@@ -7,6 +7,8 @@ import {
 } from './auth.js';
 import { type TetherClientError, TetherClientErrorCode } from './errors.js';
 import { EventRegistry } from './shared/event.js';
+import { TabChannel } from './shared/tab-channel.js';
+import { TETHER_PREFIX } from './storage/utils.js';
 import { Storage } from './storage.js';
 import { Sync, type SyncStatus, type WebSocketConstructor } from './sync.js';
 import type { Table } from './table.js';
@@ -34,6 +36,12 @@ export interface TetherClientOptions {
 /**
  * Main client-side database entry point providing reactive IndexedDB tables,
  * local-first storage, automatic auth lifecycle, and background synchronization.
+ *
+ * **Multi-tab coordination**: when the same application is open across multiple
+ * browser tabs, TetherClient coordinates via the Web Locks API and BroadcastChannel:
+ * 1. Web Locks elect an active leader tab to synchronize uncontested with the server.
+ * 2. BroadcastChannel synchronizes authentication state and data mutations in real-time.
+ * 3. `localStorage` persists sessions so new tabs immediately start in the authenticated state.
  */
 export class TetherClient {
   /** Reactive event registry triggered whenever the authentication status changes. */
@@ -42,9 +50,13 @@ export class TetherClient {
   readonly onSyncStatusChange = new EventRegistry<SyncStatus>();
   /** Reactive event registry triggered whenever background sync or network errors occur. */
   readonly onError = new EventRegistry<TetherClientError>();
+
   private readonly storage: Storage;
   private readonly auth: Auth;
   private readonly sync: Sync;
+  private readonly tabChannel: TabChannel;
+  private leaderLockAbortController: AbortController | null = null;
+  private isProcessingRemoteAuth = false;
 
   /**
    * Initializes a new TetherClient instance and wires reactive auth & sync coordination.
@@ -56,6 +68,48 @@ export class TetherClient {
     this.storage = createStorage(name);
     this.sync = createSync(this.storage, options);
     this.auth = createAuth(this.storage, this.sync);
+    this.tabChannel = new TabChannel(name);
+
+    // Broadcast local writes to sibling tabs.
+    this.storage.onLocalChangeBatch.register(({ tableName, mutations }) => {
+      this.tabChannel.broadcast({
+        type: 'change',
+        table: tableName,
+        events: mutations.map((m) => ({
+          id: m.id,
+          op: m.op,
+          data: m.data,
+          isRemote: true,
+        })),
+      });
+    });
+
+    // Handle cross-tab messages from sibling tabs.
+    this.tabChannel.onMessage((msg) => {
+      if (msg.type === 'change') {
+        this.storage.table(msg.table).notifyRemoteChanges(msg.events);
+      } else if (msg.type === 'auth') {
+        this.isProcessingRemoteAuth = true;
+        try {
+          if (msg.status === 'signedIn') {
+            this.storage.setCurrentUser(msg.userName);
+            this.auth.applyRemoteAuth(
+              AuthStatus.SignedIn,
+              msg.userName,
+              msg.token,
+            );
+            this.sync.connect(msg.token);
+            this.sync.schedulePush(0);
+          } else if (msg.status === 'signedOut') {
+            this.storage.setCurrentUser(undefined);
+            this.auth.applyRemoteAuth(AuthStatus.SignedOut);
+            this.sync.connect(undefined);
+          }
+        } finally {
+          this.isProcessingRemoteAuth = false;
+        }
+      }
+    });
 
     // Push local changes reactively.
     this.storage.onLocalChange.register(() => {
@@ -69,9 +123,23 @@ export class TetherClient {
         this.storage.setCurrentUser(this.auth.userName);
         this.sync.connect(this.auth.token);
         this.sync.schedulePush(0);
+        if (!this.isProcessingRemoteAuth && this.auth.userName) {
+          this.tabChannel.broadcast({
+            type: 'auth',
+            status: 'signedIn',
+            userName: this.auth.userName,
+            token: this.auth.token,
+          });
+        }
       } else if (status === AuthStatus.SignedOut) {
         this.storage.setCurrentUser(undefined);
         this.sync.connect(undefined);
+        if (!this.isProcessingRemoteAuth) {
+          this.tabChannel.broadcast({
+            type: 'auth',
+            status: 'signedOut',
+          });
+        }
       }
     });
 
@@ -97,16 +165,20 @@ export class TetherClient {
   // -- Lifecycle ------------------------------------------------------------
 
   /**
-   * Restores any active authenticated session and initiates sync connection.
+   * Restores any active authenticated session and begins leader election.
    */
   async init(): Promise<void> {
     await this.auth.restoreSession();
+    this.startLeaderElection();
   }
 
   /**
    * Disconnects active connections, cancels retry timers, and closes IndexedDB handles.
    */
   async close(): Promise<void> {
+    this.leaderLockAbortController?.abort();
+    this.leaderLockAbortController = null;
+    this.tabChannel.destroy();
     this.sync.destroy();
     await this.storage.close();
   }
@@ -192,6 +264,38 @@ export class TetherClient {
    */
   get syncStatus(): SyncStatus {
     return this.sync.status;
+  }
+
+  // -- Private Helpers ------------------------------------------------------
+
+  /**
+   * Initiates leader election using the Web Locks API scoped to `${TETHER_PREFIX}${name}`.
+   * The tab that acquires the exclusive lock becomes the leader coordinator.
+   */
+  private startLeaderElection(): void {
+    if (typeof navigator === 'undefined' || !navigator.locks) {
+      return;
+    }
+
+    const lockName = `${TETHER_PREFIX}${this.storage.name}`;
+    this.leaderLockAbortController = new AbortController();
+    const { signal } = this.leaderLockAbortController;
+
+    navigator.locks
+      .request(lockName, { mode: 'exclusive', signal }, async () => {
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) {
+            resolve();
+            return;
+          }
+          signal.addEventListener('abort', () => resolve(), { once: true });
+        });
+      })
+      .catch((err: unknown) => {
+        if (err instanceof Error && err.name !== 'AbortError') {
+          console.error('TetherDB leader lock error:', err);
+        }
+      });
   }
 }
 

@@ -47,12 +47,13 @@ The codebase is organized into five decoupled layers with clear subpath exports:
   - Pure TypeScript with zero runtime dependencies.
 - **Client Layer (`src/client/`)**:
   - Exported as `tetherdb/client`.
-  - **TetherClient (`client.ts`)**: Main reactive facade client with local-first storage, auto-session, and auth helpers.
-  - **Auth (`auth.ts`)**: Internal authentication coordinator managing sessions, metadata, and WebSocket auth protocol.
-  - **Storage (`storage/`)**: Atomic transaction coordinator (`storage.ts`), IndexedDB connection & schema upgrades (`database.ts`), and IDB utilities (`utils.ts`).
+  - **TetherClient (`client.ts`)**: Main reactive facade client with local-first storage, auto-session, multi-tab coordination via Web Locks leader election, and auth helpers.
+  - **Auth (`auth.ts`)**: Internal authentication coordinator managing sessions, localStorage persistence, metadata, and WebSocket auth protocol.
+  - **Storage (`storage/`)**: Atomic transaction coordinator (`storage.ts`), IndexedDB connection & schema upgrades with `onversionchange` handling (`database.ts`), and IDB utilities (`utils.ts`).
   - **Tables (`table.ts`)**: Typed table wrappers providing local-first CRUD operations and reactive event subscriptions.
   - **Indexes (`indexed.ts`)**: First-class declarative `Index` definitions, query methods, and reactive subscription views.
   - **Sync (`sync/`)**: Two-way WebSocket sync coordinator (`sync.ts`) and connection manager with auto-reconnect backoff (`connection.ts`).
+  - **TabChannel (`shared/tab-channel.ts`)**: BroadcastChannel wrapper propagating local mutation events and auth state transitions across open browser tabs.
 - **Server Layer (`src/server/`)**:
   - Exported as `tetherdb/server`.
   - **Server (`server.ts`)**: Unified HTTP and WebSocket server (`TetherServer`, `startServer`) handling health/readiness/metrics, admin REST endpoints, and real-time synchronization with WebSocket authentication.

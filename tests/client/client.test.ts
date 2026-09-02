@@ -8,6 +8,7 @@ import {
   TetherClientErrorCode,
 } from '../../src/client/index.js';
 import type { WebSocketConstructor } from '../../src/client/sync.js';
+import { waitForCondition } from '../helpers.js';
 
 class MockWebSocket {
   static instances: MockWebSocket[] = [];
@@ -371,6 +372,127 @@ describe('TetherClient', () => {
       const record = await posts.getWithMetadata('p1');
       expect(record?.data).toEqual({ title: 'First Post' });
       expect(record?.userName).toBe('alice');
+    });
+  });
+
+  describe('Multi-Tab Synchronization', () => {
+    it('should propagate local mutations from Tab A to Tab B via BroadcastChannel', async () => {
+      const dbName = `multitab-sync-${Math.random().toString(36).substring(2, 8)}`;
+      const tabA = new TetherClient(dbName);
+      const tabB = new TetherClient(dbName);
+      clientsToClose.push(tabA, tabB);
+
+      const todosA = tabA.table<{ title: string }>('todos');
+      const todosB = tabB.table<{ title: string }>('todos');
+
+      const eventsReceivedByB: Array<{
+        id: string;
+        op: string;
+        data?: { title: string };
+        isRemote?: boolean;
+      }> = [];
+      todosB.onChange.register((events) => {
+        eventsReceivedByB.push(...events);
+      });
+
+      await todosA.put('t1', { title: 'Buy oat milk' });
+
+      await waitForCondition(() => eventsReceivedByB.length === 1);
+      expect(eventsReceivedByB[0]).toMatchObject({
+        id: 't1',
+        op: 'put',
+        data: { title: 'Buy oat milk' },
+        isRemote: true,
+      });
+    });
+
+    it('should propagate sign-in from Tab A to Tab B in real-time', async () => {
+      const dbName = `multitab-auth-${Math.random().toString(36).substring(2, 8)}`;
+      const tabA = new TetherClient(dbName, {
+        webSocketClass: MockWebSocket as unknown as WebSocketConstructor,
+      });
+      const tabB = new TetherClient(dbName, {
+        webSocketClass: MockWebSocket as unknown as WebSocketConstructor,
+      });
+      clientsToClose.push(tabA, tabB);
+
+      const authStatusesB: AuthStatus[] = [];
+      tabB.onAuthStatusChange.register((status) => {
+        authStatusesB.push(status);
+      });
+
+      // @ts-expect-error - mock login without real server
+      vi.spyOn(tabA.sync, 'login').mockResolvedValueOnce({
+        userName: 'alice',
+        token: 'token-alice-123',
+      });
+
+      await tabA.login({ userName: 'alice', password: 'password123' });
+
+      expect(tabA.authStatus).toBe(AuthStatus.SignedIn);
+      expect(tabA.userName).toBe('alice');
+
+      await waitForCondition(() => tabB.authStatus === AuthStatus.SignedIn);
+      expect(tabB.userName).toBe('alice');
+      expect(tabB.token).toBe('token-alice-123');
+      expect(authStatusesB).toContain(AuthStatus.SignedIn);
+    });
+
+    it('should propagate sign-out from Tab A to Tab B in real-time', async () => {
+      const dbName = `multitab-logout-${Math.random().toString(36).substring(2, 8)}`;
+      const tabA = new TetherClient(dbName, {
+        webSocketClass: MockWebSocket as unknown as WebSocketConstructor,
+      });
+      const tabB = new TetherClient(dbName, {
+        webSocketClass: MockWebSocket as unknown as WebSocketConstructor,
+      });
+      clientsToClose.push(tabA, tabB);
+
+      // Simulate both signed in
+      // @ts-expect-error - set internal session
+      tabA.auth.applyRemoteAuth(AuthStatus.SignedIn, 'alice', 'token-alice');
+      // @ts-expect-error - set internal session
+      tabB.auth.applyRemoteAuth(AuthStatus.SignedIn, 'alice', 'token-alice');
+
+      expect(tabA.authStatus).toBe(AuthStatus.SignedIn);
+      expect(tabB.authStatus).toBe(AuthStatus.SignedIn);
+
+      const authStatusesB: AuthStatus[] = [];
+      tabB.onAuthStatusChange.register((status) => {
+        authStatusesB.push(status);
+      });
+
+      // @ts-expect-error - mock sync logout
+      vi.spyOn(tabA.sync, 'logout').mockResolvedValueOnce(undefined);
+
+      await tabA.logout();
+
+      expect(tabA.authStatus).toBe(AuthStatus.SignedOut);
+
+      await waitForCondition(() => tabB.authStatus === AuthStatus.SignedOut);
+      expect(tabB.userName).toBeUndefined();
+      expect(tabB.token).toBeUndefined();
+      expect(authStatusesB).toContain(AuthStatus.SignedOut);
+    });
+
+    it('should isolate cross-tab messages between different database names', async () => {
+      const db1 = `isolated-db-1-${Math.random().toString(36).substring(2, 8)}`;
+      const db2 = `isolated-db-2-${Math.random().toString(36).substring(2, 8)}`;
+
+      const client1 = new TetherClient(db1);
+      const client2 = new TetherClient(db2);
+      clientsToClose.push(client1, client2);
+
+      const eventsInClient2: unknown[] = [];
+      client2.table('items').onChange.register((events) => {
+        eventsInClient2.push(...events);
+      });
+
+      await client1.table('items').put('item-1', { name: 'Widget' });
+
+      // Let event loop settle and verify client2 received no events
+      await new Promise<void>((resolve) => setTimeout(resolve, 30));
+      expect(eventsInClient2).toHaveLength(0);
     });
   });
 });

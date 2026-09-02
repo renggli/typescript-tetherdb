@@ -22,6 +22,7 @@
 ## Features
 
 - **📱 Offline-First & Local-First**: Mutations apply immediately to browser IndexedDB with zero latency and queue in an atomic outbox for background synchronization.
+- **📑 Multi-Tab Synchronization**: Zero-config cross-tab coordination using Web Locks API for uncontested outbox flush leader election and BroadcastChannel for instant real-time UI re-rendering and auth sync across all open browser tabs.
 - **🔄 Real-Time Two-Way Sync**: Fast, bi-directional WebSocket sync with delta diff catch-up on reconnect, adaptive full snapshots, and automatic live broadcast to active sessions.
 - **⚖️ Deterministic Conflict Resolution**: Last-Write-Wins (LWW) conflict handling powered by monotonically increasing logical clocks and deterministic tie-breaking.
 - **🏢 Multi-Tenant & Table Sharing**: Isolate data strictly per-user or share tables globally or across teams with fine-grained access modes (`user-private`, `public-read`, `public-read-write`, `shared`).

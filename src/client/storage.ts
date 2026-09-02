@@ -1,4 +1,5 @@
 export {
+  type LocalChangeBatch,
   type LocalMutationItem,
   type OutboxEntry,
   Storage,
