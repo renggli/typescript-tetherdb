@@ -852,33 +852,62 @@ export class SqliteStorage extends Storage {
     if (this.baseDir) assertNoActiveServerLock(this.baseDir, 'sqlite');
     const safeName = validateTableName(name);
     const dbHandle = this.getTablesDb();
-    const res = dbHandle.stmtDeleteTable.run(safeName) as {
-      changes: number;
-    };
-    if (res.changes === 0) return false;
 
-    dbHandle.stmtDeleteTableRecords.run(safeName);
-    dbHandle.stmtDeleteTableChangelog.run(safeName);
-    this.tableInstances.delete(safeName);
-    return true;
+    dbHandle.db.exec('BEGIN IMMEDIATE;');
+    try {
+      const res = dbHandle.stmtDeleteTable.run(safeName) as {
+        changes: number;
+      };
+      if (res.changes === 0) {
+        dbHandle.db.exec('ROLLBACK;');
+        return false;
+      }
+
+      dbHandle.stmtDeleteTableRecords.run(safeName);
+      dbHandle.stmtDeleteTableChangelog.run(safeName);
+      dbHandle.db.exec('COMMIT;');
+      this.tableInstances.delete(safeName);
+      return true;
+    } catch (err) {
+      dbHandle.db.exec('ROLLBACK;');
+      throw err;
+    }
   }
 
   deleteUser(userId: string): boolean {
     if (this.baseDir) assertNoActiveServerLock(this.baseDir, 'sqlite');
     const safeUserId = validateUserId(userId);
     const usersDb = this.getUsersDb();
-    const res = usersDb.stmtDeleteUser.run(safeUserId) as {
-      changes: number;
-    };
-    if (res.changes === 0) return false;
+
+    usersDb.db.exec('BEGIN IMMEDIATE;');
+    try {
+      const res = usersDb.stmtDeleteUser.run(safeUserId) as {
+        changes: number;
+      };
+      if (res.changes === 0) {
+        usersDb.db.exec('ROLLBACK;');
+        return false;
+      }
+      usersDb.db.exec('COMMIT;');
+    } catch (err) {
+      usersDb.db.exec('ROLLBACK;');
+      throw err;
+    }
 
     if (this.tablesHandle) {
-      this.tablesHandle.db
-        .prepare('DELETE FROM records WHERE partition = ? OR user_id = ?')
-        .run(safeUserId, safeUserId);
-      this.tablesHandle.db
-        .prepare('DELETE FROM changelog WHERE partition = ? OR user_id = ?')
-        .run(safeUserId, safeUserId);
+      this.tablesHandle.db.exec('BEGIN IMMEDIATE;');
+      try {
+        this.tablesHandle.db
+          .prepare('DELETE FROM records WHERE partition = ? OR user_id = ?')
+          .run(safeUserId, safeUserId);
+        this.tablesHandle.db
+          .prepare('DELETE FROM changelog WHERE partition = ? OR user_id = ?')
+          .run(safeUserId, safeUserId);
+        this.tablesHandle.db.exec('COMMIT;');
+      } catch (err) {
+        this.tablesHandle.db.exec('ROLLBACK;');
+        throw err;
+      }
     }
     return true;
   }
