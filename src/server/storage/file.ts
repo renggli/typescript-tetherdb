@@ -542,17 +542,15 @@ export class FileStorage extends Storage {
     const currentLock = new Promise<void>((resolve) => {
       releaseLock = resolve;
     });
-    this.locks.set(
-      key,
-      prevLock.then(() => currentLock),
-    );
+    const chainedLock = prevLock.then(() => currentLock);
+    this.locks.set(key, chainedLock);
 
     try {
       await prevLock;
       return await fn();
     } finally {
       releaseLock();
-      if (this.locks.get(key) === currentLock) {
+      if (this.locks.get(key) === chainedLock) {
         this.locks.delete(key);
       }
     }
