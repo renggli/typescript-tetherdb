@@ -408,6 +408,76 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       }
     });
 
+    it('should not broadcast changes on owner-restricted tables to other users or guests', async () => {
+      // User 2 (Bob)
+      const bob = await storage.createUser('bob', 'password123');
+      const bobToken = await bob.createToken();
+
+      // Client 1 (Alice - Sender)
+      const wsAlice = new MockServerWebSocket();
+      sync.handleConnection(wsAlice as unknown as WebSocket);
+      wsAlice.emitClientMessage({
+        type: ClientMessageType.Auth,
+        token: validToken,
+        clientId: 'alice-client',
+        lastSyncSeq: 0,
+      });
+
+      // Client 2 (Bob - Different user)
+      const wsBob = new MockServerWebSocket();
+      sync.handleConnection(wsBob as unknown as WebSocket);
+      wsBob.emitClientMessage({
+        type: ClientMessageType.Auth,
+        token: bobToken,
+        clientId: 'bob-client',
+        lastSyncSeq: 0,
+      });
+
+      // Client 3 (Guest - Unauthenticated)
+      const wsGuest = new MockServerWebSocket();
+      sync.handleConnection(wsGuest as unknown as WebSocket);
+      wsGuest.emitClientMessage({
+        type: ClientMessageType.Auth,
+        clientId: 'guest-client',
+        lastSyncSeq: 0,
+      });
+
+      await wsAlice.waitForMessages(2);
+      await wsBob.waitForMessages(2);
+      await wsGuest.waitForMessages(2);
+
+      // Alice sends changes to private table 'todos' (default USER_PRIVATE_PERMISSIONS)
+      wsAlice.emitClientMessage({
+        type: ClientMessageType.ChangeBatch,
+        clientId: 'alice-client',
+        batchId: 'batch-private',
+        changes: [
+          {
+            table: 'todos',
+            id: 'alice-secret-item',
+            op: OperationType.Put,
+            data: { secret: 'Alice Only' },
+            timestamp: Date.now(),
+            clientId: 'alice-client',
+          },
+        ],
+      });
+
+      await wsAlice.waitForMessages(3);
+      // Wait a short tick to ensure no messages were dispatched to Bob or Guest
+      await new Promise((r) => setTimeout(r, 20));
+
+      const bobBroadcasts = wsBob
+        .getParsedMessages()
+        .filter((m) => m.type === ServerMessageType.BroadcastChanges);
+      expect(bobBroadcasts).toHaveLength(0);
+
+      const guestBroadcasts = wsGuest
+        .getParsedMessages()
+        .filter((m) => m.type === ServerMessageType.BroadcastChanges);
+      expect(guestBroadcasts).toHaveLength(0);
+    });
+
     it('should reject ChangeBatch when changes is not an array', async () => {
       const ws = new MockServerWebSocket();
       sync.handleConnection(ws as unknown as WebSocket);

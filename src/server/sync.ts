@@ -16,6 +16,7 @@ import {
 import { TetherServerError, TetherServerErrorCode } from './errors.js';
 import { filterAndSanitizeSnapshot } from './security/filter.js';
 import { UserResolver } from './security/resolver.js';
+import type { InternalStoredRecord } from './security/types.js';
 import type { TetherLogger } from './server.js';
 import { verifyDummyPasswordHash } from './shared/crypto.js';
 import type { RateLimiter } from './shared/rate-limiter.js';
@@ -712,7 +713,14 @@ export class Sync {
           tableCache.set(change.table, table);
         }
 
-        if (table?.canRead(client.user)) {
+        if (
+          table?.canRead(
+            client.user,
+            senderUser
+              ? ({ userId: senderUser.userId } as InternalStoredRecord)
+              : undefined,
+          )
+        ) {
           if (table.isPrivate) {
             if (
               client.user &&
