@@ -101,7 +101,6 @@ export async function filterAndSanitizeSnapshot(
         version: raw.version,
         timestamp: raw.timestamp,
       };
-      if (raw.deleted) item.deleted = true;
       if (raw.clientId !== undefined) item.clientId = raw.clientId;
       if (userName !== undefined) item.userName = userName;
       snapshot.push(item);

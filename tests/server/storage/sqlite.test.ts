@@ -247,7 +247,7 @@ describe('SqliteStorage', () => {
       user_version: number;
     };
 
-    expect(usersVer.user_version).toBe(2);
+    expect(usersVer.user_version).toBe(1);
     expect(tablesVer.user_version).toBe(1);
   });
 

@@ -1005,25 +1005,16 @@ function parseJsonData(raw: string | null): unknown {
 }
 
 function initUsersSchema(db: DatabaseSync): void {
-  const { user_version } = db.prepare('PRAGMA user_version').get() as {
-    user_version: number;
-  };
-  if (user_version < 2) {
-    // Version 0: fresh database, or version 1: old schema with different column
-    // names. Drop and recreate — no backward compatibility required.
-    db.exec(`
-      DROP INDEX IF EXISTS idx_users_user_name;
-      DROP TABLE IF EXISTS users;
-      CREATE TABLE users (
-        id TEXT PRIMARY KEY,
-        user_name TEXT UNIQUE NOT NULL,
-        password_hash TEXT,
-        created_at INTEGER NOT NULL
-      );
-      CREATE INDEX idx_users_user_name ON users (user_name);
-      PRAGMA user_version = 2;
-    `);
-  }
+  db.exec(`
+    PRAGMA user_version = 1;
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      user_name TEXT UNIQUE NOT NULL,
+      password_hash TEXT,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_users_user_name ON users (user_name);
+  `);
 }
 
 function initTablesSchema(db: DatabaseSync): void {
