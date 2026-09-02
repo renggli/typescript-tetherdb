@@ -185,16 +185,16 @@ export abstract class Storage {
     if (!payload) return undefined;
     const user = await this.getUser(payload.userId);
     if (!user) return undefined;
-    if (payload.pwd !== undefined) {
-      const passwordHash = await this.getUserPasswordHash(user.userId);
-      const expectedPwd = passwordHash
-        ? crypto
-            .createHash('sha256')
-            .update(passwordHash)
-            .digest('hex')
-            .slice(0, 16)
-        : '';
-      if (payload.pwd !== expectedPwd) return undefined;
+    const passwordHash = await this.getUserPasswordHash(user.userId);
+    if (passwordHash) {
+      const expectedPwd = crypto
+        .createHash('sha256')
+        .update(passwordHash)
+        .digest('hex')
+        .slice(0, 16);
+      if (!payload.pwd || payload.pwd !== expectedPwd) {
+        return undefined;
+      }
     }
     return user;
   }

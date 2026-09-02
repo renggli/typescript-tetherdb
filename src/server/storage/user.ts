@@ -95,16 +95,16 @@ export class User {
   async verifyToken(token: string): Promise<boolean> {
     const payload = verifySessionToken(token, this.storage.secret);
     if (payload === null || payload.userId !== this.userId) return false;
-    if (payload.pwd !== undefined) {
-      const passwordHash = await this.storage.getUserPasswordHash(this.userId);
-      const expectedPwd = passwordHash
-        ? crypto
-            .createHash('sha256')
-            .update(passwordHash)
-            .digest('hex')
-            .slice(0, 16)
-        : '';
-      if (payload.pwd !== expectedPwd) return false;
+    const passwordHash = await this.storage.getUserPasswordHash(this.userId);
+    if (passwordHash) {
+      const expectedPwd = crypto
+        .createHash('sha256')
+        .update(passwordHash)
+        .digest('hex')
+        .slice(0, 16);
+      if (!payload.pwd || payload.pwd !== expectedPwd) {
+        return false;
+      }
     }
     return true;
   }
