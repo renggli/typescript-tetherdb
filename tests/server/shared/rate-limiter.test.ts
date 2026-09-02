@@ -139,4 +139,26 @@ describe('RateLimiter', () => {
     defaultLimiter.recordFailure('keyB', now + 70_000);
     expect(defaultLimiter.isLimited('keyB', now + 70_000)).toBe(false);
   });
+
+  it('should accumulate consecutive failures across rate limit window boundaries and trigger backoff', () => {
+    const limiter = new RateLimiter({
+      windowMs: 1_000,
+      maxRequests: 10,
+      maxFailures: 3,
+      initialBackoffMs: 1_000,
+      maxBackoffMs: 16_000,
+    });
+    const now = 100_000;
+
+    // Failure 1 at t = 0
+    expect(limiter.recordFailure('attacker', now)).toBe(0);
+    // Failure 2 at t = 1,100 (after 1s window expired)
+    expect(limiter.recordFailure('attacker', now + 1_100)).toBe(0);
+    // Failure 3 at t = 2,200 (after another 1s window expired) -> should trigger backoff
+    const backoff = limiter.recordFailure('attacker', now + 2_200);
+    expect(backoff).toBe(1_000);
+    expect(limiter.isLimited('attacker', now + 2_200)).toBe(true);
+    expect(limiter.isLimited('attacker', now + 3_199)).toBe(true);
+    expect(limiter.isLimited('attacker', now + 3_201)).toBe(false);
+  });
 });

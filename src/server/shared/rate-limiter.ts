@@ -65,8 +65,15 @@ export class RateLimiter {
     }
 
     if (entry.resetAt <= now) {
-      this.store.delete(key);
-      return false;
+      if (
+        entry.failures === 0 ||
+        now - entry.lastFailureAt > this.maxBackoffMs
+      ) {
+        this.store.delete(key);
+        return false;
+      }
+      entry.count = 0;
+      entry.resetAt = now + this.windowMs;
     }
 
     return entry.count >= this.maxRequests;
@@ -85,7 +92,7 @@ export class RateLimiter {
     }
 
     const entry = this.store.get(key);
-    if (!entry || (entry.resetAt <= now && entry.blockedUntil <= now)) {
+    if (!entry) {
       this.setEntry(
         key,
         {
@@ -93,9 +100,16 @@ export class RateLimiter {
           resetAt: now + this.windowMs,
           failures: 0,
           blockedUntil: 0,
+          lastFailureAt: 0,
         },
         now,
       );
+      return true;
+    }
+
+    if (entry.resetAt <= now) {
+      entry.count = 1;
+      entry.resetAt = now + this.windowMs;
       return true;
     }
 
@@ -112,17 +126,25 @@ export class RateLimiter {
    */
   recordFailure(key: string, now = Date.now()): number {
     let entry = this.store.get(key);
-    if (!entry || (entry.resetAt <= now && entry.blockedUntil <= now)) {
+    if (!entry) {
       entry = {
         count: 1,
         resetAt: now + this.windowMs,
         failures: 0,
         blockedUntil: 0,
+        lastFailureAt: 0,
       };
       this.setEntry(key, entry, now);
+    } else if (entry.resetAt <= now && entry.blockedUntil <= now) {
+      entry.count = 1;
+      entry.resetAt = now + this.windowMs;
+      if (now - entry.lastFailureAt > this.maxBackoffMs) {
+        entry.failures = 0;
+      }
     }
 
     entry.failures++;
+    entry.lastFailureAt = now;
 
     if (entry.failures >= this.maxFailures) {
       const exponent = entry.failures - this.maxFailures;
@@ -160,7 +182,11 @@ export class RateLimiter {
    */
   cleanup(now = Date.now()): void {
     for (const [key, entry] of this.store.entries()) {
-      if (entry.resetAt <= now && entry.blockedUntil <= now) {
+      if (
+        entry.resetAt <= now &&
+        entry.blockedUntil <= now &&
+        (entry.failures === 0 || now - entry.lastFailureAt > this.maxBackoffMs)
+      ) {
         this.store.delete(key);
       }
     }
@@ -189,4 +215,5 @@ interface RateLimitEntry {
   resetAt: number;
   failures: number;
   blockedUntil: number;
+  lastFailureAt: number;
 }
