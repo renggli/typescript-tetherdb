@@ -127,13 +127,24 @@ export class Sync {
     }
 
     const maxPendingMessages = 1000;
+    const maxPendingBytes = 10 * 1024 * 1024;
     let pendingCount = 0;
+    let pendingBytes = 0;
     let messageQueue: Promise<void> = Promise.resolve();
 
     webSocket.on('message', (data) => {
       const userContext = this.getClientContext(webSocket);
+      const dataLength =
+        typeof data === 'string'
+          ? Buffer.byteLength(data)
+          : Array.isArray(data)
+            ? data.reduce((acc, chunk) => acc + chunk.length, 0)
+            : (data as Buffer).length;
 
-      if (pendingCount >= maxPendingMessages) {
+      if (
+        pendingCount >= maxPendingMessages ||
+        pendingBytes + dataLength > maxPendingBytes
+      ) {
         this.logger?.warn(
           `[TetherServer.Sync] WebSocket message queue exceeded limit${userContext}`,
         );
@@ -146,6 +157,7 @@ export class Sync {
       }
 
       pendingCount++;
+      pendingBytes += dataLength;
       messageQueue = messageQueue
         .then(async () => {
           try {
@@ -165,10 +177,12 @@ export class Sync {
             });
           } finally {
             pendingCount--;
+            pendingBytes -= dataLength;
           }
         })
         .catch((err) => {
           pendingCount--;
+          pendingBytes -= dataLength;
           this.logger?.error(
             `[TetherServer.Sync] Unhandled error in message queue${userContext}:`,
             err,
