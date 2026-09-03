@@ -11,6 +11,7 @@ import type {
   InternalStoredRecord,
 } from '../../../src/server/security/types.js';
 import { MemoryStorage } from '../../../src/server/storage/memory.js';
+import { User } from '../../../src/server/storage/user.js';
 import { OperationType, Permission } from '../../../src/shared/types.js';
 
 describe('Security Filter & Fattening Pipeline', () => {
@@ -19,7 +20,9 @@ describe('Security Filter & Fattening Pipeline', () => {
       const storage = new MemoryStorage();
       const user = await storage.createUser('alice', 'pass123');
 
-      expect(isPermissionAllowed(Permission.Everybody, undefined)).toBe(true);
+      expect(isPermissionAllowed(Permission.Everybody, User.Anonymous)).toBe(
+        true,
+      );
       expect(isPermissionAllowed(Permission.Everybody, user, 'other')).toBe(
         true,
       );
@@ -29,9 +32,9 @@ describe('Security Filter & Fattening Pipeline', () => {
       const storage = new MemoryStorage();
       const user = await storage.createUser('alice', 'pass123');
 
-      expect(isPermissionAllowed(Permission.Authenticated, undefined)).toBe(
-        false,
-      );
+      expect(
+        isPermissionAllowed(Permission.Authenticated, User.Anonymous),
+      ).toBe(false);
       expect(isPermissionAllowed(Permission.Authenticated, user)).toBe(true);
     });
 
@@ -39,7 +42,7 @@ describe('Security Filter & Fattening Pipeline', () => {
       const storage = new MemoryStorage();
       const alice = await storage.createUser('alice', 'pass123');
 
-      expect(isPermissionAllowed(Permission.Owner, undefined)).toBe(false);
+      expect(isPermissionAllowed(Permission.Owner, User.Anonymous)).toBe(false);
       expect(isPermissionAllowed(Permission.Owner, alice, alice.userId)).toBe(
         true,
       );
@@ -55,7 +58,9 @@ describe('Security Filter & Fattening Pipeline', () => {
       const storage = new MemoryStorage();
       const alice = await storage.createUser('alice', 'pass123');
 
-      expect(isPermissionAllowed(Permission.Nobody, undefined)).toBe(false);
+      expect(isPermissionAllowed(Permission.Nobody, User.Anonymous)).toBe(
+        false,
+      );
       expect(isPermissionAllowed(Permission.Nobody, alice)).toBe(false);
     });
   });
@@ -159,7 +164,7 @@ describe('Security Filter & Fattening Pipeline', () => {
       // Guest snapshot
       const guestSnapshot = await filterAndSanitizeSnapshot(
         tables,
-        undefined,
+        User.Anonymous,
         resolver,
       );
       expect(guestSnapshot).toHaveLength(1);

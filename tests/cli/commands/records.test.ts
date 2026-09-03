@@ -163,4 +163,158 @@ describe('handleRecordsCommand', () => {
       testLogger.hasMessage('Put record "empty-record" in table "tasks"'),
     ).toBe(true);
   });
+
+  it('bypasses permissions by default as admin and enforces permissions with --user flag', async () => {
+    // Create locked-down table: nobody can create or read normally
+    await storage.createTable('locked_table', {
+      permissions: {
+        create: 'nobody',
+        read: 'nobody',
+        update: 'nobody',
+        delete: 'nobody',
+      },
+    });
+
+    await storage.createUser('alice', 'password123');
+
+    // 1. Default admin execution succeeds even when table policy is 'nobody'
+    testLogger.clear();
+    await handleRecordsCommand(target, [
+      'records',
+      'put',
+      'locked_table',
+      'admin-rec',
+      '{"system":true}',
+    ]);
+    expect(
+      testLogger.hasMessage('Put record "admin-rec" in table "locked_table"'),
+    ).toBe(true);
+
+    testLogger.clear();
+    await handleRecordsCommand(target, ['records', 'list', 'locked_table']);
+    expect(testLogger.hasMessage('Records in "locked_table" (1):')).toBe(true);
+
+    // 2. Executing with --user=alice enforces permissions and rejects create
+    await expect(
+      handleRecordsCommand(target, [
+        'records',
+        'put',
+        'locked_table',
+        'alice-rec',
+        '{"title":"Alice"}',
+        '--user=alice',
+      ]),
+    ).rejects.toMatchObject({
+      code: TetherServerErrorCode.Forbidden,
+    });
+
+    // 3. Executing with uncreated user names ('anonymous', 'guest', 'admin') throws NotFound
+    await expect(
+      handleRecordsCommand(target, [
+        'records',
+        'put',
+        'locked_table',
+        'guest-rec',
+        '{"title":"Guest"}',
+        '--user=anonymous',
+      ]),
+    ).rejects.toMatchObject({
+      code: TetherServerErrorCode.NotFound,
+    });
+
+    await expect(
+      handleRecordsCommand(target, [
+        'records',
+        'put',
+        'locked_table',
+        'guest-rec',
+        '{"title":"Guest"}',
+        '--user=guest',
+      ]),
+    ).rejects.toMatchObject({
+      code: TetherServerErrorCode.NotFound,
+    });
+
+    await expect(
+      handleRecordsCommand(target, [
+        'records',
+        'put',
+        'locked_table',
+        'admin-rec',
+        '{"title":"Admin"}',
+        '--user=admin',
+      ]),
+    ).rejects.toMatchObject({
+      code: TetherServerErrorCode.NotFound,
+    });
+
+    // 4. Executing with unknown user throws NotFound
+    await expect(
+      handleRecordsCommand(target, [
+        'records',
+        'list',
+        'locked_table',
+        '--user=unknown_user',
+      ]),
+    ).rejects.toMatchObject({
+      code: TetherServerErrorCode.NotFound,
+    });
+
+    // 5. If an actual user named 'admin' is registered, --user=admin resolves that user and enforces permissions
+    await storage.createUser('admin', 'pass123');
+    await expect(
+      handleRecordsCommand(target, [
+        'records',
+        'put',
+        'locked_table',
+        'rec-by-admin-user',
+        '{"title":"Admin User"}',
+        '--user=admin',
+      ]),
+    ).rejects.toMatchObject({
+      code: TetherServerErrorCode.Forbidden,
+    });
+
+    // 5. In user-partitioned (private) table, --user=alice writes and reads from Alice's partition
+    await storage.createTable('private_notes', {
+      permissions: {
+        read: 'owner',
+        create: 'authenticated',
+        update: 'owner',
+        delete: 'owner',
+      },
+    });
+
+    await handleRecordsCommand(target, [
+      'records',
+      'put',
+      'private_notes',
+      'note-1',
+      '{"text":"Secret"}',
+      '--user=alice',
+    ]);
+
+    testLogger.clear();
+    await handleRecordsCommand(target, [
+      'records',
+      'list',
+      'private_notes',
+      '--user=alice',
+    ]);
+    expect(testLogger.hasMessage('Records in "private_notes" (1):')).toBe(true);
+    expect(testLogger.hasMessage('Secret')).toBe(true);
+
+    // Bob cannot read Alice's private notes
+    await storage.createUser('bob', 'password123');
+    testLogger.clear();
+    await handleRecordsCommand(target, [
+      'records',
+      'list',
+      'private_notes',
+      '--user=bob',
+    ]);
+    expect(
+      testLogger.hasMessage('No records found in table "private_notes"'),
+    ).toBe(true);
+  });
 });

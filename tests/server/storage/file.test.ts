@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { TetherServerErrorCode } from '../../../src/server/errors.js';
 import { FileStorage } from '../../../src/server/storage/file.js';
+import { User } from '../../../src/server/storage/user.js';
 import {
   type ChangeRecord,
   OperationType,
@@ -453,7 +454,7 @@ describe('FileStorage', () => {
       permissions: PUBLIC_READ_WRITE_PERMISSIONS,
     });
 
-    await context.backend.applyChanges(undefined, [
+    await context.backend.applyChanges(User.Anonymous, [
       {
         table: table.name,
         id: 'n1',
@@ -477,7 +478,10 @@ describe('FileStorage', () => {
     const corruptContent = `${lines[0]}\n{corrupted-json-line\n${lines[1]}\n`;
     await fs.writeFile(syncFile, corruptContent, 'utf-8');
 
-    const { rawChanges } = await context.backend.getRawChangesSince(0);
+    const { rawChanges } = await context.backend.getRawChangesSince(
+      0,
+      User.Admin,
+    );
     expect(rawChanges.map((c) => c.id)).toEqual(['n1', 'n2']);
   });
 
@@ -489,7 +493,7 @@ describe('FileStorage', () => {
     await context.backend.createTable('private_tbl'); // USER_PRIVATE_PERMISSIONS default
 
     // 1. Mutation in shared table
-    await context.backend.applyChanges(undefined, [
+    await context.backend.applyChanges(User.Anonymous, [
       {
         table: 'shared_tbl',
         id: 's1',
@@ -513,7 +517,7 @@ describe('FileStorage', () => {
     ]);
 
     // 3. Another mutation in shared table
-    await context.backend.applyChanges(undefined, [
+    await context.backend.applyChanges(User.Anonymous, [
       {
         table: 'shared_tbl',
         id: 's2',
@@ -557,7 +561,10 @@ describe('FileStorage', () => {
       },
     ]);
 
-    const beforeDelete = await context.backend.getRawChangesSince(0);
+    const beforeDelete = await context.backend.getRawChangesSince(
+      0,
+      User.Admin,
+    );
     expect(beforeDelete.rawChanges).toHaveLength(1);
     expect(beforeDelete.rawChanges[0].id).toBe('msg-1');
     expect(beforeDelete.rawChanges[0].op).toBe(OperationType.Put);
@@ -567,13 +574,13 @@ describe('FileStorage', () => {
     expect(deleted).toBe(true);
 
     // Subsequent sync from seq 1 should receive the delete operation
-    const afterDelete = await context.backend.getChangesSince(undefined, 1);
+    const afterDelete = await context.backend.getChangesSince(User.Admin, 1);
     expect(afterDelete.changes).toHaveLength(1);
     expect(afterDelete.changes[0].id).toBe('msg-1');
     expect(afterDelete.changes[0].op).toBe(OperationType.Delete);
 
     // Record should be deleted from table
-    const record = await table.getRecord(undefined, 'msg-1');
+    const record = await table.getRecord(User.Admin, 'msg-1');
     expect(record).toBeUndefined();
   });
 });

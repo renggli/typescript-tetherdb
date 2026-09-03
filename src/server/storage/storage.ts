@@ -18,7 +18,7 @@ import {
   validateTableName,
   validateTimestamp,
 } from '../shared/validate.js';
-import type { ApplyChangesOptions, Table } from './table.js';
+import type { Table } from './table.js';
 import type { User } from './user.js';
 
 /**
@@ -237,27 +237,25 @@ export abstract class Storage {
   /**
    * Applies an array of mutation change operations across tables for a user or shared context.
    *
-   * @param user - Target user handle (if authenticated).
+   * @param user - Target user handle.
    * @param changes - Array of change records.
-   * @param options - Optional application options.
    * @returns Applied changes and new sequence number.
    */
   abstract applyChanges(
-    user: User | undefined,
+    user: User,
     changes: ChangeRecord[],
-    options?: ApplyChangesOptions,
   ): Promise<{ applied: ChangeRecord[]; newSeq: number }>;
 
   /**
    * Retrieves change operations since a given sequence number.
    *
-   * @param user - Target user handle (if authenticated).
+   * @param user - Target user handle.
    * @param fromSeq - Starting sequence number (exclusive).
    * @param tableFilters - Optional array of table names to filter.
    * @returns Changes, current sequence, and snapshot requirement flag.
    */
   async getChangesSince(
-    user: User | undefined,
+    user: User,
     fromSeq: number,
     tableFilters?: string[],
   ): Promise<{
@@ -289,10 +287,10 @@ export abstract class Storage {
   /**
    * Returns the current global sequence number for a user or shared database.
    *
-   * @param user - Optional target user handle.
+   * @param user - Target user handle.
    * @returns Current integer sequence number.
    */
-  abstract getCurrentSeq(user?: User): Promise<number>;
+  abstract getCurrentSeq(user: User): Promise<number>;
 
   // -- Raw Persistence Driver Hooks -----------------------------------------
 
@@ -328,7 +326,7 @@ export abstract class Storage {
    */
   abstract getRawChangesSince(
     fromSeq: number,
-    user?: User,
+    user: User,
   ): Promise<{
     rawChanges: InternalChangeRecord[];
     currentSeq: number;
@@ -467,7 +465,7 @@ function isSnapshotRequired(
 export function createAppliedRecords(
   change: ChangeRecord,
   existing: InternalStoredRecord | undefined,
-  user: User | undefined,
+  user: User,
   assignedSeq: number,
   cloneData = false,
 ): {
@@ -480,7 +478,11 @@ export function createAppliedRecords(
     ? existing?.userId
     : existing && !existing.deleted
       ? existing.userId
-      : user?.userId;
+      : user.isAdmin
+        ? undefined
+        : user.isAuthenticated
+          ? user.userId
+          : undefined;
 
   const data = isDeleted
     ? undefined

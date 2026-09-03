@@ -8,6 +8,7 @@ import {
   type TetherClientOptions,
 } from '../../src/client/index.js';
 import { type RunningServer, startServer } from '../../src/server/index.js';
+import { User } from '../../src/server/storage/user.js';
 import {
   ClientMessageType,
   Permission,
@@ -119,7 +120,7 @@ describe.each(storageDescriptors)(
 
       await waitForCondition(async () => {
         const t = await server.server.storage.getTable('secrets');
-        const r = await t?.getRecord(undefined, 'sec-1');
+        const r = await t?.getRecord(User.Admin, 'sec-1');
         return r?.userName === 'alice_sec';
       });
 
@@ -131,7 +132,7 @@ describe.each(storageDescriptors)(
       await new Promise((r) => setTimeout(r, 200));
       const recordOnServer = await (
         await server.server.storage.getTable('secrets')
-      )?.getRecord(undefined, 'sec-1');
+      )?.getRecord(User.Admin, 'sec-1');
       expect(recordOnServer?.data).toEqual({ text: 'Alice Secret' });
       expect(recordOnServer?.userName).toBe('alice_sec');
     });
@@ -179,7 +180,7 @@ describe.each(storageDescriptors)(
       await waitForCondition(async () => {
         const r = await (
           await server.server.storage.getTable('shared_tasks')
-        )?.getRecord(undefined, 'task-1');
+        )?.getRecord(User.Admin, 'task-1');
         return r?.userName === 'alice_res';
       });
 
@@ -188,7 +189,7 @@ describe.each(storageDescriptors)(
       await waitForCondition(async () => {
         const r = await (
           await server.server.storage.getTable('shared_tasks')
-        )?.getRecord(undefined, 'task-1');
+        )?.getRecord(User.Admin, 'task-1');
         return r === undefined;
       });
 
@@ -197,7 +198,7 @@ describe.each(storageDescriptors)(
       await waitForCondition(async () => {
         const r = await (
           await server.server.storage.getTable('shared_tasks')
-        )?.getRecord(undefined, 'task-1');
+        )?.getRecord(User.Admin, 'task-1');
         return r?.userName === 'bob_res';
       });
 
@@ -206,7 +207,7 @@ describe.each(storageDescriptors)(
       await waitForCondition(async () => {
         const r = await (
           await server.server.storage.getTable('shared_tasks')
-        )?.getRecord(undefined, 'task-1');
+        )?.getRecord(User.Admin, 'task-1');
         return (r?.data as { title: string })?.title === 'Bob Update 2';
       });
     });
@@ -273,12 +274,12 @@ describe.each(storageDescriptors)(
 
       await waitForCondition(async () => {
         const t = await server.server.storage.getTable('spoof_test');
-        const r = await t?.getRecord(undefined, 'rec-spoof-1');
+        const r = await t?.getRecord(User.Admin, 'rec-spoof-1');
         return r !== undefined;
       });
 
       const table = await server.server.storage.getTable('spoof_test');
-      const record = await table?.getRecord(undefined, 'rec-spoof-1');
+      const record = await table?.getRecord(User.Admin, 'rec-spoof-1');
       expect(record?.clientId).toBe('genuine_client_connection');
     });
   },

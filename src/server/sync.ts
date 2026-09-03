@@ -27,7 +27,7 @@ import {
 } from './shared/validate.js';
 import type { Storage } from './storage/storage.js';
 import type { Table } from './storage/table.js';
-import type { User } from './storage/user.js';
+import { User } from './storage/user.js';
 
 /**
  * Configuration options for the synchronization coordinator.
@@ -270,10 +270,10 @@ export class Sync {
       return;
     }
 
-    let user: User | undefined;
+    let user: User;
     if (typeof msg.token === 'string' && msg.token) {
-      user = await this.storage.getUserByToken(msg.token);
-      if (!user) {
+      const resolvedUser = await this.storage.getUserByToken(msg.token);
+      if (!resolvedUser) {
         this.rateLimiter?.recordFailure(ip);
         this.send(webSocket, {
           type: ServerMessageType.AuthError,
@@ -282,13 +282,14 @@ export class Sync {
         webSocket.close();
         return;
       }
+      user = resolvedUser;
     } else {
       const existingClient = this.webSocketToClient.get(webSocket);
-      user = existingClient?.user;
+      user = existingClient?.user ?? User.Anonymous;
     }
 
     if (
-      user &&
+      user.isAuthenticated &&
       this.countUserConnections(user.userId, webSocket) >=
         this.maxConcurrentConnectionsPerUser
     ) {
@@ -324,12 +325,14 @@ export class Sync {
     this.clearPendingAuthTimer(webSocket);
 
     const currentSeq = await this.storage.getCurrentSeq(user);
-    const refreshedToken = user ? await user.createToken() : undefined;
+    const refreshedToken = user.isAuthenticated
+      ? await user.createToken()
+      : undefined;
     const accessibleTables = await this.getAccessibleTableNames(user);
     this.send(webSocket, {
       type: ServerMessageType.AuthSuccess,
       protocolVersion: PROTOCOL_VERSION,
-      userName: user?.userName,
+      userName: user.isAuthenticated ? user.userName : undefined,
       currentSeq,
       token: refreshedToken,
       tables: accessibleTables,
@@ -523,11 +526,11 @@ export class Sync {
   ): Promise<void> {
     const client = this.webSocketToClient.get(webSocket);
     if (client) {
-      client.user = undefined;
+      client.user = User.Anonymous;
     }
 
-    const currentSeq = await this.storage.getCurrentSeq(undefined);
-    const accessibleTables = await this.getAccessibleTableNames(undefined);
+    const currentSeq = await this.storage.getCurrentSeq(User.Anonymous);
+    const accessibleTables = await this.getAccessibleTableNames(User.Anonymous);
 
     this.send(webSocket, {
       type: ServerMessageType.AuthSuccess,
@@ -606,7 +609,8 @@ export class Sync {
           err,
         );
         const sanitizedMessage =
-          !client.user && err.code === TetherServerErrorCode.Forbidden
+          client.user.isAnonymous &&
+          err.code === TetherServerErrorCode.Forbidden
             ? 'Access denied'
             : err.message;
         this.send(webSocket, {
@@ -639,7 +643,7 @@ export class Sync {
   private getClientContext(webSocket: WebSocket): string {
     const client = this.webSocketToClient.get(webSocket);
     return client
-      ? ` (user: "${client.user?.userId ?? 'guest'}", client: "${client.clientId}")`
+      ? ` (user: "${client.user.isAnonymous ? 'guest' : client.user.userId}", client: "${client.clientId}")`
       : '';
   }
 
@@ -712,7 +716,7 @@ export class Sync {
 
   private async broadcastChanges(
     senderWebSocket: WebSocket,
-    senderUser: User | undefined,
+    senderUser: User,
     changes: ChangeRecord[],
     seq: number,
   ): Promise<void> {
@@ -736,15 +740,15 @@ export class Sync {
         if (
           table?.canRead(
             client.user,
-            senderUser
+            senderUser.isAuthenticated
               ? ({ userId: senderUser.userId } as InternalStoredRecord)
               : undefined,
           )
         ) {
           if (table.isPrivate) {
             if (
-              client.user &&
-              senderUser &&
+              client.user.isAuthenticated &&
+              senderUser.isAuthenticated &&
               client.user.userId === senderUser.userId
             ) {
               clientChanges.push(change);
@@ -806,14 +810,18 @@ export class Sync {
   private countUserConnections(userId: string, excludeWs?: WebSocket): number {
     let count = 0;
     for (const c of this.clients) {
-      if (c.user?.userId === userId && c.webSocket !== excludeWs) {
+      if (
+        c.user.isAuthenticated &&
+        c.user.userId === userId &&
+        c.webSocket !== excludeWs
+      ) {
         count++;
       }
     }
     return count;
   }
 
-  private async getAccessibleTableNames(user?: User): Promise<string[]> {
+  private async getAccessibleTableNames(user: User): Promise<string[]> {
     const tables = await this.storage.getTables();
     return tables
       .filter((table) => table.canRead(user) || table.canCreate(user))
@@ -826,6 +834,6 @@ export class Sync {
 interface ActiveClient {
   webSocket: WebSocket;
   clientId: string;
-  user?: User;
+  user: User;
   tables?: string[];
 }

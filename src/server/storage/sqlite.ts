@@ -33,8 +33,8 @@ import {
   StorageType,
   validateBatchChanges,
 } from './storage.js';
-import { type ApplyChangesOptions, Table } from './table.js';
-import { User } from './user.js';
+import { Table } from './table.js';
+import { createAuthenticatedUser, type User } from './user.js';
 
 export interface SqliteUserData {
   userId: string;
@@ -237,14 +237,19 @@ export class SqliteStorage extends Storage {
     const createdAt = Date.now();
 
     usersDb.stmtInsertUser.run(userId, safeUserName, passwordHash, createdAt);
-    return new User(userId, safeUserName, createdAt, this);
+    return createAuthenticatedUser(userId, safeUserName, createdAt, this);
   }
 
   async getUser(userId: string): Promise<User | undefined> {
     const safeUserId = validateUserId(userId);
     const data = this.findUserDataById(safeUserId);
     if (data) {
-      return new User(data.userId, data.userName, data.createdAt, this);
+      return createAuthenticatedUser(
+        data.userId,
+        data.userName,
+        data.createdAt,
+        this,
+      );
     }
     return undefined;
   }
@@ -262,7 +267,7 @@ export class SqliteStorage extends Storage {
         }
       | undefined;
     if (!row) return undefined;
-    return new User(row.id, row.user_name, row.created_at, this);
+    return createAuthenticatedUser(row.id, row.user_name, row.created_at, this);
   }
 
   async getUsers(): Promise<User[]> {
@@ -273,7 +278,9 @@ export class SqliteStorage extends Storage {
       password_hash: string | null;
       created_at: number;
     }>;
-    return rows.map((r) => new User(r.id, r.user_name, r.created_at, this));
+    return rows.map((r) =>
+      createAuthenticatedUser(r.id, r.user_name, r.created_at, this),
+    );
   }
 
   async getUserPasswordHash(
@@ -320,7 +327,7 @@ export class SqliteStorage extends Storage {
 
   async getRawChangesSince(
     fromSeq: number,
-    _user?: User,
+    _user: User,
   ): Promise<{
     rawChanges: InternalChangeRecord[];
     currentSeq: number;
@@ -378,9 +385,8 @@ export class SqliteStorage extends Storage {
   }
 
   async applyChanges(
-    user: User | undefined,
+    user: User,
     changes: ChangeRecord[],
-    options?: ApplyChangesOptions,
   ): Promise<{ applied: ChangeRecord[]; newSeq: number }> {
     const dbHandle = this.getTablesDb();
     const defaultMaxRecords = this.options.maxRecords ?? 10_000;
@@ -414,7 +420,7 @@ export class SqliteStorage extends Storage {
         const table = this.getTableSync(tableName);
         if (!table) continue;
 
-        if (table.isPrivate && !user && !options?.skipPermissionCheck) {
+        if (table.isPrivate && user.isAnonymous) {
           throw new TetherServerError(
             TetherServerErrorCode.Forbidden,
             'Authentication required',
@@ -422,7 +428,9 @@ export class SqliteStorage extends Storage {
         }
 
         const effectiveUserId: string =
-          table.isPrivate && user ? user.userId : '__shared__';
+          table.isPrivate && user.isAuthenticated && !user.isAdmin
+            ? user.userId
+            : '__shared__';
 
         const maxRecords = table.settings.maxRecords ?? defaultMaxRecords;
 
@@ -436,9 +444,7 @@ export class SqliteStorage extends Storage {
           ? rowToInternalStoredRecord(existingRow, recordId)
           : undefined;
 
-        if (!options?.skipPermissionCheck) {
-          table.assertCanApplyChange(user, change, existing);
-        }
+        table.assertCanApplyChange(user, change, existing);
 
         if (
           change.op === OperationType.Put &&
@@ -561,7 +567,7 @@ export class SqliteStorage extends Storage {
     return { applied: publicApplied, newSeq };
   }
 
-  async getCurrentSeq(_user?: User): Promise<number> {
+  async getCurrentSeq(_user: User): Promise<number> {
     const dbHandle = this.getTablesDb();
     const metaRow = dbHandle.stmtGetMeta.get() as
       | { current_seq: number; min_seq: number }
@@ -899,7 +905,12 @@ export class SqliteStorage extends Storage {
       }
     }
     usersDb.stmtRenameUser.run(safeNewName, safeUserId);
-    return new User(safeUserId, safeNewName, existing.createdAt, this);
+    return createAuthenticatedUser(
+      safeUserId,
+      safeNewName,
+      existing.createdAt,
+      this,
+    );
   }
 }
 

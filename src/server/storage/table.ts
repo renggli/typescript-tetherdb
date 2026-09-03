@@ -5,7 +5,6 @@ import {
   Permission,
   type SnapshotRecord,
   type StoredRecord,
-  type TablePermissions,
   type TableRow,
   type TableSettings,
 } from '../../shared/types.js';
@@ -17,15 +16,7 @@ import {
 import { UserResolver } from '../security/resolver.js';
 import type { InternalStoredRecord } from '../security/types.js';
 import type { Storage } from './storage.js';
-import type { User } from './user.js';
-
-/**
- * Options for applying mutation changes to storage.
- */
-export interface ApplyChangesOptions {
-  /** If true, skips actor and ownership permission checks. */
-  skipPermissionCheck?: boolean;
-}
+import { User } from './user.js';
 
 /**
  * Concrete Table domain object providing access control and record operations.
@@ -59,29 +50,28 @@ export class Table {
   }
 
   /**
-   * Indicates whether table operates in user-private partition mode.
+   * True if this table is user-partitioned (private to individual user accounts).
    */
   get isPrivate(): boolean {
     return this.settings.permissions.read === Permission.Owner;
   }
 
   /**
-   * Updates table settings dynamically.
+   * Updates settings for this table.
    *
-   * @param settings - Partial table settings to merge.
-   * @returns Updated table settings.
+   * @param settings - Partial or complete table settings.
+   * @returns Updated TableSettings.
    */
   async updateSettings(
     settings: Partial<TableSettings>,
   ): Promise<TableSettings> {
-    const permissions: TablePermissions = {
-      ...this.settings.permissions,
-      ...settings.permissions,
-    };
     const updated: TableSettings = {
       ...this.settings,
       ...settings,
-      permissions,
+      permissions: {
+        ...this.settings.permissions,
+        ...settings.permissions,
+      },
     };
     if (settings.maxRecords === 0) {
       delete updated.maxRecords;
@@ -102,7 +92,7 @@ export class Table {
    *
    * @param user - Target user handle.
    */
-  canCreate(user?: User): boolean {
+  canCreate(user: User): boolean {
     return this.canAccess(this.settings.permissions.create, user);
   }
 
@@ -112,7 +102,7 @@ export class Table {
    * @param user - Target user handle.
    * @param record - Optional specific record to check.
    */
-  canRead(user?: User, record?: InternalStoredRecord): boolean {
+  canRead(user: User, record?: InternalStoredRecord): boolean {
     return record
       ? isPermissionAllowed(this.settings.permissions.read, user, record.userId)
       : this.canAccess(this.settings.permissions.read, user);
@@ -124,7 +114,7 @@ export class Table {
    * @param user - Target user handle.
    * @param existing - Existing record to update.
    */
-  canUpdate(user?: User, existing?: InternalStoredRecord): boolean {
+  canUpdate(user: User, existing?: InternalStoredRecord): boolean {
     return existing
       ? isPermissionAllowed(
           this.settings.permissions.update,
@@ -140,7 +130,7 @@ export class Table {
    * @param user - Target user handle.
    * @param existing - Existing record to delete.
    */
-  canDelete(user?: User, existing?: InternalStoredRecord): boolean {
+  canDelete(user: User, existing?: InternalStoredRecord): boolean {
     return existing
       ? isPermissionAllowed(
           this.settings.permissions.delete,
@@ -159,10 +149,11 @@ export class Table {
    * @throws TetherServerError with Forbidden code if unauthorized.
    */
   assertCanApplyChange(
-    user: User | undefined,
+    user: User,
     change: { op: OperationType; id: string; table?: string },
     existing?: InternalStoredRecord,
   ): void {
+    if (user.isAdmin) return;
     const tableName = change.table ?? this.name;
     if (change.op === OperationType.Delete) {
       if (!this.canDelete(user, existing)) {
@@ -193,13 +184,13 @@ export class Table {
    * @param id - Record identifier.
    * @returns Stored record or `undefined`.
    */
-  async getRecord(
-    user: User | undefined,
-    id: string,
-  ): Promise<StoredRecord | undefined> {
+  async getRecord(user: User, id: string): Promise<StoredRecord | undefined> {
     if (!this.canRead(user)) return undefined;
-    const partition = this.isPrivate ? user?.userId : '__shared__';
-    if (!partition) return undefined;
+    if (this.isPrivate && user.isAnonymous) return undefined;
+    const partition =
+      this.isPrivate && user.isAuthenticated && !user.isAdmin
+        ? user.userId
+        : '__shared__';
 
     const raw = await this.storage.getRawRecord(this.name, partition, id);
     if (!raw || raw.deleted || !this.canRead(user, raw)) return undefined;
@@ -214,10 +205,13 @@ export class Table {
    * @param user - Target user handle.
    * @returns Array of public SnapshotRecord items.
    */
-  async getAllRecords(user?: User): Promise<SnapshotRecord[]> {
+  async getAllRecords(user: User): Promise<SnapshotRecord[]> {
     if (!this.canRead(user)) return [];
-    const partition = this.isPrivate ? user?.userId : '__shared__';
-    if (!partition) return [];
+    if (this.isPrivate && user.isAnonymous) return [];
+    const partition =
+      this.isPrivate && user.isAuthenticated && !user.isAdmin
+        ? user.userId
+        : '__shared__';
 
     const rawRecords = await this.storage.getRawRecords(this.name, partition);
     const resolver = new UserResolver(this.storage);
@@ -245,20 +239,18 @@ export class Table {
    * Applies an array of mutation change operations to this table for a user.
    *
    * @param user - Target user handle.
-   * @param changes - Array of change records.
-   * @param options - Optional application options.
+   * @param changes - Array of change records to apply.
    * @returns Applied changes and new sequence number.
    */
   async applyChanges(
-    user: User | undefined,
+    user: User,
     changes: ChangeRecord[],
-    options?: ApplyChangesOptions,
   ): Promise<{ applied: ChangeRecord[]; newSeq: number }> {
     const targeted = changes.map((c) => ({
       ...c,
       table: this.name,
     }));
-    return this.storage.applyChanges(user, targeted, options);
+    return this.storage.applyChanges(user, targeted);
   }
 
   /**
@@ -269,14 +261,14 @@ export class Table {
    */
   async insertRows(rows: TableRow[]): Promise<number> {
     if (rows.length === 0) return 0;
-    const existing = await this.getAllRecords();
+    const existing = await this.getAllRecords(User.Admin);
     const existingIds = new Set(existing.map((r) => r.id));
     const toInsert = rows.filter((r) => !existingIds.has(r.id));
     if (toInsert.length === 0) return 0;
 
     const now = Date.now();
     for (const item of toInsert) {
-      let authorUser: User | undefined;
+      let authorUser: User = User.Admin;
       if (item.userName) {
         const user = await this.storage.getUserByUserName(item.userName);
         if (user) {
@@ -290,9 +282,7 @@ export class Table {
         data: item.data,
         timestamp: now,
       };
-      await this.applyChanges(authorUser, [change], {
-        skipPermissionCheck: true,
-      });
+      await this.applyChanges(authorUser, [change]);
     }
     return toInsert.length;
   }
@@ -308,10 +298,11 @@ export class Table {
 
   // -- Private Helpers --------------------------------------------------------
 
-  private canAccess(permission: Permission, user?: User): boolean {
+  private canAccess(permission: Permission, user: User): boolean {
+    if (user.isAdmin) return true;
     return (
       permission === Permission.Everybody ||
-      (user !== undefined && permission !== Permission.Nobody)
+      (user.isAuthenticated && permission !== Permission.Nobody)
     );
   }
 }

@@ -28,8 +28,8 @@ import {
   StorageType,
   validateBatchChanges,
 } from './storage.js';
-import { type ApplyChangesOptions, Table } from './table.js';
-import { User } from './user.js';
+import { Table } from './table.js';
+import { createAuthenticatedUser, type User } from './user.js';
 
 export interface StatePartition {
   currentSeq: number;
@@ -129,14 +129,24 @@ export class MemoryStorage extends Storage {
 
     this.users.set(userId, userData);
     this.usersByUserName.set(safeUserName, userId);
-    return new User(userId, safeUserName, userData.createdAt, this);
+    return createAuthenticatedUser(
+      userId,
+      safeUserName,
+      userData.createdAt,
+      this,
+    );
   }
 
   async getUser(userId: string): Promise<User | undefined> {
     const safeUserId = validateUserId(userId);
     const data = this.users.get(safeUserId);
     if (data) {
-      return new User(data.userId, data.userName, data.createdAt, this);
+      return createAuthenticatedUser(
+        data.userId,
+        data.userName,
+        data.createdAt,
+        this,
+      );
     }
     return undefined;
   }
@@ -148,14 +158,19 @@ export class MemoryStorage extends Storage {
     if (!userId) return undefined;
     const data = this.users.get(userId);
     if (data) {
-      return new User(data.userId, data.userName, data.createdAt, this);
+      return createAuthenticatedUser(
+        data.userId,
+        data.userName,
+        data.createdAt,
+        this,
+      );
     }
     return undefined;
   }
 
   async getUsers(): Promise<User[]> {
-    return Array.from(this.users.values()).map(
-      (data) => new User(data.userId, data.userName, data.createdAt, this),
+    return Array.from(this.users.values()).map((data) =>
+      createAuthenticatedUser(data.userId, data.userName, data.createdAt, this),
     );
   }
 
@@ -219,7 +234,12 @@ export class MemoryStorage extends Storage {
     this.usersByUserName.delete(data.userName);
     data.userName = safeNewName;
     this.usersByUserName.set(safeNewName, safeUserId);
-    return new User(data.userId, data.userName, data.createdAt, this);
+    return createAuthenticatedUser(
+      data.userId,
+      data.userName,
+      data.createdAt,
+      this,
+    );
   }
 
   async getUserPasswordHash(
@@ -268,14 +288,17 @@ export class MemoryStorage extends Storage {
 
   async getRawChangesSince(
     fromSeq: number,
-    user?: User,
+    user: User,
   ): Promise<{
     rawChanges: InternalChangeRecord[];
     currentSeq: number;
     minSeq: number;
   }> {
     const currentSeq = this.globalSeq;
-    const userState = user ? this.getUserState(user.userId) : null;
+    const userState =
+      user.isAuthenticated && !user.isAdmin && user.userId
+        ? this.getUserState(user.userId)
+        : null;
     const userMinSeq = userState?.minSeq ?? 0;
     const sharedMinSeq = this.sharedState.minSeq;
     const minSeq = Math.max(userMinSeq, sharedMinSeq);
@@ -293,9 +316,8 @@ export class MemoryStorage extends Storage {
   }
 
   async applyChanges(
-    user: User | undefined,
+    user: User,
     changes: ChangeRecord[],
-    options?: ApplyChangesOptions,
   ): Promise<{ applied: ChangeRecord[]; newSeq: number }> {
     if (changes.length === 0) {
       return { applied: [], newSeq: this.globalSeq };
@@ -319,7 +341,10 @@ export class MemoryStorage extends Storage {
     >();
     const stagedApplied: InternalChangeRecord[] = [];
 
-    const userState = user ? this.getUserState(user.userId) : null;
+    const userState =
+      user.isAuthenticated && !user.isAdmin && user.userId
+        ? this.getUserState(user.userId)
+        : null;
 
     for (const change of changes) {
       const tableName = validateTableName(change.table);
@@ -331,7 +356,7 @@ export class MemoryStorage extends Storage {
       let targetMap: Map<string, InternalStoredRecord>;
 
       if (table.isPrivate) {
-        if (!userState && !options?.skipPermissionCheck) {
+        if (user.isAnonymous) {
           throw new TetherServerError(
             TetherServerErrorCode.Forbidden,
             'Authentication required',
@@ -341,7 +366,7 @@ export class MemoryStorage extends Storage {
         if (!stagedMap) {
           const existingMap = userState
             ? userState.tables.get(tableName)
-            : undefined;
+            : this.sharedState.tables.get(tableName);
           stagedMap = new Map(existingMap);
           stagedUserTables.set(tableName, stagedMap);
         }
@@ -357,9 +382,7 @@ export class MemoryStorage extends Storage {
       }
 
       const existing = targetMap.get(recordId);
-      if (!options?.skipPermissionCheck) {
-        table.assertCanApplyChange(user, change, existing);
-      }
+      table.assertCanApplyChange(user, change, existing);
 
       if (
         change.op === OperationType.Put &&
@@ -396,6 +419,10 @@ export class MemoryStorage extends Storage {
       }
       userState.currentSeq = this.globalSeq;
       if (userState.minSeq === 0 && this.globalSeq > 0) userState.minSeq = 1;
+    } else {
+      for (const [tableName, stagedMap] of stagedUserTables.entries()) {
+        this.sharedState.tables.set(tableName, stagedMap);
+      }
     }
 
     for (const [tableName, stagedMap] of stagedSharedTables.entries()) {
@@ -441,7 +468,7 @@ export class MemoryStorage extends Storage {
     return { applied: publicApplied, newSeq: this.globalSeq };
   }
 
-  async getCurrentSeq(_user?: User): Promise<number> {
+  async getCurrentSeq(_user: User): Promise<number> {
     return this.globalSeq;
   }
 

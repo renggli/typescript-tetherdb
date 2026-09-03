@@ -11,6 +11,7 @@ import type {
   Storage,
   StorageStatus,
 } from './storage/storage.js';
+import { User } from './storage/user.js';
 
 /**
  * Connection details encoded in an admin connection token.
@@ -125,19 +126,19 @@ export interface AdminTarget {
     newUserName: string,
   ): Promise<{ userId: string; userName: string; createdAt: number }>;
 
-  /** Retrieves records from a table partition. */
-  getRecords(tableName: string, userId?: string): Promise<SnapshotRecord[]>;
+  /** Retrieves records from a table partition, optionally executing as a specific user. */
+  getRecords(tableName: string, user?: string): Promise<SnapshotRecord[]>;
 
-  /** Puts or updates a record payload in a table partition. */
+  /** Puts or updates a record payload in a table partition, optionally executing as a specific user. */
   putRecord(
     tableName: string,
     id: string,
     data: unknown,
-    userId?: string,
+    user?: string,
   ): Promise<void>;
 
-  /** Deletes a record from a table partition. */
-  deleteRecord(tableName: string, id: string, userId?: string): Promise<void>;
+  /** Deletes a record from a table partition, optionally executing as a specific user. */
+  deleteRecord(tableName: string, id: string, user?: string): Promise<void>;
 
   /** Truncates WAL log files for SQLite databases. */
   checkpoint(): Promise<MaintenanceResult>;
@@ -266,10 +267,10 @@ export class AdminClient implements AdminTarget {
 
   async getRecords(
     tableName: string,
-    userId?: string,
+    user?: string,
   ): Promise<SnapshotRecord[]> {
     const params = new URLSearchParams({ table: tableName });
-    if (userId) params.set('user', userId);
+    if (user) params.set('user', user);
     return this.request('GET', `/admin/records?${params.toString()}`);
   }
 
@@ -277,7 +278,7 @@ export class AdminClient implements AdminTarget {
     tableName: string,
     id: string,
     data: unknown,
-    userId?: string,
+    user?: string,
   ): Promise<void> {
     const change: ChangeRecord = {
       table: tableName,
@@ -288,7 +289,7 @@ export class AdminClient implements AdminTarget {
       clientId: 'admin-cli',
     };
     await this.request('POST', '/admin/records', {
-      userId,
+      user,
       changes: [change],
     });
   }
@@ -296,7 +297,7 @@ export class AdminClient implements AdminTarget {
   async deleteRecord(
     tableName: string,
     id: string,
-    userId?: string,
+    user?: string,
   ): Promise<void> {
     const change: ChangeRecord = {
       table: tableName,
@@ -306,7 +307,7 @@ export class AdminClient implements AdminTarget {
       clientId: 'admin-cli',
     };
     await this.request('POST', '/admin/records', {
-      userId,
+      user,
       changes: [change],
     });
   }
@@ -490,7 +491,7 @@ export class LocalAdminTarget implements AdminTarget {
 
   async getRecords(
     tableName: string,
-    userId?: string,
+    user?: string,
   ): Promise<SnapshotRecord[]> {
     const table = await this.storage.getTable(tableName);
     if (!table) {
@@ -499,8 +500,8 @@ export class LocalAdminTarget implements AdminTarget {
         `Table "${tableName}" not found`,
       );
     }
-    const user = userId ? await this.storage.getUser(userId) : undefined;
-    const records = await table.getAllRecords(user);
+    const resolvedUser = await this.resolveUser(user);
+    const records = await table.getAllRecords(resolvedUser);
     return records.map((r) => ({
       table: tableName,
       id: r.id,
@@ -517,22 +518,22 @@ export class LocalAdminTarget implements AdminTarget {
     tableName: string,
     id: string,
     data: unknown,
-    userId?: string,
+    user?: string,
   ): Promise<void> {
-    await this.applyAdminChange(tableName, id, OperationType.Put, data, userId);
+    await this.applyAdminChange(tableName, id, OperationType.Put, data, user);
   }
 
   async deleteRecord(
     tableName: string,
     id: string,
-    userId?: string,
+    user?: string,
   ): Promise<void> {
     await this.applyAdminChange(
       tableName,
       id,
       OperationType.Delete,
       undefined,
-      userId,
+      user,
     );
   }
 
@@ -554,15 +555,31 @@ export class LocalAdminTarget implements AdminTarget {
 
   // -- Private Helpers --------------------------------------------------------
 
+  private async resolveUser(identifier?: string): Promise<User> {
+    if (identifier === undefined) {
+      return User.Admin;
+    }
+    const user =
+      (await this.storage.getUser(identifier)) ??
+      (await this.storage.getUserByUserName(identifier));
+    if (!user) {
+      throw new TetherServerError(
+        TetherServerErrorCode.NotFound,
+        `User "${identifier}" not found`,
+      );
+    }
+    return user;
+  }
+
   private async applyAdminChange(
     table: string,
     id: string,
     op: OperationType,
     data?: unknown,
-    userId?: string,
+    user?: string,
   ): Promise<void> {
-    const user = userId ? await this.storage.getUser(userId) : undefined;
-    await this.storage.applyChanges(user, [
+    const resolvedUser = await this.resolveUser(user);
+    await this.storage.applyChanges(resolvedUser, [
       {
         table,
         id,

@@ -14,23 +14,25 @@ import type { InternalChangeRecord, InternalStoredRecord } from './types.js';
  * Checks whether an actor permission rule permits access for a given user and record owner.
  *
  * @param permission - Permission requirement level.
- * @param user - Authenticated user context.
+ * @param user - User context.
  * @param recordUserId - Record owner user ID.
  * @returns `true` if access is granted.
  */
 export function isPermissionAllowed(
   permission: Permission,
-  user?: User,
+  user: User,
   recordUserId?: string,
 ): boolean {
+  if (user.isAdmin) return true;
+
   switch (permission) {
     case Permission.Everybody:
       return true;
     case Permission.Authenticated:
-      return user !== undefined;
+      return user.isAuthenticated;
     case Permission.Owner:
       return (
-        user !== undefined &&
+        user.isAuthenticated &&
         recordUserId !== undefined &&
         recordUserId === user.userId
       );
@@ -45,7 +47,7 @@ export function isPermissionAllowed(
  *
  * @param raw - Internal stored record.
  * @param resolver - UserResolver instance.
- * @param fallbackUser - Optional authenticated user context.
+ * @param fallbackUser - Optional user context.
  * @returns Public StoredRecord object with no internal fields.
  */
 export async function sanitizeStoredRecord<T = unknown>(
@@ -70,14 +72,14 @@ export async function sanitizeStoredRecord<T = unknown>(
  * Filters readable tables/records and produces a sanitized, fattened snapshot payload.
  *
  * @param tables - Array of available Table handles.
- * @param user - Target authenticated user or guest.
+ * @param user - Target user.
  * @param resolver - UserResolver instance.
  * @param tableFilters - Optional table name filter.
  * @returns Array of public SnapshotRecord objects.
  */
 export async function filterAndSanitizeSnapshot(
   tables: Table[],
-  user: User | undefined,
+  user: User,
   resolver: UserResolver,
   tableFilters?: string[],
 ): Promise<SnapshotRecord[]> {
@@ -86,10 +88,9 @@ export async function filterAndSanitizeSnapshot(
   for (const table of tables) {
     if (!table.canRead(user)) continue;
     if (tableFilters && !tableFilters.includes(table.name)) continue;
+    if (table.isPrivate && user.isAnonymous) continue;
 
-    const partition = table.isPrivate ? user?.userId : '__shared__';
-    if (!partition) continue;
-
+    const partition = table.isPrivate ? user.userId : '__shared__';
     const rawRecords = await table.storage.getRawRecords(table.name, partition);
     for (const raw of rawRecords) {
       if (raw.deleted || !table.canRead(user, raw)) continue;
@@ -122,7 +123,7 @@ export async function filterAndSanitizeSnapshot(
  */
 export async function filterAndSanitizeChanges(
   rawChanges: InternalChangeRecord[],
-  user: User | undefined,
+  user: User,
   tableLookup: (name: string) => Promise<Table | undefined> | Table | undefined,
   resolver: UserResolver,
   tableFilters?: string[],
@@ -140,7 +141,13 @@ export async function filterAndSanitizeChanges(
     }
 
     if (!table?.canRead(user)) continue;
-    if (table.isPrivate && (!user || raw.userId !== user.userId)) continue;
+    if (
+      table.isPrivate &&
+      !user.isAdmin &&
+      (!user.isAuthenticated || raw.userId !== user.userId)
+    ) {
+      continue;
+    }
     if (!table.canRead(user, { userId: raw.userId } as InternalStoredRecord)) {
       continue;
     }

@@ -5,6 +5,7 @@ import { TetherServerErrorCode } from '../../../src/server/errors.js';
 import { acquireServerLock } from '../../../src/server/shared/lock.js';
 import { SqliteStorage } from '../../../src/server/storage/sqlite.js';
 import { StorageType } from '../../../src/server/storage/storage.js';
+import { User } from '../../../src/server/storage/user.js';
 import {
   OperationType,
   Permission,
@@ -399,7 +400,7 @@ describe('SqliteStorage', () => {
       permissions: PUBLIC_READ_WRITE_PERMISSIONS,
     });
 
-    await context.backend.applyChanges(undefined, [
+    await context.backend.applyChanges(User.Anonymous, [
       {
         table: 'posts_del',
         id: 'p1',
@@ -409,7 +410,7 @@ describe('SqliteStorage', () => {
       },
     ]);
 
-    expect(await table.getRecord(undefined, 'p1')).toBeDefined();
+    expect(await table.getRecord(User.Anonymous, 'p1')).toBeDefined();
 
     const deleted = context.backend.deleteTable('posts_del');
     expect(deleted).toBe(true);
@@ -463,7 +464,10 @@ describe('SqliteStorage', () => {
       },
     ]);
 
-    const beforeDelete = await context.backend.getRawChangesSince(0);
+    const beforeDelete = await context.backend.getRawChangesSince(
+      0,
+      User.Admin,
+    );
     expect(beforeDelete.rawChanges).toHaveLength(1);
     expect(beforeDelete.rawChanges[0].id).toBe('msg-1');
     expect(beforeDelete.rawChanges[0].op).toBe(OperationType.Put);
@@ -473,13 +477,13 @@ describe('SqliteStorage', () => {
     expect(deleted).toBe(true);
 
     // Subsequent sync from seq 1 should receive the delete operation
-    const afterDelete = await context.backend.getChangesSince(undefined, 1);
+    const afterDelete = await context.backend.getChangesSince(User.Admin, 1);
     expect(afterDelete.changes).toHaveLength(1);
     expect(afterDelete.changes[0].id).toBe('msg-1');
     expect(afterDelete.changes[0].op).toBe(OperationType.Delete);
 
     // Record should be deleted from table
-    const record = await table.getRecord(undefined, 'msg-1');
+    const record = await table.getRecord(User.Admin, 'msg-1');
     expect(record).toBeUndefined();
   });
 });

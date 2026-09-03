@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { TetherServerErrorCode } from '../../../src/server/errors.js';
 import type { Storage } from '../../../src/server/storage/storage.js';
-import type { User } from '../../../src/server/storage/user.js';
+import { User } from '../../../src/server/storage/user.js';
 import {
   type ChangeRecord,
   OperationType,
@@ -61,7 +61,7 @@ describe.each(storageDescriptors)(
 
         // Guest fails
         await expect(
-          storage.applyChanges(undefined, [change]),
+          storage.applyChanges(User.Anonymous, [change]),
         ).rejects.toMatchObject({
           code: TetherServerErrorCode.Forbidden,
         });
@@ -92,7 +92,7 @@ describe.each(storageDescriptors)(
 
         // Guest fails
         await expect(
-          storage.applyChanges(undefined, [guestChange]),
+          storage.applyChanges(User.Anonymous, [guestChange]),
         ).rejects.toMatchObject({
           code: TetherServerErrorCode.Forbidden,
         });
@@ -132,7 +132,7 @@ describe.each(storageDescriptors)(
           timestamp: 1000,
           clientId: 'c1',
         };
-        await storage.applyChanges(undefined, [guestChange]);
+        await storage.applyChanges(User.Anonymous, [guestChange]);
 
         // Alice creates record
         const aliceChange: ChangeRecord = {
@@ -145,9 +145,11 @@ describe.each(storageDescriptors)(
         };
         await storage.applyChanges(userAlice, [aliceChange]);
 
-        expect(await table.getRecord(undefined, 'guest-rec')).toBeDefined();
+        expect(
+          await table.getRecord(User.Anonymous, 'guest-rec'),
+        ).toBeDefined();
         expect(await table.getRecord(userAlice, 'alice-rec')).toBeDefined();
-        expect(await table.getAllRecords(undefined)).toHaveLength(2);
+        expect(await table.getAllRecords(User.Anonymous)).toHaveLength(2);
       });
     });
 
@@ -187,8 +189,10 @@ describe.each(storageDescriptors)(
         expect(await table.getAllRecords(userBob)).toHaveLength(0);
 
         // Guest cannot read
-        expect(await table.getRecord(undefined, 'secret-1')).toBeUndefined();
-        expect(await table.getAllRecords(undefined)).toHaveLength(0);
+        expect(
+          await table.getRecord(User.Anonymous, 'secret-1'),
+        ).toBeUndefined();
+        expect(await table.getAllRecords(User.Anonymous)).toHaveLength(0);
 
         // getChangesSince returns no changes
         const diff = await storage.getChangesSince(userAlice, 0);
@@ -241,9 +245,9 @@ describe.each(storageDescriptors)(
         expect(bobAll[0].id).toBe('note-2');
 
         // Guest reads: sees nothing
-        expect(await table.getRecord(undefined, 'note-1')).toBeUndefined();
-        expect(await table.getRecord(undefined, 'note-2')).toBeUndefined();
-        expect(await table.getAllRecords(undefined)).toHaveLength(0);
+        expect(await table.getRecord(User.Anonymous, 'note-1')).toBeUndefined();
+        expect(await table.getRecord(User.Anonymous, 'note-2')).toBeUndefined();
+        expect(await table.getAllRecords(User.Anonymous)).toHaveLength(0);
 
         // Changelog isolation: incremental diffs from seq 1
         const aliceDiff = await storage.getChangesSince(userAlice, 1);
@@ -291,15 +295,15 @@ describe.each(storageDescriptors)(
         expect(await table.getAllRecords(userBob)).toHaveLength(2);
 
         // Guest CANNOT read
-        expect(await table.getRecord(undefined, 'task-1')).toBeUndefined();
-        expect(await table.getAllRecords(undefined)).toHaveLength(0);
+        expect(await table.getRecord(User.Anonymous, 'task-1')).toBeUndefined();
+        expect(await table.getAllRecords(User.Anonymous)).toHaveLength(0);
 
         // Bob receives subsequent change from seq 1
         const bobDiff = await storage.getChangesSince(userBob, 1);
         expect(bobDiff.changes.some((c) => c.id === 'task-2')).toBe(true);
 
         // Guest receives no changes in changelog
-        const guestDiff = await storage.getChangesSince(undefined, 1);
+        const guestDiff = await storage.getChangesSince(User.Anonymous, 1);
         expect(guestDiff.changes.some((c) => c.id === 'task-2')).toBe(false);
       });
 
@@ -330,10 +334,10 @@ describe.each(storageDescriptors)(
         // Alice, Bob, and Guest all see the record
         expect(await table.getRecord(userAlice, 'news-1')).toBeDefined();
         expect(await table.getRecord(userBob, 'news-1')).toBeDefined();
-        expect(await table.getRecord(undefined, 'news-1')).toBeDefined();
+        expect(await table.getRecord(User.Anonymous, 'news-1')).toBeDefined();
 
-        expect(await table.getAllRecords(undefined)).toHaveLength(2);
-        const guestDiff = await storage.getChangesSince(undefined, 1);
+        expect(await table.getAllRecords(User.Anonymous)).toHaveLength(2);
+        const guestDiff = await storage.getChangesSince(User.Anonymous, 1);
         expect(guestDiff.changes.some((c) => c.id === 'news-2')).toBe(true);
       });
     });
@@ -433,7 +437,7 @@ describe.each(storageDescriptors)(
 
         // Guest attempts to edit Alice's post -> rejected
         await expect(
-          storage.applyChanges(undefined, [
+          storage.applyChanges(User.Anonymous, [
             {
               table: 'forum_posts',
               id: 'post-1',
@@ -503,7 +507,7 @@ describe.each(storageDescriptors)(
 
         // Guest attempts update -> fails
         await expect(
-          storage.applyChanges(undefined, [
+          storage.applyChanges(User.Anonymous, [
             {
               table: 'collaborative_wiki',
               id: 'article-1',
@@ -539,7 +543,7 @@ describe.each(storageDescriptors)(
         ]);
 
         // Guest updates
-        await storage.applyChanges(undefined, [
+        await storage.applyChanges(User.Anonymous, [
           {
             table: 'shared_scratchpad',
             id: 'pad-1',
@@ -550,7 +554,7 @@ describe.each(storageDescriptors)(
           },
         ]);
 
-        const record = await table.getRecord(undefined, 'pad-1');
+        const record = await table.getRecord(User.Anonymous, 'pad-1');
         expect(record?.data).toEqual({ text: 'Hello from guest' });
       });
     });
@@ -643,7 +647,7 @@ describe.each(storageDescriptors)(
 
         // Guest attempts to delete -> rejected
         await expect(
-          storage.applyChanges(undefined, [
+          storage.applyChanges(User.Anonymous, [
             {
               table: 'discussions',
               id: 'topic-1',
@@ -696,7 +700,7 @@ describe.each(storageDescriptors)(
 
         // Guest cannot delete
         await expect(
-          storage.applyChanges(undefined, [
+          storage.applyChanges(User.Anonymous, [
             {
               table: 'moderated_chat',
               id: 'msg-1',
@@ -740,7 +744,7 @@ describe.each(storageDescriptors)(
         ]);
 
         // Guest deletes
-        await storage.applyChanges(undefined, [
+        await storage.applyChanges(User.Anonymous, [
           {
             table: 'temp_sandbox',
             id: 'tmp-1',
@@ -750,7 +754,7 @@ describe.each(storageDescriptors)(
           },
         ]);
 
-        expect(await table.getRecord(undefined, 'tmp-1')).toBeUndefined();
+        expect(await table.getRecord(User.Anonymous, 'tmp-1')).toBeUndefined();
       });
 
       it('should prevent non-creator from updating or deleting unowned records when policy is Permission.Owner', async () => {
@@ -764,20 +768,16 @@ describe.each(storageDescriptors)(
         });
 
         // Insert unowned record (userId undefined)
-        await storage.applyChanges(
-          undefined,
-          [
-            {
-              table: 'shared_owner_unowned',
-              id: 'unowned-rec',
-              op: OperationType.Put,
-              data: { text: 'System default' },
-              timestamp: 1000,
-              clientId: 'system',
-            },
-          ],
-          { skipPermissionCheck: true },
-        );
+        await storage.applyChanges(User.Admin, [
+          {
+            table: 'shared_owner_unowned',
+            id: 'unowned-rec',
+            op: OperationType.Put,
+            data: { text: 'System default' },
+            timestamp: 1000,
+            clientId: 'system',
+          },
+        ]);
 
         // Alice attempts to update unowned record -> rejected
         await expect(
@@ -810,7 +810,7 @@ describe.each(storageDescriptors)(
           code: TetherServerErrorCode.Forbidden,
         });
 
-        const rec = await table.getRecord(undefined, 'unowned-rec');
+        const rec = await table.getRecord(User.Anonymous, 'unowned-rec');
         expect(rec?.data).toEqual({ text: 'System default' });
       });
     });
@@ -840,6 +840,109 @@ describe.each(storageDescriptors)(
         expect(authUserNew).toBeDefined();
         expect(authUserNew?.userId).toBe(user.userId);
         expect(await user.verifyToken(newToken)).toBe(true);
+      });
+    });
+
+    describe('Admin and Anonymous Operations Matrix', () => {
+      it('allows Admin to perform full CRUD on a table with Permission.Nobody for everything', async () => {
+        const lockedTable = await storage.createTable('locked_down', {
+          permissions: {
+            create: Permission.Nobody,
+            read: Permission.Nobody,
+            update: Permission.Nobody,
+            delete: Permission.Nobody,
+          },
+        });
+
+        // Alice cannot create
+        await expect(
+          storage.applyChanges(userAlice, [
+            {
+              table: 'locked_down',
+              id: 'l-1',
+              op: OperationType.Put,
+              data: { val: 1 },
+              timestamp: 1000,
+              clientId: 'c1',
+            },
+          ]),
+        ).rejects.toMatchObject({ code: TetherServerErrorCode.Forbidden });
+
+        // Admin can create
+        const putRes = await storage.applyChanges(User.Admin, [
+          {
+            table: 'locked_down',
+            id: 'l-1',
+            op: OperationType.Put,
+            data: { val: 1 },
+            timestamp: 1000,
+            clientId: 'admin-client',
+          },
+        ]);
+        expect(putRes.applied).toHaveLength(1);
+
+        // Admin can read
+        const adminRec = await lockedTable.getRecord(User.Admin, 'l-1');
+        expect(adminRec).toBeDefined();
+        expect(adminRec?.data).toEqual({ val: 1 });
+
+        const adminAll = await lockedTable.getAllRecords(User.Admin);
+        expect(adminAll).toHaveLength(1);
+
+        // Admin can update
+        await storage.applyChanges(User.Admin, [
+          {
+            table: 'locked_down',
+            id: 'l-1',
+            op: OperationType.Put,
+            data: { val: 2 },
+            timestamp: 2000,
+            clientId: 'admin-client',
+          },
+        ]);
+        const updated = await lockedTable.getRecord(User.Admin, 'l-1');
+        expect(updated?.data).toEqual({ val: 2 });
+
+        // Admin can delete
+        await storage.applyChanges(User.Admin, [
+          {
+            table: 'locked_down',
+            id: 'l-1',
+            op: OperationType.Delete,
+            timestamp: 3000,
+            clientId: 'admin-client',
+          },
+        ]);
+        const deleted = await lockedTable.getRecord(User.Admin, 'l-1');
+        expect(deleted).toBeUndefined();
+      });
+
+      it('strictly prohibits Anonymous from accessing private tables', async () => {
+        await storage.createTable('secret_notes', {
+          private: true,
+          permissions: USER_PRIVATE_PERMISSIONS,
+        });
+
+        // Anonymous applyChanges is rejected with Forbidden
+        await expect(
+          storage.applyChanges(User.Anonymous, [
+            {
+              table: 'secret_notes',
+              id: 'note-1',
+              op: OperationType.Put,
+              data: { text: 'forbidden' },
+              timestamp: 1000,
+              clientId: 'anon-client',
+            },
+          ]),
+        ).rejects.toMatchObject({ code: TetherServerErrorCode.Forbidden });
+
+        const table = await storage.getTable('secret_notes');
+        expect(table).toBeDefined();
+        expect(await table?.getAllRecords(User.Anonymous)).toHaveLength(0);
+        expect(
+          await table?.getRecord(User.Anonymous, 'note-1'),
+        ).toBeUndefined();
       });
     });
   },

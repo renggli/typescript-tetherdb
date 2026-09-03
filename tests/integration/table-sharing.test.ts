@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket as NodeWebSocket } from 'ws';
 import { DataMode, SyncStatus, TetherClient } from '../../src/client/index.js';
 import { startServer, TetherServer } from '../../src/server/server.js';
+import { User } from '../../src/server/storage/user.js';
 import { Permission } from '../../src/shared/types.js';
 import { waitForCondition } from '../helpers.js';
 import {
@@ -375,7 +376,7 @@ describe.each(storageDescriptors)(
 
       // Server table still contains only initial record
       const serverTbl = await server.storage.getTable('public_readonly_rules');
-      expect(await serverTbl?.getAllRecords()).toHaveLength(1);
+      expect(await serverTbl?.getAllRecords(User.Admin)).toHaveLength(1);
     });
 
     it('should isolate authenticated readonly tables from guests while allowing authenticated users to read', async () => {

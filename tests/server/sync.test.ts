@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebSocket } from 'ws';
 import { RateLimiter } from '../../src/server/shared/rate-limiter.js';
 import type { Storage } from '../../src/server/storage/storage.js';
+import { User } from '../../src/server/storage/user.js';
 import { Sync } from '../../src/server/sync.js';
 import {
   ClientMessageType,
@@ -1218,7 +1219,7 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       });
 
       await ws.waitForMessages(3);
-      const record = await table.getRecord(undefined, 'log1');
+      const record = await table.getRecord(User.Admin, 'log1');
       expect(record?.clientId).toBe('genuine_client_123');
     });
 

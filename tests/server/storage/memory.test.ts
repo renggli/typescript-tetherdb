@@ -3,6 +3,7 @@ import {
   TetherServerError,
   TetherServerErrorCode,
 } from '../../../src/server/errors.js';
+import { User } from '../../../src/server/storage/user.js';
 import {
   type ChangeRecord,
   OperationType,
@@ -246,7 +247,10 @@ describe('MemoryStorage', () => {
       const bobChanges = await backend.getChangesSince(userB, seqAfterA1);
       expect(bobChanges.changes.length).toBe(0);
 
-      const guestChanges = await backend.getChangesSince(undefined, seqAfterA1);
+      const guestChanges = await backend.getChangesSince(
+        User.Anonymous,
+        seqAfterA1,
+      );
       expect(guestChanges.changes.length).toBe(0);
     } finally {
       await cleanup();
@@ -285,7 +289,7 @@ describe('MemoryStorage', () => {
         permissions: PUBLIC_READ_WRITE_PERMISSIONS,
       });
       const payload = { settings: { theme: 'dark', count: 1 } };
-      await backend.applyChanges(undefined, [
+      await backend.applyChanges(User.Anonymous, [
         {
           table: table.name,
           id: 'c1',
@@ -298,7 +302,7 @@ describe('MemoryStorage', () => {
       payload.settings.theme = 'light';
       payload.settings.count = 999;
 
-      const record = await table.getRecord(undefined, 'c1');
+      const record = await table.getRecord(User.Anonymous, 'c1');
       expect(record?.data).toEqual({
         settings: { theme: 'dark', count: 1 },
       });

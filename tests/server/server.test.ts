@@ -5,6 +5,7 @@ import {
   TetherServerErrorCode,
 } from '../../src/server/errors.js';
 import { startServer, TetherServer } from '../../src/server/server.js';
+import { User } from '../../src/server/storage/user.js';
 import { Permission, type TableRow } from '../../src/shared/types.js';
 import { type StorageContext, storageDescriptors } from './storage/matrix.js';
 
@@ -76,7 +77,7 @@ describe.each(storageDescriptors)(
           { permissions: { read: Permission.Everybody } },
           rows,
         );
-        const records = await table.getAllRecords();
+        const records = await table.getAllRecords(User.Admin);
 
         expect(records).toHaveLength(2);
         expect(records.map((r) => r.id).sort()).toEqual(['item1', 'item2']);
@@ -102,7 +103,7 @@ describe.each(storageDescriptors)(
         );
 
         const table = await server.storage.getTable('categories');
-        const records = await table?.getAllRecords();
+        const records = await table?.getAllRecords(User.Admin);
 
         expect(records).toHaveLength(2);
         expect(records?.map((r) => r.id).sort()).toEqual(['cat1', 'cat2']);

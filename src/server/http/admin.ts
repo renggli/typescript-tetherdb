@@ -8,6 +8,7 @@ import {
 import { TetherServerError, TetherServerErrorCode } from '../errors.js';
 import type { TetherLogger } from '../server.js';
 import type { MaintenanceResult, Storage } from '../storage/storage.js';
+import { User } from '../storage/user.js';
 import type { CorsOptions } from './cors.js';
 import { readJsonBody, sendJson } from './json.js';
 
@@ -309,10 +310,7 @@ export async function handleAdminRequest(
           `Table "${tableName}" not found`,
         );
       }
-      const user = userParam
-        ? ((await ctx.storage.getUser(userParam)) ??
-          (await ctx.storage.getUserByUserName(userParam)))
-        : undefined;
+      const user = await resolveAdminTargetUser(ctx.storage, userParam);
       const records = await table.getAllRecords(user);
       sendJson(res, 200, records, ctx.corsConfig, req);
       return true;
@@ -321,6 +319,7 @@ export async function handleAdminRequest(
     if (method === 'POST') {
       try {
         const body = (await readJsonBody(req)) as {
+          user?: string;
           userId?: string;
           changes?: ChangeRecord[];
           table?: string;
@@ -328,10 +327,8 @@ export async function handleAdminRequest(
           data?: unknown;
           op?: OperationType;
         };
-        const user = body.userId
-          ? ((await ctx.storage.getUser(body.userId)) ??
-            (await ctx.storage.getUserByUserName(body.userId)))
-          : undefined;
+        const userParam = body.user ?? body.userId;
+        const user = await resolveAdminTargetUser(ctx.storage, userParam);
 
         let changes = body.changes;
         if (!changes && body.table && body.id) {
@@ -363,4 +360,25 @@ export async function handleAdminRequest(
   }
 
   return false;
+}
+
+// -- Private Helpers --------------------------------------------------------
+
+async function resolveAdminTargetUser(
+  storage: Storage,
+  identifier?: string | null,
+): Promise<User> {
+  if (identifier === undefined || identifier === null) {
+    return User.Admin;
+  }
+  const user =
+    (await storage.getUser(identifier)) ??
+    (await storage.getUserByUserName(identifier));
+  if (!user) {
+    throw new TetherServerError(
+      TetherServerErrorCode.NotFound,
+      `User "${identifier}" not found`,
+    );
+  }
+  return user;
 }

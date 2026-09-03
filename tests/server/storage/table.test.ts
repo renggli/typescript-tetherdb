@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { InternalStoredRecord } from '../../../src/server/security/types.js';
 import { MemoryStorage } from '../../../src/server/storage/memory.js';
+import { User } from '../../../src/server/storage/user.js';
 import { OperationType, Permission } from '../../../src/shared/types.js';
 
 describe('Table', () => {
@@ -19,11 +20,11 @@ describe('Table', () => {
     });
 
     // Create
-    expect(table.canCreate(undefined)).toBe(false);
+    expect(table.canCreate(User.Anonymous)).toBe(false);
     expect(table.canCreate(alice)).toBe(true);
 
     // Read
-    expect(table.canRead(undefined)).toBe(true);
+    expect(table.canRead(User.Anonymous)).toBe(true);
     expect(table.canRead(alice)).toBe(true);
 
     // Update
@@ -34,7 +35,7 @@ describe('Table', () => {
       table.canUpdate(bob, { userId: alice.userId } as InternalStoredRecord),
     ).toBe(false);
     expect(
-      table.canUpdate(undefined, {
+      table.canUpdate(User.Anonymous, {
         userId: alice.userId,
       } as InternalStoredRecord),
     ).toBe(false);
@@ -47,7 +48,7 @@ describe('Table', () => {
       table.canDelete(bob, { userId: alice.userId } as InternalStoredRecord),
     ).toBe(false);
     expect(
-      table.canDelete(undefined, {
+      table.canDelete(User.Anonymous, {
         userId: alice.userId,
       } as InternalStoredRecord),
     ).toBe(false);
@@ -101,14 +102,14 @@ describe('Table', () => {
       },
     ]);
 
-    const record = await table.getRecord(undefined, 'n1');
+    const record = await table.getRecord(User.Anonymous, 'n1');
     expect(record).toBeDefined();
     expect(record?.id).toBe('n1');
     expect(record?.data).toEqual({ text: 'hello' });
     expect(record?.userName).toBe('alice');
     expect((record as Record<string, unknown>).userId).toBeUndefined();
 
-    const all = await table.getAllRecords();
+    const all = await table.getAllRecords(User.Anonymous);
     expect(all).toHaveLength(1);
     expect(all[0].id).toBe('n1');
     expect(all[0].userName).toBe('alice');
@@ -135,7 +136,7 @@ describe('Table', () => {
 
     expect(inserted).toBe(2);
 
-    const records = await table.getAllRecords();
+    const records = await table.getAllRecords(User.Admin);
     expect(records).toHaveLength(2);
     const item1 = records.find((r) => r.id === 'i1');
     expect(item1?.userName).toBe('alice');
@@ -197,7 +198,7 @@ describe('Table', () => {
       },
     ]);
 
-    const record = await table.getRecord(undefined, 'art-1');
+    const record = await table.getRecord(User.Anonymous, 'art-1');
     expect(record?.userName).toBe('bob');
     expect(record?.data).toEqual({ title: 'Bob Post' });
 

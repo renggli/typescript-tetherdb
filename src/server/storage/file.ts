@@ -32,8 +32,8 @@ import {
   StorageType,
   validateBatchChanges,
 } from './storage.js';
-import { type ApplyChangesOptions, Table } from './table.js';
-import { User } from './user.js';
+import { Table } from './table.js';
+import { createAuthenticatedUser, type User } from './user.js';
 
 export interface FileUserData {
   userId: string;
@@ -157,7 +157,12 @@ export class FileStorage extends Storage {
 
       users.set(userId, userData);
       await this.writeUsersFile(users);
-      return new User(userId, safeUserName, userData.createdAt, this);
+      return createAuthenticatedUser(
+        userId,
+        safeUserName,
+        userData.createdAt,
+        this,
+      );
     });
   }
 
@@ -165,7 +170,12 @@ export class FileStorage extends Storage {
     const safeUserId = validateUserId(userId);
     const data = await this.findUserDataById(safeUserId);
     if (data) {
-      return new User(data.userId, data.userName, data.createdAt, this);
+      return createAuthenticatedUser(
+        data.userId,
+        data.userName,
+        data.createdAt,
+        this,
+      );
     }
     return undefined;
   }
@@ -176,7 +186,7 @@ export class FileStorage extends Storage {
     const users = await this.readUsersFile();
     for (const u of users.values()) {
       if (u.userName.toLowerCase() === safeUserName) {
-        return new User(u.userId, u.userName, u.createdAt, this);
+        return createAuthenticatedUser(u.userId, u.userName, u.createdAt, this);
       }
     }
     return undefined;
@@ -184,8 +194,8 @@ export class FileStorage extends Storage {
 
   async getUsers(): Promise<User[]> {
     const users = await this.readUsersFile();
-    return Array.from(users.values()).map(
-      (data) => new User(data.userId, data.userName, data.createdAt, this),
+    return Array.from(users.values()).map((data) =>
+      createAuthenticatedUser(data.userId, data.userName, data.createdAt, this),
     );
   }
 
@@ -221,14 +231,16 @@ export class FileStorage extends Storage {
 
   async getRawChangesSince(
     fromSeq: number,
-    user?: User,
+    user: User,
   ): Promise<{
     rawChanges: InternalChangeRecord[];
     currentSeq: number;
     minSeq: number;
   }> {
     const partitions: string[] = ['__shared__'];
-    if (user) partitions.push(user.userId);
+    if (user.isAuthenticated && !user.isAdmin && user.userId) {
+      partitions.push(user.userId);
+    }
 
     const meta = await this.readGlobalMeta();
     const allChanges: InternalChangeRecord[] = [];
@@ -267,9 +279,8 @@ export class FileStorage extends Storage {
   }
 
   async applyChanges(
-    user: User | undefined,
+    user: User,
     changes: ChangeRecord[],
-    options?: ApplyChangesOptions,
   ): Promise<{ applied: ChangeRecord[]; newSeq: number }> {
     const defaultMaxRecords = this.options.maxRecords ?? 10_000;
     const defaultMaxRecordSize = this.options.maxRecordSizeBytes ?? 512 * 1024;
@@ -288,16 +299,16 @@ export class FileStorage extends Storage {
       for (const change of changes) {
         const table = await this.getTable(change.table);
         if (!table) continue;
-        const partitionId = table.isPrivate
-          ? (user?.userId ?? '__shared__')
-          : '__shared__';
-        if (table.isPrivate && !user && !options?.skipPermissionCheck) {
+        if (table.isPrivate && user.isAnonymous) {
           throw new TetherServerError(
             TetherServerErrorCode.Forbidden,
             'Authentication required',
           );
         }
-        if (!partitionId) continue;
+        const partitionId =
+          table.isPrivate && user.isAuthenticated && !user.isAdmin
+            ? user.userId
+            : '__shared__';
         let list = partitionChanges.get(partitionId);
         if (!list) {
           list = [];
@@ -330,9 +341,7 @@ export class FileStorage extends Storage {
             }
 
             const existing = map.get(change.id);
-            if (!options?.skipPermissionCheck) {
-              table.assertCanApplyChange(user, change, existing);
-            }
+            table.assertCanApplyChange(user, change, existing);
 
             if (
               change.op === OperationType.Put &&
@@ -346,6 +355,7 @@ export class FileStorage extends Storage {
             }
 
             const shouldApply = !existing || shouldOverwrite(change, existing);
+
             if (shouldApply) {
               meta.currentSeq++;
               if (meta.minSeq === 0) meta.minSeq = 1;
@@ -409,7 +419,7 @@ export class FileStorage extends Storage {
     });
   }
 
-  async getCurrentSeq(_user?: User): Promise<number> {
+  async getCurrentSeq(_user: User): Promise<number> {
     const meta = await this.readGlobalMeta();
     return meta.currentSeq;
   }
@@ -675,7 +685,12 @@ export class FileStorage extends Storage {
       }
       users.set(safeUserId, { ...existing, userName: safeNewName });
       await this.writeUsersFile(users);
-      return new User(safeUserId, safeNewName, existing.createdAt, this);
+      return createAuthenticatedUser(
+        safeUserId,
+        safeNewName,
+        existing.createdAt,
+        this,
+      );
     });
   }
 

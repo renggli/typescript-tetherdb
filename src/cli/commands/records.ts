@@ -25,10 +25,10 @@ export async function handleRecordsCommand(
     );
   }
 
-  const userId = parseUserOption(args);
+  const user = parseUserOption(args);
 
   if (action === 'list') {
-    const records = await target.getRecords(tableName, userId);
+    const records = await target.getRecords(tableName, user);
     printRecords(tableName, records);
     return;
   }
@@ -52,7 +52,7 @@ export async function handleRecordsCommand(
       }
     }
 
-    await target.putRecord(tableName, recordId, parsedData, userId);
+    await target.putRecord(tableName, recordId, parsedData, user);
     console.log(`Put record "${recordId}" in table "${tableName}"`);
     return;
   }
@@ -66,7 +66,7 @@ export async function handleRecordsCommand(
       );
     }
 
-    await target.deleteRecord(tableName, recordId, userId);
+    await target.deleteRecord(tableName, recordId, user);
     console.log(`Deleted record "${recordId}" from table "${tableName}"`);
     return;
   }

@@ -14,6 +14,7 @@ import { getUserBucket } from '../../../../src/server/shared/validate.js';
 import { FileStorage } from '../../../../src/server/storage/file.js';
 import { SqliteStorage } from '../../../../src/server/storage/sqlite.js';
 import { StorageType } from '../../../../src/server/storage/storage.js';
+import { createAuthenticatedUser } from '../../../../src/server/storage/user.js';
 import { OperationType } from '../../../../src/shared/types.js';
 
 describe('handleMigrateCommand', () => {
@@ -161,15 +162,7 @@ describe('handleMigrateCommand', () => {
     const todosTable = await storage.getTable('todos');
     expect(todosTable).toBeDefined();
 
-    const mockUser = {
-      userId,
-      userName: 'test',
-      createdAt: 1000,
-      verifyPassword: async () => true,
-      changePassword: async () => {},
-      delete: async () => true,
-    };
-
+    const mockUser = createAuthenticatedUser(userId, 'test', 1000, storage);
     const records = await todosTable?.getAllRecords(mockUser);
     expect(records).toHaveLength(1);
     expect(records?.[0].id).toBe('rec1');
@@ -262,15 +255,7 @@ describe('handleMigrateCommand', () => {
     const todosTable = await storage.getTable('todos');
     expect(todosTable).toBeDefined();
 
-    const mockUser = {
-      userId,
-      userName: 'fileuser',
-      createdAt: 1000,
-      verifyPassword: async () => true,
-      changePassword: async () => {},
-      delete: async () => true,
-    };
-
+    const mockUser = createAuthenticatedUser(userId, 'fileuser', 1000, storage);
     const records = await todosTable?.getAllRecords(mockUser);
     expect(records).toHaveLength(1);
     expect(records?.[0].id).toBe('todo1');
