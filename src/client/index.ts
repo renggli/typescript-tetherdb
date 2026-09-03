@@ -9,6 +9,12 @@ export {
   type StoredRecord,
 } from '../shared/types.js';
 export {
+  isValidTableName,
+  TABLE_NAME_MAX_LENGTH,
+  TABLE_NAME_PATTERN,
+  type ValidTableName,
+} from '../shared/validate.js';
+export {
   AuthStatus,
   DataMode,
   type LoginOptions,

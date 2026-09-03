@@ -1,4 +1,5 @@
 import { EventRegistry } from '../shared/event.js';
+import { isValidTableName, type ValidTableName } from '../shared/validate.js';
 import {
   Auth,
   AuthStatus,
@@ -6,7 +7,7 @@ import {
   type LogoutOptions,
   type RegisterOptions,
 } from './auth.js';
-import { type TetherClientError, TetherClientErrorCode } from './errors.js';
+import { TetherClientError, TetherClientErrorCode } from './errors.js';
 import { TabChannel } from './shared/tab-channel.js';
 import { Storage } from './storage/storage.js';
 import { TETHER_PREFIX } from './storage/utils.js';
@@ -66,6 +67,16 @@ export class TetherClient {
    * @param options - Optional configuration options for remote sync and networking.
    */
   constructor(name: string, options: TetherClientOptions = {}) {
+    if (options.tables) {
+      for (const table of options.tables) {
+        if (!isValidTableName(table)) {
+          throw new TetherClientError(
+            TetherClientErrorCode.InvalidInput,
+            `Invalid table name "${table}"`,
+          );
+        }
+      }
+    }
     this.storage = createStorage(name);
     this.sync = createSync(this.storage, options);
     this.auth = createAuth(this.storage, this.sync);
@@ -200,11 +211,15 @@ export class TetherClient {
    * Obtains a typed table reference for reading, mutating, and subscribing to records.
    * Tables are created dynamically on-demand if not already declared.
    *
-   * @template T - Type of the stored object data.
-   * @param name - Table name.
+   * @typeParam T - Type of the stored object data.
+   * @typeParam N - Table name literal type.
+   * @param name - Valid table name string matching `/^[a-zA-Z0-9_-]{1,64}$/`.
    * @returns Typed Table reference.
+   * @throws TetherClientError if the table name is invalid.
    */
-  table<T = unknown>(name: string): Table<T> {
+  table<T = unknown, N extends string = string>(
+    name: ValidTableName<N>,
+  ): Table<T> {
     return this.storage.table<T>(name);
   }
 

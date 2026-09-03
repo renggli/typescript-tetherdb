@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   IndexDirection,
   IndexRange,
-  type Table,
+  Table,
   type TableChangeEvent,
+  TetherClientError,
+  TetherClientErrorCode,
 } from '../../src/client/index.js';
 import { Storage } from '../../src/client/storage/storage.js';
 import { OperationType } from '../../src/shared/types.js';
@@ -35,6 +37,20 @@ describe('Table', () => {
     expect(table.name).toBe('items');
     expect(table.clientId).toBe(storage.clientId);
     expect(typeof table.clientId).toBe('string');
+  });
+
+  it('should reject invalid table names in constructor', () => {
+    expect(() => new Table('invalid name', storage)).toThrow(TetherClientError);
+    try {
+      new Table('invalid name', storage);
+    } catch (err) {
+      expect((err as TetherClientError).code).toBe(
+        TetherClientErrorCode.InvalidInput,
+      );
+      expect((err as TetherClientError).message).toBe(
+        'Invalid table name "invalid name"',
+      );
+    }
   });
 
   describe('get & getAll', () => {

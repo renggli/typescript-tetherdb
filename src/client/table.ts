@@ -4,6 +4,8 @@ import {
   OperationType,
   type StoredRecord,
 } from '../shared/types.js';
+import { isValidTableName } from '../shared/validate.js';
+import { TetherClientError, TetherClientErrorCode } from './errors.js';
 import { Index, type IndexOptions } from './indexed.js';
 import type { LocalMutationItem, Storage } from './storage/storage.js';
 
@@ -67,6 +69,12 @@ export class Table<T = unknown> {
    * @param storage - Local storage coordinator.
    */
   constructor(tableName: string, storage: Storage) {
+    if (!isValidTableName(tableName)) {
+      throw new TetherClientError(
+        TetherClientErrorCode.InvalidInput,
+        `Invalid table name "${tableName}"`,
+      );
+    }
     this.tableName = tableName;
     this.storage = storage;
   }

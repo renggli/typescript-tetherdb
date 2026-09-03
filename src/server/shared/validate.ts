@@ -5,6 +5,7 @@
  * @module tetherdb/server/shared/validate
  */
 
+import { isValidTableName } from '../../shared/validate.js';
 import { TetherServerError, TetherServerErrorCode } from '../errors.js';
 
 /** Minimum allowed username character length. */
@@ -73,7 +74,13 @@ export function validateUserId(userId: string): string {
  * @throws TetherServerError if the name is invalid or unsafe.
  */
 export function validateTableName(name: string): string {
-  return validateFilesystemSafe(name, 'table name');
+  if (!isValidTableName(name)) {
+    throw new TetherServerError(
+      TetherServerErrorCode.InvalidInput,
+      'Invalid table name',
+    );
+  }
+  return name;
 }
 
 /**

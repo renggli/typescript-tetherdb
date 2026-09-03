@@ -54,6 +54,28 @@ describe('TetherClient', () => {
       expect(client.userName).toBeUndefined();
       expect(client.syncStatus).toBe(SyncStatus.Disconnected);
     });
+
+    it('should validate options.tables when provided', () => {
+      expect(() => {
+        const client = new TetherClient('db-test', {
+          // @ts-expect-error - testing invalid table name
+          tables: ['valid_table', 'invalid table with spaces'],
+        });
+        clientsToClose.push(client);
+      }).toThrow(TetherClientError);
+
+      try {
+        const client = new TetherClient('db-test', {
+          // @ts-expect-error - testing invalid table name
+          tables: ['valid_table', 'invalid table with spaces'],
+        });
+        clientsToClose.push(client);
+      } catch (err) {
+        expect((err as TetherClientError).code).toBe(
+          TetherClientErrorCode.InvalidInput,
+        );
+      }
+    });
   });
 
   describe('URL & Endpoint Resolution', () => {
@@ -141,6 +163,34 @@ describe('TetherClient', () => {
 
       await client.clear();
       expect(await table.getAll()).toHaveLength(0);
+    });
+
+    it('should reject invalid table names with TetherClientError', () => {
+      const client = new TetherClient(
+        `table-invalid-test-${Math.random().toString(36).substring(2, 8)}`,
+      );
+      clientsToClose.push(client);
+
+      // @ts-expect-error - testing invalid empty table name
+      expect(() => client.table('')).toThrow(TetherClientError);
+      // @ts-expect-error - testing invalid table name with spaces
+      expect(() => client.table('my table')).toThrow(TetherClientError);
+      // @ts-expect-error - testing path traversal
+      expect(() => client.table('../traversal')).toThrow(TetherClientError);
+      // @ts-expect-error - testing exceeding 64 characters
+      expect(() => client.table('a'.repeat(65))).toThrow(TetherClientError);
+
+      try {
+        // @ts-expect-error - testing invalid table name
+        client.table('invalid name');
+      } catch (err) {
+        expect((err as TetherClientError).code).toBe(
+          TetherClientErrorCode.InvalidInput,
+        );
+        expect((err as TetherClientError).message).toBe(
+          'Invalid table name "invalid name"',
+        );
+      }
     });
   });
 
