@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket as NodeWebSocket } from 'ws';
-import { SyncStatus, TetherClient } from '../../src/client/index.js';
+import { DataMode, SyncStatus, TetherClient } from '../../src/client/index.js';
 import { startServer, TetherServer } from '../../src/server/server.js';
 import { Permission } from '../../src/shared/types.js';
 import { waitForCondition } from '../helpers.js';
@@ -54,6 +54,38 @@ describe.each(storageDescriptors)(
         permissions: {
           read: Permission.Authenticated,
           create: Permission.Authenticated,
+          update: Permission.Nobody,
+          delete: Permission.Nobody,
+        },
+      });
+      await server.declareTable(
+        'public_readonly_rules',
+        {
+          permissions: {
+            read: Permission.Everybody,
+            create: Permission.Nobody,
+            update: Permission.Nobody,
+            delete: Permission.Nobody,
+          },
+        },
+        [{ id: 'rule1', data: { text: 'Be kind' } }],
+      );
+      await server.declareTable(
+        'auth_readonly_config',
+        {
+          permissions: {
+            read: Permission.Authenticated,
+            create: Permission.Nobody,
+            update: Permission.Nobody,
+            delete: Permission.Nobody,
+          },
+        },
+        [{ id: 'cfg1', data: { setting: 'v1' } }],
+      );
+      await server.declareTable('system_internal', {
+        permissions: {
+          read: Permission.Nobody,
+          create: Permission.Nobody,
           update: Permission.Nobody,
           delete: Permission.Nobody,
         },
@@ -129,6 +161,49 @@ describe.each(storageDescriptors)(
       expect(await table2.getAll()).toEqual([{ title: "Bob's Secret" }]);
       expect(await table1.get('n2')).toBeUndefined();
       expect(await table2.get('n1')).toBeUndefined();
+    });
+
+    it('should keep private table mutations local for unauthenticated guests without server errors and sync upon login', async () => {
+      const guest = createClient();
+      await waitForCondition(() => guest.syncStatus === SyncStatus.Connected);
+
+      const clientErrors: Error[] = [];
+      guest.onError.register((err) => clientErrors.push(err));
+
+      const privateNotes = guest.table<{ title: string }>('private_notes');
+      await privateNotes.put('p1', { title: 'Local Guest Secret' });
+
+      // Local write is immediately available
+      expect(await privateNotes.get('p1')).toEqual({
+        title: 'Local Guest Secret',
+      });
+
+      // Allow background debounce/push cycles
+      await new Promise((r) => setTimeout(r, 100));
+
+      // No client errors or disconnected status
+      expect(clientErrors).toHaveLength(0);
+      expect(guest.syncStatus).toBe(SyncStatus.Connected);
+
+      // Register and login with the guest data
+      await server.declareUser('secret_keeper', 'password123');
+      await guest.login({
+        userName: 'secret_keeper',
+        password: 'password123',
+        dataMode: DataMode.Merge,
+      });
+      await waitForCondition(() => guest.syncStatus === SyncStatus.Connected);
+
+      // Server should now receive the private note in secret_keeper's partition
+      const user = await server.storage.getUserByUserName('secret_keeper');
+      const serverTbl = await server.storage.getTable('private_notes');
+      await waitForCondition(async () => {
+        const records = await serverTbl?.getAllRecords(user);
+        return (records ?? []).length === 1;
+      });
+
+      const records = await serverTbl?.getAllRecords(user);
+      expect(records?.[0].data).toEqual({ title: 'Local Guest Secret' });
     });
 
     it('should allow guest clients to read and subscribe to public-read tables', async () => {
@@ -257,6 +332,112 @@ describe.each(storageDescriptors)(
       // Client A receives second log entry
       await waitForCondition(async () => (await logsA.getAll()).length === 2);
       expect(await logsA.getAll()).toHaveLength(2);
+    });
+
+    it('should allow guest and authenticated clients to read public readonly tables and reject writes gracefully', async () => {
+      const guest = createClient();
+      await waitForCondition(() => guest.syncStatus === SyncStatus.Connected);
+
+      const guestRules = guest.table<{ text: string }>('public_readonly_rules');
+      await waitForCondition(
+        async () => (await guestRules.getAll()).length === 1,
+      );
+      expect(await guestRules.get('rule1')).toEqual({ text: 'Be kind' });
+
+      // Guest attempts to write
+      const guestErrors: Error[] = [];
+      guest.onError.register((e) => guestErrors.push(e));
+      await guestRules.put('rule2', { text: 'Forbidden write' });
+
+      await waitForCondition(() => guestErrors.length > 0);
+      expect(guestErrors[0].message).toBe('Access denied');
+      expect(guest.syncStatus).toBe(SyncStatus.Connected);
+
+      // Authenticated user
+      await server.declareUser('auditor', 'password123');
+      const authClient = createClient();
+      await authClient.login({ userName: 'auditor', password: 'password123' });
+      await waitForCondition(
+        () => authClient.syncStatus === SyncStatus.Connected,
+      );
+
+      const authRules = authClient.table<{ text: string }>(
+        'public_readonly_rules',
+      );
+      expect(await authRules.get('rule1')).toEqual({ text: 'Be kind' });
+
+      const authErrors: Error[] = [];
+      authClient.onError.register((e) => authErrors.push(e));
+      await authRules.put('rule3', { text: 'Auth write rejected' });
+
+      await waitForCondition(() => authErrors.length > 0);
+      expect(authClient.syncStatus).toBe(SyncStatus.Connected);
+
+      // Server table still contains only initial record
+      const serverTbl = await server.storage.getTable('public_readonly_rules');
+      expect(await serverTbl?.getAllRecords()).toHaveLength(1);
+    });
+
+    it('should isolate authenticated readonly tables from guests while allowing authenticated users to read', async () => {
+      const guest = createClient();
+      await waitForCondition(() => guest.syncStatus === SyncStatus.Connected);
+
+      const guestConfig = guest.table<{ setting: string }>(
+        'auth_readonly_config',
+      );
+      expect(await guestConfig.getAll()).toHaveLength(0);
+
+      // Guest writes locally — stays local and does not error on server
+      await guestConfig.put('cfg_guest', { setting: 'local_only' });
+      expect(await guestConfig.get('cfg_guest')).toEqual({
+        setting: 'local_only',
+      });
+      await new Promise((r) => setTimeout(r, 50));
+      expect(guest.syncStatus).toBe(SyncStatus.Connected);
+
+      // Authenticated user connects
+      await server.declareUser('config_reader', 'password123');
+      const authClient = createClient();
+      await authClient.login({
+        userName: 'config_reader',
+        password: 'password123',
+      });
+      await waitForCondition(
+        () => authClient.syncStatus === SyncStatus.Connected,
+      );
+
+      const authConfig = authClient.table<{ setting: string }>(
+        'auth_readonly_config',
+      );
+      await waitForCondition(
+        async () => (await authConfig.getAll()).length === 1,
+      );
+      expect(await authConfig.get('cfg1')).toEqual({ setting: 'v1' });
+    });
+
+    it('should isolate system internal tables from all clients', async () => {
+      const guest = createClient();
+      await server.declareUser('sys_user', 'password123');
+      const authClient = createClient();
+      await authClient.login({ userName: 'sys_user', password: 'password123' });
+
+      await waitForCondition(
+        () =>
+          guest.syncStatus === SyncStatus.Connected &&
+          authClient.syncStatus === SyncStatus.Connected,
+      );
+
+      const guestSys = guest.table('system_internal');
+      const authSys = authClient.table('system_internal');
+
+      expect(await guestSys.getAll()).toHaveLength(0);
+      expect(await authSys.getAll()).toHaveLength(0);
+
+      // Local writes stay local for guest
+      await guestSys.put('s1', { internal: true });
+      expect(await guestSys.get('s1')).toEqual({ internal: true });
+      await new Promise((r) => setTimeout(r, 50));
+      expect(guest.syncStatus).toBe(SyncStatus.Connected);
     });
 
     it('should start and shut down cleanly via startServer helper', async () => {

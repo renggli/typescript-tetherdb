@@ -294,7 +294,7 @@ export class FileStorage extends Storage {
         if (table.isPrivate && !user && !options?.skipPermissionCheck) {
           throw new TetherServerError(
             TetherServerErrorCode.Forbidden,
-            `Authentication required for private table "${change.table}"`,
+            'Authentication required',
           );
         }
         if (!partitionId) continue;

@@ -513,6 +513,107 @@ describe('Sync', () => {
       await sync.pushOutbox();
       expect(await storage.getPendingOutbox()).toHaveLength(1);
     });
+
+    it('should filter outbox changes by accessibleTables for unauthenticated guests', async () => {
+      const sync = createSync();
+      const ws = MockWebSocket.instances[0];
+      ws.triggerOpen();
+      await new Promise((r) => setTimeout(r, 2));
+
+      // Server indicates only public_chat is accessible to guest
+      ws.triggerMessage({
+        type: ServerMessageType.AuthSuccess,
+        protocolVersion: 1,
+        currentSeq: 0,
+        tables: ['public_chat'],
+      });
+      await new Promise((r) => setTimeout(r, 2));
+
+      const chatTable = storage.table<{ text: string }>('public_chat');
+      const settingsTable = storage.table<{ theme: string }>('user_settings');
+
+      await chatTable.put('m1', { text: 'Public message' });
+      await settingsTable.put('s1', { theme: 'dark' });
+
+      ws.sentMessages.length = 0;
+      await sync.pushOutbox();
+
+      expect(ws.sentMessages).toHaveLength(1);
+      const batch = JSON.parse(ws.sentMessages[0]) as {
+        type: string;
+        changes: Array<{ table: string; id: string }>;
+      };
+      expect(batch.type).toBe(ClientMessageType.ChangeBatch);
+      expect(batch.changes).toHaveLength(1);
+      expect(batch.changes[0].table).toBe('public_chat');
+
+      // user_settings remains in outbox
+      const pending = await storage.getPendingOutbox();
+      expect(pending.map((p) => p.change.table)).toContain('user_settings');
+    });
+
+    it('should not filter changes by initial accessibleTables when authenticated', async () => {
+      const sync = createSync({ token: 'auth-token-123' });
+      const ws = MockWebSocket.instances[0];
+      ws.triggerOpen();
+      await new Promise((r) => setTimeout(r, 2));
+
+      ws.triggerMessage({
+        type: ServerMessageType.AuthSuccess,
+        protocolVersion: 1,
+        currentSeq: 0,
+        token: 'auth-token-123',
+        tables: ['todos'],
+      });
+      await new Promise((r) => setTimeout(r, 2));
+
+      const newTable = storage.table<{ content: string }>('dynamically_added');
+      await newTable.put('d1', { content: 'Dynamic' });
+
+      ws.sentMessages.length = 0;
+      await sync.pushOutbox();
+
+      expect(ws.sentMessages).toHaveLength(1);
+      const batch = JSON.parse(ws.sentMessages[0]) as {
+        changes: Array<{ table: string }>;
+      };
+      expect(batch.changes[0].table).toBe('dynamically_added');
+    });
+
+    it('should not schedule retry on ServerMessageType.Error and release batch', async () => {
+      const sync = createSync({ token: 'tok' });
+      const ws = MockWebSocket.instances[0];
+      ws.triggerOpen();
+      await new Promise((r) => setTimeout(r, 2));
+      ws.triggerMessage({
+        type: ServerMessageType.AuthSuccess,
+        protocolVersion: 1,
+        currentSeq: 0,
+        token: 'tok',
+      });
+      await new Promise((r) => setTimeout(r, 2));
+
+      const table = storage.table<{ text: string }>('readonly_table');
+      await table.put('r1', { text: 'Will fail' });
+
+      const scheduleSpy = vi.spyOn(sync, 'schedulePush');
+      ws.sentMessages.length = 0;
+      await sync.pushOutbox();
+
+      expect(ws.sentMessages).toHaveLength(1);
+      const batch = JSON.parse(ws.sentMessages[0]) as { batchId: string };
+
+      // Server returns error with batchId
+      ws.triggerMessage({
+        type: ServerMessageType.Error,
+        batchId: batch.batchId,
+        message: 'Access denied',
+      });
+      await new Promise((r) => setTimeout(r, 5));
+
+      // schedulePush should NOT have been called on error
+      expect(scheduleSpy).not.toHaveBeenCalled();
+    });
   });
 
   describe('Reconnection & Keepalive Ping', () => {

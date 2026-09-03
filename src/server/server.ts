@@ -560,6 +560,7 @@ export class TetherServer {
           adminSecret: this.adminSecret,
           corsConfig: this.corsConfig,
           closeServer: () => this.close(),
+          logger: this.logger,
         });
       }
 
@@ -591,18 +592,23 @@ export class TetherServer {
     settings?: Partial<TableSettings>,
     rows?: TableRow[],
   ): Promise<Table> {
-    const safeName = validateTableName(name);
-    let table = await this.storage.getTable(safeName);
-    if (!table) {
-      table = await this.storage.createTable(safeName, settings);
-    } else if (settings) {
-      await table.updateSettings(settings);
+    try {
+      const safeName = validateTableName(name);
+      let table = await this.storage.getTable(safeName);
+      if (!table) {
+        table = await this.storage.createTable(safeName, settings);
+      } else if (settings) {
+        await table.updateSettings(settings);
+      }
+      const initialRows = rows ?? settings?.rows;
+      if (initialRows && initialRows.length > 0 && table.insertRows) {
+        await table.insertRows(initialRows);
+      }
+      return table;
+    } catch (err) {
+      this.logger?.error(`Failed to declare table "${name}":`, err);
+      throw err;
     }
-    const initialRows = rows ?? settings?.rows;
-    if (initialRows && initialRows.length > 0 && table.insertRows) {
-      await table.insertRows(initialRows);
-    }
-    return table;
   }
 
   /**

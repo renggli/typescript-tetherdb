@@ -334,7 +334,7 @@ export class MemoryStorage extends Storage {
         if (!userState && !options?.skipPermissionCheck) {
           throw new TetherServerError(
             TetherServerErrorCode.Forbidden,
-            `Authentication required for private table "${tableName}"`,
+            'Authentication required',
           );
         }
         let stagedMap = stagedUserTables.get(tableName);

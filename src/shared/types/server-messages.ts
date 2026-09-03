@@ -42,6 +42,8 @@ export interface ErrorServerMessage {
   type: ServerMessageType.Error;
   /** Error description message. */
   message: string;
+  /** Correlation identifier if in response to a change batch request. */
+  batchId?: string;
 }
 
 /**
@@ -61,6 +63,8 @@ export interface AuthSuccessServerMessage {
   token?: string;
   /** Current global sequence number on the server. */
   currentSeq: number;
+  /** Table names accessible by this client connection. */
+  tables?: string[];
 }
 
 /**

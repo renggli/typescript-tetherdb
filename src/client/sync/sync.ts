@@ -40,6 +40,7 @@ export class Sync {
   private connection: ConnectionManager;
   private pushTimer: ReturnType<typeof setTimeout> | null = null;
   private isPushing = false;
+  private accessibleTables?: Set<string>;
   private pendingBatches: Map<string, number[]> = new Map();
   private pendingRequests = new Map<
     string,
@@ -212,6 +213,7 @@ export class Sync {
    * Disconnects the active connection.
    */
   disconnect(): void {
+    this.accessibleTables = undefined;
     this.pendingBatches.clear();
     this.rejectPendingRequests(
       new TetherClientError(
@@ -268,11 +270,26 @@ export class Sync {
       const changes: ChangeRecord[] = [];
 
       for (const entry of pending) {
+        if (
+          !this.token &&
+          this.accessibleTables !== undefined &&
+          !this.accessibleTables.has(entry.change.table)
+        ) {
+          continue;
+        }
+        if (
+          this.options.tables !== undefined &&
+          !this.options.tables.includes(entry.change.table)
+        ) {
+          continue;
+        }
         if (entry.localId !== undefined) {
           localIds.push(entry.localId);
         }
         changes.push(entry.change);
       }
+
+      if (changes.length === 0) return;
 
       this.pendingBatches.set(batchId, localIds);
 
@@ -347,6 +364,7 @@ export class Sync {
   }
 
   private handleConnectionClose(): void {
+    this.accessibleTables = undefined;
     this.pendingBatches.clear();
     this.rejectPendingRequests(
       new TetherClientError(
@@ -358,36 +376,40 @@ export class Sync {
   }
 
   private send(msg: ClientMessage): void {
-    this.connection.send(JSON.stringify(msg));
-  }
-
-  private async sendAuth(): Promise<void> {
-    this.pendingBatches.clear();
-    try {
-      if (!this.token && this.pendingRequests.size > 0) {
-        return;
-      }
-      const lastSyncSeq =
-        (await this.storage.getMeta<number>('lastSyncSeq')) ?? 0;
-      if (!this.token && this.pendingRequests.size > 0) {
-        return;
-      }
-      this.send({
-        type: ClientMessageType.Auth,
-        protocolVersion: PROTOCOL_VERSION,
-        token: this.token,
-        clientId: this.clientId,
-        tables: this.options.tables,
-        lastSyncSeq,
-      });
-    } catch {
-      // Ignored if storage closed during reconnect
+    if (this.connection.isOpen) {
+      this.connection.send(JSON.stringify(msg));
     }
   }
 
-  private enqueueIncomingMessage(raw: string): void {
+  private sendAuth(): void {
+    this.storage
+      .getMeta<number>('lastSyncSeq')
+      .then((lastSyncSeq) => {
+        this.send({
+          type: ClientMessageType.Auth,
+          protocolVersion: PROTOCOL_VERSION,
+          clientId: this.clientId,
+          token: this.token,
+          lastSyncSeq,
+          tables: this.options.tables,
+        });
+      })
+      .catch((err) => {
+        this.onError.publish(
+          new TetherClientError(
+            TetherClientErrorCode.SyncError,
+            err instanceof Error
+              ? err.message
+              : 'Failed to read lastSyncSeq metadata for authentication',
+          ),
+        );
+      });
+  }
+
+  private enqueueIncomingMessage(data: string | Buffer): void {
     try {
-      const msg: ServerMessage = JSON.parse(raw);
+      const raw = typeof data === 'string' ? data : data.toString();
+      const msg = JSON.parse(raw) as ServerMessage;
       this.messageQueue = this.messageQueue
         .then(() => this.handleServerMessage(msg))
         .catch((err) => {
@@ -416,6 +438,11 @@ export class Sync {
     switch (msg.type) {
       case ServerMessageType.AuthSuccess: {
         this.connection.setStatus(SyncStatus.Connected);
+        if (msg.tables) {
+          this.accessibleTables = new Set(msg.tables);
+        } else {
+          this.accessibleTables = undefined;
+        }
         if (msg.token) {
           this.token = msg.token;
           this.onTokenRefresh.publish(msg.token);
@@ -433,6 +460,7 @@ export class Sync {
         break;
       }
       case ServerMessageType.AuthError: {
+        this.accessibleTables = undefined;
         this.connection.setStatus(SyncStatus.Error);
         if (msg.requestId) {
           const req = this.pendingRequests.get(msg.requestId);
@@ -485,11 +513,14 @@ export class Sync {
       case ServerMessageType.Pong:
         break;
       case ServerMessageType.Error:
-        this.pendingBatches.clear();
+        if (msg.batchId) {
+          this.pendingBatches.delete(msg.batchId);
+        } else {
+          this.pendingBatches.clear();
+        }
         this.onError.publish(
           new TetherClientError(TetherClientErrorCode.SyncError, msg.message),
         );
-        this.schedulePush(100);
         break;
     }
   }

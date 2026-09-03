@@ -417,7 +417,7 @@ export class SqliteStorage extends Storage {
         if (table.isPrivate && !user && !options?.skipPermissionCheck) {
           throw new TetherServerError(
             TetherServerErrorCode.Forbidden,
-            `Authentication required for private table "${tableName}"`,
+            'Authentication required',
           );
         }
 

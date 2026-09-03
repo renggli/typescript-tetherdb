@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebSocket } from 'ws';
 import { RateLimiter } from '../../src/server/shared/rate-limiter.js';
 import type { Storage } from '../../src/server/storage/storage.js';
@@ -9,9 +9,11 @@ import {
   OperationType,
   Permission,
   PROTOCOL_VERSION,
+  PUBLIC_READ_PERMISSIONS,
   PUBLIC_READ_WRITE_PERMISSIONS,
   type ServerMessage,
   ServerMessageType,
+  USER_PRIVATE_PERMISSIONS,
 } from '../../src/shared/types.js';
 import { type StorageContext, storageDescriptors } from './storage/matrix.js';
 
@@ -1306,6 +1308,285 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
         ServerMessageType.AuthSuccess,
       );
       expect(ws.isClosed).toBe(false);
+    });
+
+    it('should advertise accessible tables in AuthSuccess for guests and authenticated users', async () => {
+      // 1. Private table (USER_PRIVATE_PERMISSIONS)
+      await storage.createTable('priv_table', {
+        permissions: USER_PRIVATE_PERMISSIONS,
+      });
+      // 2. Public readonly table
+      await storage.createTable('public_ro_table', {
+        permissions: {
+          read: Permission.Everybody,
+          create: Permission.Nobody,
+          update: Permission.Nobody,
+          delete: Permission.Nobody,
+        },
+      });
+      // 3. Public read / auth write (PUBLIC_READ_PERMISSIONS)
+      await storage.createTable('public_auth_table', {
+        permissions: PUBLIC_READ_PERMISSIONS,
+      });
+      // 4. Authenticated readonly table
+      await storage.createTable('auth_ro_table', {
+        permissions: {
+          read: Permission.Authenticated,
+          create: Permission.Nobody,
+          update: Permission.Nobody,
+          delete: Permission.Nobody,
+        },
+      });
+      // 5. System table (Nobody)
+      await storage.createTable('system_table', {
+        permissions: {
+          read: Permission.Nobody,
+          create: Permission.Nobody,
+          update: Permission.Nobody,
+          delete: Permission.Nobody,
+        },
+      });
+
+      // Guest connection
+      const guestWs = new MockServerWebSocket();
+      sync.handleConnection(guestWs as unknown as WebSocket);
+      guestWs.emitClientMessage({
+        type: ClientMessageType.Auth,
+        clientId: 'guest_probe',
+      });
+      await guestWs.waitForMessages(2);
+      const guestAuth = guestWs.getParsedMessages()[0] as {
+        type: string;
+        tables?: string[];
+      };
+      expect(guestAuth.type).toBe(ServerMessageType.AuthSuccess);
+      expect(guestAuth.tables).toBeDefined();
+      expect(guestAuth.tables).toContain('public_ro_table');
+      expect(guestAuth.tables).toContain('public_auth_table');
+      expect(guestAuth.tables).not.toContain('priv_table');
+      expect(guestAuth.tables).not.toContain('auth_ro_table');
+      expect(guestAuth.tables).not.toContain('system_table');
+
+      // Authenticated user connection
+      const user = await storage.createUser('test_auth_user', 'Pass123!');
+      const token = await user.createToken();
+      const userWs = new MockServerWebSocket();
+      sync.handleConnection(userWs as unknown as WebSocket);
+      userWs.emitClientMessage({
+        type: ClientMessageType.Auth,
+        clientId: 'user_probe',
+        token,
+      });
+      await userWs.waitForMessages(2);
+      const userAuth = userWs.getParsedMessages()[0] as {
+        type: string;
+        tables?: string[];
+      };
+      expect(userAuth.type).toBe(ServerMessageType.AuthSuccess);
+      expect(userAuth.tables).toBeDefined();
+      expect(userAuth.tables).toContain('priv_table');
+      expect(userAuth.tables).toContain('public_ro_table');
+      expect(userAuth.tables).toContain('public_auth_table');
+      expect(userAuth.tables).toContain('auth_ro_table');
+      expect(userAuth.tables).not.toContain('system_table');
+    });
+
+    it('should reject unauthorized batches with generic Access denied and correlation batchId', async () => {
+      await storage.createTable('protected_notes', {
+        permissions: USER_PRIVATE_PERMISSIONS,
+      });
+      await storage.createTable('announcements', {
+        permissions: PUBLIC_READ_PERMISSIONS,
+      });
+
+      const guestWs = new MockServerWebSocket();
+      sync.handleConnection(guestWs as unknown as WebSocket);
+      guestWs.emitClientMessage({
+        type: ClientMessageType.Auth,
+        clientId: 'guest_batch_tester',
+      });
+      await guestWs.waitForMessages(2);
+
+      // Guest sends change to private table
+      guestWs.emitClientMessage({
+        type: ClientMessageType.ChangeBatch,
+        batchId: 'b_priv',
+        changes: [
+          {
+            table: 'protected_notes',
+            id: 'p1',
+            op: OperationType.Put,
+            data: { secret: 'data' },
+            timestamp: Date.now(),
+          },
+        ],
+      });
+      await guestWs.waitForMessages(3);
+      const privError = guestWs.getParsedMessages()[2] as {
+        type: string;
+        batchId?: string;
+        message: string;
+      };
+      expect(privError.type).toBe(ServerMessageType.Error);
+      expect(privError.batchId).toBe('b_priv');
+      expect(privError.message).toBe('Access denied');
+      expect(privError.message).not.toContain('protected_notes');
+
+      // Guest sends change to public-read (auth create) table
+      guestWs.emitClientMessage({
+        type: ClientMessageType.ChangeBatch,
+        batchId: 'b_pub_read',
+        changes: [
+          {
+            table: 'announcements',
+            id: 'a1',
+            op: OperationType.Put,
+            data: { text: 'Spam' },
+            timestamp: Date.now(),
+          },
+        ],
+      });
+      await guestWs.waitForMessages(4);
+      const pubReadError = guestWs.getParsedMessages()[3] as {
+        type: string;
+        batchId?: string;
+        message: string;
+      };
+      expect(pubReadError.type).toBe(ServerMessageType.Error);
+      expect(pubReadError.batchId).toBe('b_pub_read');
+      expect(pubReadError.message).toBe('Access denied');
+    });
+
+    it('should reject authenticated mutations to read-only tables gracefully', async () => {
+      await storage.createTable('system_docs', {
+        permissions: {
+          read: Permission.Authenticated,
+          create: Permission.Nobody,
+          update: Permission.Nobody,
+          delete: Permission.Nobody,
+        },
+      });
+
+      const user = await storage.createUser('writer_user', 'Pass123!');
+      const token = await user.createToken();
+      const userWs = new MockServerWebSocket();
+      sync.handleConnection(userWs as unknown as WebSocket);
+      userWs.emitClientMessage({
+        type: ClientMessageType.Auth,
+        clientId: 'auth_writer',
+        token,
+      });
+      await userWs.waitForMessages(2);
+
+      userWs.emitClientMessage({
+        type: ClientMessageType.ChangeBatch,
+        batchId: 'b_ro',
+        changes: [
+          {
+            table: 'system_docs',
+            id: 'doc1',
+            op: OperationType.Put,
+            data: { title: 'New Doc' },
+            timestamp: Date.now(),
+          },
+        ],
+      });
+      await userWs.waitForMessages(3);
+      const err = userWs.getParsedMessages()[2] as {
+        type: string;
+        batchId?: string;
+        message: string;
+      };
+      expect(err.type).toBe(ServerMessageType.Error);
+      expect(err.batchId).toBe('b_ro');
+      expect(err.message).toContain('create access');
+    });
+
+    it('should log errors when attempting to create, update, or delete records without permission via sync', async () => {
+      const mockLogger = {
+        info: vi.fn(),
+        debug: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      };
+      const loggedSync = new Sync(storage, {
+        logger: mockLogger,
+      });
+
+      // Table that allows read, but disallows update & delete (append-only)
+      const table = await storage.createTable('append_table', {
+        permissions: {
+          read: Permission.Everybody,
+          create: Permission.Everybody,
+          update: Permission.Nobody,
+          delete: Permission.Nobody,
+        },
+      });
+
+      const ws = new MockServerWebSocket();
+      loggedSync.handleConnection(ws as unknown as WebSocket);
+      ws.emitClientMessage({
+        type: ClientMessageType.Auth,
+        clientId: 'test_mutator',
+      });
+      await ws.waitForMessages(2);
+
+      // 1. Create a record (permitted)
+      ws.emitClientMessage({
+        type: ClientMessageType.ChangeBatch,
+        batchId: 'b_create',
+        changes: [
+          {
+            table: table.name,
+            id: 'rec1',
+            op: OperationType.Put,
+            data: { val: 1 },
+            timestamp: 1000,
+          },
+        ],
+      });
+      await ws.waitForMessages(3);
+      expect(mockLogger.error).not.toHaveBeenCalled();
+
+      // 2. Attempt to update the existing record (forbidden -> update: Nobody)
+      ws.emitClientMessage({
+        type: ClientMessageType.ChangeBatch,
+        batchId: 'b_update_fail',
+        changes: [
+          {
+            table: table.name,
+            id: 'rec1',
+            op: OperationType.Put,
+            data: { val: 2 },
+            timestamp: 2000,
+          },
+        ],
+      });
+      await ws.waitForMessages(4);
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Change batch error'),
+        expect.anything(),
+      );
+      mockLogger.error.mockClear();
+
+      // 3. Attempt to delete the record (forbidden -> delete: Nobody)
+      ws.emitClientMessage({
+        type: ClientMessageType.ChangeBatch,
+        batchId: 'b_delete_fail',
+        changes: [
+          {
+            table: table.name,
+            id: 'rec1',
+            op: OperationType.Delete,
+            timestamp: 3000,
+          },
+        ],
+      });
+      await ws.waitForMessages(5);
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Change batch error'),
+        expect.anything(),
+      );
     });
   });
 });

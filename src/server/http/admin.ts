@@ -6,6 +6,7 @@ import {
   type TableSettings,
 } from '../../shared/types.js';
 import { TetherServerError, TetherServerErrorCode } from '../errors.js';
+import type { TetherLogger } from '../server.js';
 import type { MaintenanceResult, Storage } from '../storage/storage.js';
 import type { CorsOptions } from './cors.js';
 import { readJsonBody, sendJson } from './json.js';
@@ -15,6 +16,7 @@ export interface AdminRouteContext {
   adminSecret: string;
   corsConfig: CorsOptions | null;
   closeServer: () => Promise<void>;
+  logger?: TetherLogger | null;
 }
 
 /**
@@ -123,25 +125,30 @@ export async function handleAdminRequest(
 
   // POST /admin/tables
   if (method === 'POST' && adminPath === '/tables') {
-    const body = (await readJsonBody(req)) as {
-      name: string;
-      settings?: TableSettings;
-    };
-    if (!body.name) {
-      throw new TetherServerError(
-        TetherServerErrorCode.InvalidInput,
-        'Table name is required',
+    try {
+      const body = (await readJsonBody(req)) as {
+        name: string;
+        settings?: TableSettings;
+      };
+      if (!body.name) {
+        throw new TetherServerError(
+          TetherServerErrorCode.InvalidInput,
+          'Table name is required',
+        );
+      }
+      const table = await ctx.storage.createTable(body.name, body.settings);
+      sendJson(
+        res,
+        201,
+        { name: table.name, settings: table.settings },
+        ctx.corsConfig,
+        req,
       );
+      return true;
+    } catch (err) {
+      ctx.logger?.error('Failed to create table:', err);
+      throw err;
     }
-    const table = await ctx.storage.createTable(body.name, body.settings);
-    sendJson(
-      res,
-      201,
-      { name: table.name, settings: table.settings },
-      ctx.corsConfig,
-      req,
-    );
-    return true;
   }
 
   // /admin/tables/:name
@@ -186,16 +193,21 @@ export async function handleAdminRequest(
       return true;
     }
     if (method === 'DELETE') {
-      const table = await ctx.storage.getTable(tableName);
-      if (!table) {
-        throw new TetherServerError(
-          TetherServerErrorCode.NotFound,
-          `Table "${tableName}" not found`,
-        );
+      try {
+        const table = await ctx.storage.getTable(tableName);
+        if (!table) {
+          throw new TetherServerError(
+            TetherServerErrorCode.NotFound,
+            `Table "${tableName}" not found`,
+          );
+        }
+        await table.delete();
+        sendJson(res, 200, { deleted: true }, ctx.corsConfig, req);
+        return true;
+      } catch (err) {
+        ctx.logger?.error(`Failed to delete table "${tableName}":`, err);
+        throw err;
       }
-      await table.delete();
-      sendJson(res, 200, { deleted: true }, ctx.corsConfig, req);
-      return true;
     }
   }
 
@@ -307,41 +319,46 @@ export async function handleAdminRequest(
     }
 
     if (method === 'POST') {
-      const body = (await readJsonBody(req)) as {
-        userId?: string;
-        changes?: ChangeRecord[];
-        table?: string;
-        id?: string;
-        data?: unknown;
-        op?: OperationType;
-      };
-      const user = body.userId
-        ? ((await ctx.storage.getUser(body.userId)) ??
-          (await ctx.storage.getUserByUserName(body.userId)))
-        : undefined;
+      try {
+        const body = (await readJsonBody(req)) as {
+          userId?: string;
+          changes?: ChangeRecord[];
+          table?: string;
+          id?: string;
+          data?: unknown;
+          op?: OperationType;
+        };
+        const user = body.userId
+          ? ((await ctx.storage.getUser(body.userId)) ??
+            (await ctx.storage.getUserByUserName(body.userId)))
+          : undefined;
 
-      let changes = body.changes;
-      if (!changes && body.table && body.id) {
-        changes = [
-          {
-            table: body.table,
-            id: body.id,
-            op: body.op ?? OperationType.Put,
-            data: body.data,
-            timestamp: Date.now(),
-            clientId: 'admin_cli',
-          },
-        ];
+        let changes = body.changes;
+        if (!changes && body.table && body.id) {
+          changes = [
+            {
+              table: body.table,
+              id: body.id,
+              op: body.op ?? OperationType.Put,
+              data: body.data,
+              timestamp: Date.now(),
+              clientId: 'admin_cli',
+            },
+          ];
+        }
+        if (!changes) {
+          throw new TetherServerError(
+            TetherServerErrorCode.InvalidInput,
+            'Either "changes" array or "table" and "id" must be provided',
+          );
+        }
+        const result = await ctx.storage.applyChanges(user, changes);
+        sendJson(res, 200, result, ctx.corsConfig, req);
+        return true;
+      } catch (err) {
+        ctx.logger?.error('Failed to apply record changes:', err);
+        throw err;
       }
-      if (!changes) {
-        throw new TetherServerError(
-          TetherServerErrorCode.InvalidInput,
-          'Either "changes" array or "table" and "id" must be provided',
-        );
-      }
-      const result = await ctx.storage.applyChanges(user, changes);
-      sendJson(res, 200, result, ctx.corsConfig, req);
-      return true;
     }
   }
 

@@ -325,12 +325,14 @@ export class Sync {
 
     const currentSeq = await this.storage.getCurrentSeq(user);
     const refreshedToken = user ? await user.createToken() : undefined;
+    const accessibleTables = await this.getAccessibleTableNames(user);
     this.send(webSocket, {
       type: ServerMessageType.AuthSuccess,
       protocolVersion: PROTOCOL_VERSION,
       userName: user?.userName,
       currentSeq,
       token: refreshedToken,
+      tables: accessibleTables,
     });
 
     // Initial sync: snapshot or diff
@@ -525,6 +527,7 @@ export class Sync {
     }
 
     const currentSeq = await this.storage.getCurrentSeq(undefined);
+    const accessibleTables = await this.getAccessibleTableNames(undefined);
 
     this.send(webSocket, {
       type: ServerMessageType.AuthSuccess,
@@ -533,6 +536,7 @@ export class Sync {
       userName: undefined,
       currentSeq,
       token: undefined,
+      tables: accessibleTables,
     });
 
     if (client) {
@@ -577,21 +581,42 @@ export class Sync {
       clientId: client.clientId,
     }));
 
-    const { applied, newSeq } = await this.storage.applyChanges(
-      client.user,
-      sanitizedChanges,
-    );
+    try {
+      const { applied, newSeq } = await this.storage.applyChanges(
+        client.user,
+        sanitizedChanges,
+      );
 
-    // Acknowledge to sender
-    this.send(webSocket, {
-      type: ServerMessageType.ChangeAck,
-      batchId,
-      appliedSeq: newSeq,
-    });
+      // Acknowledge to sender
+      this.send(webSocket, {
+        type: ServerMessageType.ChangeAck,
+        batchId,
+        appliedSeq: newSeq,
+      });
 
-    // Broadcast applied changes to other active clients who have access to the modified tables
-    if (applied.length > 0) {
-      await this.broadcastChanges(webSocket, client.user, applied, newSeq);
+      // Broadcast applied changes to other active clients who have access to the modified tables
+      if (applied.length > 0) {
+        await this.broadcastChanges(webSocket, client.user, applied, newSeq);
+      }
+    } catch (err) {
+      if (err instanceof TetherServerError) {
+        const userContext = this.getClientContext(webSocket);
+        this.logger?.error(
+          `[TetherServer.Sync] Change batch error (${err.message})${userContext}:`,
+          err,
+        );
+        const sanitizedMessage =
+          !client.user && err.code === TetherServerErrorCode.Forbidden
+            ? 'Access denied'
+            : err.message;
+        this.send(webSocket, {
+          type: ServerMessageType.Error,
+          batchId,
+          message: sanitizedMessage,
+        });
+        return;
+      }
+      throw err;
     }
   }
 
@@ -763,6 +788,7 @@ export class Sync {
 
     const currentSeq = await this.storage.getCurrentSeq(user);
     const token = await user.createToken();
+    const accessibleTables = await this.getAccessibleTableNames(user);
 
     this.send(webSocket, {
       type: ServerMessageType.AuthSuccess,
@@ -771,6 +797,7 @@ export class Sync {
       userName: user.userName,
       currentSeq,
       token,
+      tables: accessibleTables,
     });
 
     await this.performSync(client, 0, client.tables);
@@ -784,6 +811,13 @@ export class Sync {
       }
     }
     return count;
+  }
+
+  private async getAccessibleTableNames(user?: User): Promise<string[]> {
+    const tables = await this.storage.getTables();
+    return tables
+      .filter((table) => table.canRead(user) || table.canCreate(user))
+      .map((table) => table.name);
   }
 }
 

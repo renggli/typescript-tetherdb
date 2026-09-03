@@ -499,6 +499,80 @@ describe.each(storageDescriptors)(
         }
       });
 
+      it('should log errors when attempting to create or delete tables or records fails', async () => {
+        const mockLogger = {
+          info: vi.fn(),
+          debug: vi.fn(),
+          warn: vi.fn(),
+          error: vi.fn(),
+        };
+        const loggedServer = new TetherServer({
+          storage: storageContext.storage,
+          adminSecret: 'test-admin-secret',
+          logger: mockLogger,
+        });
+        const running = await loggedServer.listen(0, '127.0.0.1');
+        const port = (running.address() as { port: number }).port;
+
+        try {
+          // 1. Attempting to delete non-existent table
+          const delRes = await fetch(
+            `http://127.0.0.1:${port}/admin/tables/missing_table`,
+            {
+              method: 'DELETE',
+              headers: { Authorization: 'Bearer test-admin-secret' },
+            },
+          );
+          expect(delRes.status).toBe(404);
+          expect(mockLogger.error).toHaveBeenCalledWith(
+            expect.stringContaining('Failed to delete table "missing_table":'),
+            expect.anything(),
+          );
+
+          // 2. Attempting to create table with empty name
+          const createRes = await fetch(
+            `http://127.0.0.1:${port}/admin/tables`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: 'Bearer test-admin-secret',
+              },
+              body: JSON.stringify({ name: '' }),
+            },
+          );
+          expect(createRes.status).toBe(400);
+          expect(mockLogger.error).toHaveBeenCalledWith(
+            expect.stringContaining('Failed to create table:'),
+            expect.anything(),
+          );
+
+          // 3. Attempting to apply invalid record changes
+          const recRes = await fetch(`http://127.0.0.1:${port}/admin/records`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: 'Bearer test-admin-secret',
+            },
+            body: JSON.stringify({}),
+          });
+          expect(recRes.status).toBe(400);
+          expect(mockLogger.error).toHaveBeenCalledWith(
+            expect.stringContaining('Failed to apply record changes:'),
+            expect.anything(),
+          );
+
+          // 4. Attempting to declare table with invalid name
+          await expect(loggedServer.declareTable('')).rejects.toThrow();
+          expect(mockLogger.error).toHaveBeenCalledWith(
+            expect.stringContaining('Failed to declare table "":'),
+            expect.anything(),
+          );
+        } finally {
+          await loggedServer.close();
+        }
+      });
+
       it('should support logger: false to silence logs completely', async () => {
         const silentServer = new TetherServer({
           storage: storageContext.storage,
