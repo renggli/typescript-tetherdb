@@ -18,6 +18,7 @@ import { assertNoActiveServerLock } from '../shared/lock.js';
 import {
   getUserBucket,
   normalizeUserName,
+  validateKeepCount,
   validatePassword,
   validateRecordId,
   validateTableName,
@@ -439,7 +440,10 @@ export class FileStorage extends Storage {
   }
 
   async prune(keepCount?: number): Promise<MaintenanceResult> {
-    const keep = keepCount ?? this.options.maxHistoryEntries ?? 1000;
+    const keep = validateKeepCount(
+      keepCount,
+      this.options.maxHistoryEntries ?? 1000,
+    );
     const meta = await this.readGlobalMeta();
     let totalPruned = 0;
 

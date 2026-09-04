@@ -7,6 +7,7 @@ import {
 } from '../../shared/types.js';
 import { TetherServerError, TetherServerErrorCode } from '../errors.js';
 import type { TetherLogger } from '../server.js';
+import { validateKeepCount } from '../shared/validate.js';
 import { getServerVersion } from '../shared/version.js';
 import type { MaintenanceResult, Storage } from '../storage/storage.js';
 import { User } from '../storage/user.js';
@@ -101,7 +102,11 @@ export async function handleAdminRequest(
     } else if (body.action === 'vacuum') {
       result = await ctx.storage.vacuum();
     } else if (body.action === 'prune') {
-      result = await ctx.storage.prune(body.keepCount);
+      const keep =
+        body.keepCount !== undefined
+          ? validateKeepCount(body.keepCount)
+          : undefined;
+      result = await ctx.storage.prune(keep);
     } else {
       throw new TetherServerError(
         TetherServerErrorCode.InvalidInput,

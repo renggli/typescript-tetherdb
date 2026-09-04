@@ -512,4 +512,31 @@ function runStorageTestSuite(createStorage: () => Storage) {
       'Change batch exceeds maximum allowed operations',
     );
   });
+
+  it('should reject invalid or negative keepCount in prune without corrupting changelog', async () => {
+    const user = await storage.createUser('prune_guard_user', 'password');
+    for (let i = 1; i <= 5; i++) {
+      await storage.applyChanges(user, [
+        {
+          table: 'todos',
+          id: `task_${i}`,
+          op: OperationType.Put,
+          data: { title: `Task ${i}` },
+          timestamp: 1000 + i,
+          clientId: 'c1',
+        },
+      ]);
+    }
+
+    // Negative keepCount should be rejected
+    await expect(storage.prune(-5)).rejects.toThrow(TetherServerError);
+
+    // Non-finite or NaN should be rejected
+    await expect(storage.prune(Number.NaN)).rejects.toThrow(TetherServerError);
+
+    // Active changes should still be intact and retrievable
+    const res = await storage.getChangesSince(user, 1);
+    expect(res.requiresSnapshot).toBe(false);
+    expect(res.changes.length).toBeGreaterThan(0);
+  });
 }

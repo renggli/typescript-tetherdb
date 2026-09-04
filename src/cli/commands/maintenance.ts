@@ -37,8 +37,23 @@ export async function handleMaintenanceCommand(
     }
 
     case 'prune': {
-      const keepStr = positionalArgs[2];
-      const keepCount = keepStr ? Number.parseInt(keepStr, 10) : undefined;
+      // CLI may pass ['maintenance', 'prune', keepCount] or ['maintenance', 'prune', tableName, keepCount]
+      let keepStr: string | undefined;
+      if (positionalArgs[3] !== undefined) {
+        keepStr = positionalArgs[3];
+      } else if (positionalArgs[2] !== undefined) {
+        keepStr = positionalArgs[2];
+      }
+      let keepCount: number | undefined;
+      if (keepStr !== undefined) {
+        keepCount = Number.parseInt(keepStr, 10);
+        if (!Number.isFinite(keepCount) || keepCount < 0) {
+          throw new TetherServerError(
+            TetherServerErrorCode.InvalidInput,
+            `Invalid keep count: "${keepStr}". Expected a non-negative integer`,
+          );
+        }
+      }
       const result = await target.prune(keepCount);
       console.log(result.message);
       break;

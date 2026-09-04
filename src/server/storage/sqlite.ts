@@ -19,6 +19,7 @@ import { getOrCreateKeyfileSecret, hashPassword } from '../shared/crypto.js';
 import { assertNoActiveServerLock } from '../shared/lock.js';
 import {
   normalizeUserName,
+  validateKeepCount,
   validatePassword,
   validateRecordId,
   validateTableName,
@@ -600,7 +601,10 @@ export class SqliteStorage extends Storage {
   }
 
   async prune(keepCount?: number): Promise<MaintenanceResult> {
-    const keep = keepCount ?? this.options.maxHistoryEntries ?? 1000;
+    const keep = validateKeepCount(
+      keepCount,
+      this.options.maxHistoryEntries ?? 1000,
+    );
     const dbHandle = this.getTablesDb();
     const metaRow = dbHandle.stmtGetMeta.get() as
       | { current_seq: number; min_seq: number }

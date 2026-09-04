@@ -171,6 +171,8 @@ describe('AdminTarget (LocalAdminTarget & AdminClient)', () => {
     const pruneRes = await remoteTarget.prune(10);
     expect(pruneRes.action).toBe('prune');
 
+    await expect(remoteTarget.prune(-10)).rejects.toThrow();
+
     // Cleanup
     await remoteTarget.deleteUser(user.userId);
     await remoteTarget.deleteTable('remotetasks');

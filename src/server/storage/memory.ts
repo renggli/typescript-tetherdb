@@ -14,6 +14,7 @@ import type {
 import { hashPassword } from '../shared/crypto.js';
 import {
   normalizeUserName,
+  validateKeepCount,
   validatePassword,
   validateRecordId,
   validateTableName,
@@ -487,7 +488,10 @@ export class MemoryStorage extends Storage {
   }
 
   async prune(keepCount?: number): Promise<MaintenanceResult> {
-    const limit = keepCount ?? this.options.maxHistoryEntries ?? 1000;
+    const limit = validateKeepCount(
+      keepCount,
+      this.options.maxHistoryEntries ?? 1000,
+    );
     let pruned = 0;
 
     const pruneLog = (state: StatePartition) => {

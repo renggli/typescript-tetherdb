@@ -227,6 +227,35 @@ export function getUserBucket(userId: string): string {
   return clean.length >= 2 ? clean.slice(0, 2) : clean.padStart(2, '0');
 }
 
+/**
+ * Validates changelog retention count for maintenance prune operations.
+ *
+ * @param keepCount - Optional retention count.
+ * @param defaultKeep - Fallback default retention count (defaults to 1000).
+ * @returns Validated non-negative integer count.
+ * @throws TetherServerError if keepCount is negative, non-finite, or invalid.
+ */
+export function validateKeepCount(
+  keepCount: unknown,
+  defaultKeep = 1000,
+): number {
+  if (keepCount === undefined || keepCount === null) {
+    return defaultKeep;
+  }
+  if (
+    typeof keepCount !== 'number' ||
+    !Number.isFinite(keepCount) ||
+    !Number.isInteger(keepCount) ||
+    keepCount < 0
+  ) {
+    throw new TetherServerError(
+      TetherServerErrorCode.InvalidInput,
+      'Prune keepCount must be a non-negative integer',
+    );
+  }
+  return keepCount;
+}
+
 // -- Private Helpers --------------------------------------------------------
 
 function validateFilesystemSafe(id: string, name: string): string {
