@@ -567,6 +567,14 @@ export class Sync {
       );
     }
 
+    const maxBatchChanges = this.storage.options?.maxBatchChanges ?? 1000;
+    if (msg.changes.length > maxBatchChanges) {
+      throw new TetherServerError(
+        TetherServerErrorCode.LimitExceeded,
+        `Change batch exceeds maximum allowed operations (${maxBatchChanges})`,
+      );
+    }
+
     const maxBatchSize =
       this.storage.options?.maxBatchSizeBytes ?? 5 * 1024 * 1024;
     const batchBytes = calculateByteSize(msg.changes);

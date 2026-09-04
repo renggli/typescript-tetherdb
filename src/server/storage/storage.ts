@@ -42,6 +42,8 @@ export interface StorageOptions {
   maxRecordSizeBytes?: number;
   /** Maximum allowed size in bytes for a single change batch payload. */
   maxBatchSizeBytes?: number;
+  /** Maximum allowed number of change operations in a single change batch. */
+  maxBatchChanges?: number;
   /** Maximum number of history entries retained per partition before compaction. */
   maxHistoryEntries?: number;
 }
@@ -397,6 +399,14 @@ export async function validateBatchChanges(
   changes: ChangeRecord[],
   defaultMaxRecordSize = 512 * 1024,
 ): Promise<void> {
+  const maxBatchChanges = storage.options?.maxBatchChanges ?? 1000;
+  if (changes.length > maxBatchChanges) {
+    throw new TetherServerError(
+      TetherServerErrorCode.LimitExceeded,
+      `Change batch exceeds maximum allowed operations (${maxBatchChanges})`,
+    );
+  }
+
   for (const change of changes) {
     if (
       !change ||

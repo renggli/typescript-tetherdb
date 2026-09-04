@@ -498,4 +498,18 @@ function runStorageTestSuite(createStorage: () => Storage) {
       TetherServerError,
     );
   });
+
+  it('should reject batches exceeding maxBatchChanges', async () => {
+    const changes: ChangeRecord[] = Array.from({ length: 1005 }, (_, i) => ({
+      table: 'todos',
+      id: `task_${i}`,
+      op: OperationType.Put,
+      data: { title: `Task ${i}` },
+      timestamp: 1000 + i,
+    }));
+
+    await expect(validateBatchChanges(storage, changes)).rejects.toThrow(
+      'Change batch exceeds maximum allowed operations',
+    );
+  });
 }
