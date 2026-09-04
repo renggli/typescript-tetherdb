@@ -173,6 +173,17 @@ describe('AdminTarget (LocalAdminTarget & AdminClient)', () => {
 
     await expect(remoteTarget.prune(-10)).rejects.toThrow();
 
+    // Table settings limits validation
+    await expect(
+      remoteTarget.updateTable('remotetasks', { maxRecords: -1 }),
+    ).rejects.toThrow();
+    await expect(
+      remoteTarget.createTable('badtable', { maxRecordSizeBytes: -100 }),
+    ).rejects.toThrow();
+    await expect(
+      remoteTarget.updateTable('remotetasks', { maxHistoryEntries: -5 }),
+    ).rejects.toThrow();
+
     // Cleanup
     await remoteTarget.deleteUser(user.userId);
     await remoteTarget.deleteTable('remotetasks');

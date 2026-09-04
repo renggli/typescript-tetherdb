@@ -7,7 +7,10 @@ import {
 } from '../../shared/types.js';
 import { TetherServerError, TetherServerErrorCode } from '../errors.js';
 import type { TetherLogger } from '../server.js';
-import { validateKeepCount } from '../shared/validate.js';
+import {
+  validateKeepCount,
+  validateTableSettings,
+} from '../shared/validate.js';
 import { getServerVersion } from '../shared/version.js';
 import type { MaintenanceResult, Storage } from '../storage/storage.js';
 import { User } from '../storage/user.js';
@@ -150,7 +153,8 @@ export async function handleAdminRequest(
           'Table name is required',
         );
       }
-      const table = await ctx.storage.createTable(body.name, body.settings);
+      const validatedSettings = validateTableSettings(body.settings);
+      const table = await ctx.storage.createTable(body.name, validatedSettings);
       sendJson(
         res,
         201,

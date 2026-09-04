@@ -5,6 +5,7 @@
  * @module tetherdb/server/shared/validate
  */
 
+import type { TableSettings } from '../../shared/types.js';
 import { isValidTableName } from '../../shared/validate.js';
 import { TetherServerError, TetherServerErrorCode } from '../errors.js';
 
@@ -254,6 +255,42 @@ export function validateKeepCount(
     );
   }
   return keepCount;
+}
+
+/**
+ * Validates table settings and configuration limits.
+ *
+ * @param settings - Table settings to validate.
+ * @returns Validated table settings.
+ * @throws TetherServerError if numeric limits are negative, non-finite, or invalid.
+ */
+export function validateTableSettings(
+  settings?: Partial<TableSettings>,
+): Partial<TableSettings> {
+  if (!settings || typeof settings !== 'object') {
+    return {};
+  }
+  const validatedLimits = [
+    { field: 'maxRecords', value: settings.maxRecords },
+    { field: 'maxRecordSizeBytes', value: settings.maxRecordSizeBytes },
+    { field: 'maxHistoryEntries', value: settings.maxHistoryEntries },
+  ];
+  for (const { field, value } of validatedLimits) {
+    if (value !== undefined && value !== null) {
+      if (
+        typeof value !== 'number' ||
+        !Number.isFinite(value) ||
+        !Number.isInteger(value) ||
+        value < 0
+      ) {
+        throw new TetherServerError(
+          TetherServerErrorCode.InvalidInput,
+          `Table setting "${field}" must be a non-negative integer`,
+        );
+      }
+    }
+  }
+  return settings;
 }
 
 // -- Private Helpers --------------------------------------------------------

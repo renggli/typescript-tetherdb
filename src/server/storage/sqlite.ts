@@ -23,6 +23,7 @@ import {
   validatePassword,
   validateRecordId,
   validateTableName,
+  validateTableSettings,
   validateUserId,
   validateUserName,
 } from '../shared/validate.js';
@@ -132,6 +133,7 @@ export class SqliteStorage extends Storage {
   ): Promise<Table> {
     if (this.baseDir) assertNoActiveServerLock(this.baseDir, 'sqlite');
     const safeName = validateTableName(name);
+    const validatedSettings = validateTableSettings(settings);
     const dbHandle = this.getTablesDb();
     const existing = dbHandle.stmtFindTable.get(safeName);
     if (existing) {
@@ -143,10 +145,10 @@ export class SqliteStorage extends Storage {
 
     dbHandle.stmtInsertTable.run(
       safeName,
-      JSON.stringify(settings),
+      JSON.stringify(validatedSettings),
       Date.now(),
     );
-    const table = new Table(safeName, this, settings);
+    const table = new Table(safeName, this, validatedSettings);
     this.tableInstances.set(safeName, table);
     return table;
   }

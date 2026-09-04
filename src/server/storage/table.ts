@@ -15,6 +15,7 @@ import {
 } from '../security/filter.js';
 import { UserResolver } from '../security/resolver.js';
 import type { InternalStoredRecord } from '../security/types.js';
+import { validateTableSettings } from '../shared/validate.js';
 import type { Storage } from './storage.js';
 import { User } from './user.js';
 
@@ -65,21 +66,22 @@ export class Table {
   async updateSettings(
     settings: Partial<TableSettings>,
   ): Promise<TableSettings> {
+    const validated = validateTableSettings(settings);
     const updated: TableSettings = {
       ...this.settings,
-      ...settings,
+      ...validated,
       permissions: {
         ...this.settings.permissions,
-        ...settings.permissions,
+        ...validated.permissions,
       },
     };
-    if (settings.maxRecords === 0) {
+    if (validated.maxRecords === 0) {
       delete updated.maxRecords;
     }
-    if (settings.maxRecordSizeBytes === 0) {
+    if (validated.maxRecordSizeBytes === 0) {
       delete updated.maxRecordSizeBytes;
     }
-    if (settings.maxHistoryEntries === 0) {
+    if (validated.maxHistoryEntries === 0) {
       delete updated.maxHistoryEntries;
     }
     this.settings = updated;

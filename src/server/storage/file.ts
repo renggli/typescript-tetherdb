@@ -22,6 +22,7 @@ import {
   validatePassword,
   validateRecordId,
   validateTableName,
+  validateTableSettings,
   validateUserId,
   validateUserName,
 } from '../shared/validate.js';
@@ -81,6 +82,7 @@ export class FileStorage extends Storage {
   ): Promise<Table> {
     assertNoActiveServerLock(this.baseDir);
     const safeName = validateTableName(name);
+    const validatedSettings = validateTableSettings(settings);
     return this.withLock('__tables__', async () => {
       const tables = await this.readTablesFile();
       if (tables.has(safeName)) {
@@ -91,10 +93,14 @@ export class FileStorage extends Storage {
       }
 
       const now = Date.now();
-      tables.set(safeName, { name: safeName, settings, createdAt: now });
+      tables.set(safeName, {
+        name: safeName,
+        settings: validatedSettings,
+        createdAt: now,
+      });
       await this.writeTablesFile(tables);
 
-      return new Table(safeName, this, settings);
+      return new Table(safeName, this, validatedSettings);
     });
   }
 

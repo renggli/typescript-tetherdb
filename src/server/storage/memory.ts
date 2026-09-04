@@ -18,6 +18,7 @@ import {
   validatePassword,
   validateRecordId,
   validateTableName,
+  validateTableSettings,
   validateUserId,
   validateUserName,
 } from '../shared/validate.js';
@@ -79,13 +80,14 @@ export class MemoryStorage extends Storage {
     settings: Partial<TableSettings> = {},
   ): Promise<Table> {
     const safeName = validateTableName(name);
+    const validatedSettings = validateTableSettings(settings);
     if (this.tables.has(safeName)) {
       throw new TetherServerError(
         TetherServerErrorCode.AlreadyExists,
         'Table already exists',
       );
     }
-    const table = new Table(safeName, this, settings);
+    const table = new Table(safeName, this, validatedSettings);
     this.tables.set(safeName, table);
     return table;
   }
