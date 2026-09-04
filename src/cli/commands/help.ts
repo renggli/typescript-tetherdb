@@ -33,6 +33,7 @@ Commands:
   users add <user_name> <password>             Register a new user account
   users rm <user_name>                         Delete a user account and associated data
   users mv <user_name> <new_user_name>         Rename a user account (ID and data unchanged)
+  version                                      Display TetherDB version
 
 Server Options (for 'serve'):
   -p, --port <number>                          Port number to bind (default: 8080 or PORT env)

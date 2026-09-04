@@ -81,7 +81,10 @@ describe('AdminTarget (LocalAdminTarget & AdminClient)', () => {
     );
     expect(recordsAfterDelete).toHaveLength(0);
 
-    // 4. Maintenance & Status
+    // 4. Maintenance & Status & Version
+    const version = await localTarget.getVersion();
+    expect(version.version).toBeDefined();
+
     const status = await localTarget.getStatus();
     expect(status.tablesCount).toBe(1);
     expect(status.usersCount).toBe(1);
@@ -151,7 +154,10 @@ describe('AdminTarget (LocalAdminTarget & AdminClient)', () => {
     );
     expect(recordsAfterDelete).toHaveLength(0);
 
-    // 4. Maintenance & Status
+    // 4. Maintenance & Status & Version
+    const version = await remoteTarget.getVersion();
+    expect(version.version).toBeDefined();
+
     const status = await remoteTarget.getStatus();
     expect(status.tablesCount).toBe(1);
     expect(status.usersCount).toBe(1);

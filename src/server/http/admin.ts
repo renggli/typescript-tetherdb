@@ -7,6 +7,7 @@ import {
 } from '../../shared/types.js';
 import { TetherServerError, TetherServerErrorCode } from '../errors.js';
 import type { TetherLogger } from '../server.js';
+import { getServerVersion } from '../shared/version.js';
 import type { MaintenanceResult, Storage } from '../storage/storage.js';
 import { User } from '../storage/user.js';
 import type { CorsOptions } from './cors.js';
@@ -78,6 +79,13 @@ export async function handleAdminRequest(
   if (method === 'GET' && adminPath === '/status') {
     const status = await ctx.storage.getStatus();
     sendJson(res, 200, status, ctx.corsConfig, req);
+    return true;
+  }
+
+  // GET /admin/version
+  if (method === 'GET' && adminPath === '/version') {
+    const version = getServerVersion();
+    sendJson(res, 200, version, ctx.corsConfig, req);
     return true;
   }
 

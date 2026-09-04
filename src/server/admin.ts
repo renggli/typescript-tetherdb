@@ -6,12 +6,15 @@ import type {
 import { OperationType } from '../shared/types.js';
 import { TetherServerError, TetherServerErrorCode } from './errors.js';
 import type { ServerLockInfo } from './shared/lock.js';
+import { getServerVersion, type ServerVersion } from './shared/version.js';
 import type {
   MaintenanceResult,
   Storage,
   StorageStatus,
 } from './storage/storage.js';
 import { User } from './storage/user.js';
+
+export type { ServerVersion };
 
 /**
  * Connection details encoded in an admin connection token.
@@ -74,6 +77,9 @@ export function decodeAdminToken(token: string): AdminTokenPayload {
 export interface AdminTarget {
   /** Retrieves storage summary statistics and table listings. */
   getStatus(): Promise<StorageStatus>;
+
+  /** Retrieves running server or database version details. */
+  getVersion(): Promise<ServerVersion>;
 
   /** Retrieves all table definitions. */
   getTables(): Promise<Array<{ name: string; settings: TableSettings }>>;
@@ -189,6 +195,10 @@ export class AdminClient implements AdminTarget {
 
   async getStatus(): Promise<StorageStatus> {
     return this.request('GET', '/admin/status');
+  }
+
+  async getVersion(): Promise<ServerVersion> {
+    return this.request('GET', '/admin/version');
   }
 
   async getTables(): Promise<Array<{ name: string; settings: TableSettings }>> {
@@ -385,6 +395,10 @@ export class LocalAdminTarget implements AdminTarget {
 
   async getStatus(): Promise<StorageStatus> {
     return this.storage.getStatus();
+  }
+
+  async getVersion(): Promise<ServerVersion> {
+    return getServerVersion();
   }
 
   async getTables(): Promise<Array<{ name: string; settings: TableSettings }>> {

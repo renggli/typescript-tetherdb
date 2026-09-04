@@ -14,6 +14,7 @@ import { handleStatusCommand } from './commands/status.js';
 import { handleStopCommand } from './commands/stop.js';
 import { handleTablesCommand } from './commands/tables.js';
 import { handleUsersCommand } from './commands/users.js';
+import { handleVersionCommand } from './commands/version.js';
 
 /**
  * Standard command line interface for TetherDB.
@@ -42,6 +43,10 @@ export async function runCli(
     if (command === 'serve') {
       const storage = createBackend(backend, dir);
       await handleServeCommand(storage, backend, dir, port, host);
+      return;
+    }
+    if (command === 'version') {
+      await handleVersionCommand(dir, backend, token);
       return;
     }
 
