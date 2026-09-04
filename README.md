@@ -295,6 +295,9 @@ npx tetherdb serve --file=./data --host=127.0.0.1 --port=9000
 # Inspect server status, database size, table count, and user count
 npx tetherdb status --sqlite=./data
 
+# Print TetherDB version
+npx tetherdb version
+
 # Gracefully stop a running server via its lockfile or admin token
 npx tetherdb stop --sqlite=./data
 ```
@@ -384,7 +387,7 @@ npx tetherdb migrate --sqlite=./data
 | `GET` | `/health` | Server uptime and liveness probe | Public / Internal |
 | `GET` | `/ready` | Storage backend readiness check | Internal Management |
 | `GET` | `/metrics` | Connected clients, table counts, memory metrics | Internal Management |
-| `*` | `/admin/*` | REST API for tables, users, records, and maintenance | Admin (Bearer Token) |
+| `*` | `/admin/*` | REST API for tables, users, records, version, and maintenance | Admin (Bearer Token) |
 
 > [!IMPORTANT]
 > **Security Notice — Expose Only the WebSocket Port / Route (`/tether`)**:

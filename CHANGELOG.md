@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2026-09-04
+
+### Security & Hardening
+
+- **Batch Size Limit**: Enforced maximum item count on incoming change batches (`validateBatchChanges`) to prevent memory exhaustion and DoS attacks.
+- **Partition Isolation & Anonymization**: Enforced partition isolation and stripped author user IDs from shared table broadcast payloads to prevent identity leakage.
+- **Table Settings Validation**: Validated table configuration limits (`maxRecordSize`, `maxRecords`) across REST endpoints, CLI commands, and all storage backends (`FileStorage`, `SqliteStorage`, `MemoryStorage`).
+- **Maintenance Parameter Validation**: Added strict validation on changelog pruning parameters (`keepCount`, `olderThan`) to guard against unintended changelog deletion.
+- **User Constraints Validation**: Enforced username and user ID format and collision constraints during user rename operations.
+- **Client-Side Validation**: Added shared table name validation rules (`src/shared/validate.ts`) with early rejection on client-side table operations.
+
+### Client & Sync Protocol (`tetherdb/client`)
+
+- **State Reconciliation on LWW Conflict**: Server sends targeted reconciliation messages when a client update is rejected under Last-Write-Wins conflict resolution, ensuring client IndexedDB converges with canonical server state.
+- **Authentication Failure Handling**: WebSocket sync client halts reconnection loops on authentication failures and improves error logging on rejected record mutations.
+
+### Server & Storage Architecture (`tetherdb/server`)
+
+- **User Model Refactoring**: Refactored `User` class to `UserRecord` interface and required explicit user context across all storage operations.
+- **Table Deletion Changelog Purge**: Ensured all associated changelog entries are purged upon table deletion across `FileStorage` and `MemoryStorage`.
+
+### CLI & Administration (`tetherdb/cli`)
+
+- **Version Reporting**: Added `GET /admin/version` REST endpoint and `tetherdb version` CLI subcommand.
+- **Status Reporting**: Displayed server and storage version in `GET /admin/status` and status CLI output banner.
+
 ## [0.2.0] - 2026-09-02
 
 ### Client & Reactive Querying (`tetherdb/client`)
