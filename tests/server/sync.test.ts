@@ -481,6 +481,116 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       expect(guestBroadcasts).toHaveLength(0);
     });
 
+    it('isolates private partition broadcasts between users and prevents internal userId leaks', async () => {
+      // Bob
+      const bob = await storage.createUser('bob_isolated', 'password123');
+      const bobToken = await bob.createToken();
+
+      // Alice connects tab 1 and tab 2
+      const { ws: wsAlice1 } = await connectAndAuth(sync, validToken, {
+        clientId: 'alice-tab-1',
+      });
+      const { ws: wsAlice2 } = await connectAndAuth(sync, validToken, {
+        clientId: 'alice-tab-2',
+      });
+
+      // Bob connects tab 1 and tab 2
+      const { ws: wsBob1 } = await connectAndAuth(sync, bobToken, {
+        clientId: 'bob-tab-1',
+      });
+      const { ws: wsBob2 } = await connectAndAuth(sync, bobToken, {
+        clientId: 'bob-tab-2',
+      });
+
+      // Alice sends a mutation to her private 'todos' table
+      wsAlice1.emitClientMessage({
+        type: ClientMessageType.ChangeBatch,
+        batchId: 'alice-batch-1',
+        changes: [
+          {
+            table: 'todos',
+            id: 'alice-private-task',
+            op: OperationType.Put,
+            data: { task: 'Alice task' },
+            timestamp: Date.now(),
+          },
+        ],
+      });
+
+      await wsAlice1.waitForMessages(3); // AuthSuccess, SyncDiff, ChangeAck
+      await wsAlice2.waitForMessages(3); // AuthSuccess, SyncDiff, BroadcastChanges
+
+      // Alice's other tab MUST receive the broadcast
+      const alice2Broadcasts = wsAlice2
+        .getParsedMessages()
+        .filter((m) => m.type === ServerMessageType.BroadcastChanges);
+      expect(alice2Broadcasts).toHaveLength(1);
+      const aliceBroadcast = alice2Broadcasts[0] as {
+        type: ServerMessageType.BroadcastChanges;
+        changes: ChangeRecord[];
+      };
+      expect(aliceBroadcast.changes[0].id).toBe('alice-private-task');
+      // Crucial: internal userId must never leak over WebSocket wire
+      expect(
+        (aliceBroadcast.changes[0] as { userId?: string }).userId,
+      ).toBeUndefined();
+
+      // Neither of Bob's tabs may receive Alice's private broadcast
+      const bob1Broadcasts = wsBob1
+        .getParsedMessages()
+        .filter((m) => m.type === ServerMessageType.BroadcastChanges);
+      const bob2Broadcasts = wsBob2
+        .getParsedMessages()
+        .filter((m) => m.type === ServerMessageType.BroadcastChanges);
+      expect(bob1Broadcasts).toHaveLength(0);
+      expect(bob2Broadcasts).toHaveLength(0);
+
+      // Now Bob sends a mutation to his private 'todos' table
+      wsBob1.emitClientMessage({
+        type: ClientMessageType.ChangeBatch,
+        batchId: 'bob-batch-1',
+        changes: [
+          {
+            table: 'todos',
+            id: 'bob-private-task',
+            op: OperationType.Put,
+            data: { task: 'Bob task' },
+            timestamp: Date.now(),
+          },
+        ],
+      });
+
+      await wsBob1.waitForMessages(3);
+      await wsBob2.waitForMessages(3);
+
+      // Bob's other tab receives the broadcast
+      const bob2NewBroadcasts = wsBob2
+        .getParsedMessages()
+        .filter((m) => m.type === ServerMessageType.BroadcastChanges);
+      expect(bob2NewBroadcasts).toHaveLength(1);
+      expect(
+        (bob2NewBroadcasts[0] as { changes: ChangeRecord[] }).changes[0].id,
+      ).toBe('bob-private-task');
+      expect(
+        (
+          (bob2NewBroadcasts[0] as { changes: ChangeRecord[] }).changes[0] as {
+            userId?: string;
+          }
+        ).userId,
+      ).toBeUndefined();
+
+      // Neither of Alice's tabs may receive Bob's private broadcast
+      const alice1Broadcasts = wsAlice1
+        .getParsedMessages()
+        .filter((m) => m.type === ServerMessageType.BroadcastChanges);
+      expect(alice1Broadcasts).toHaveLength(0);
+      expect(
+        wsAlice2
+          .getParsedMessages()
+          .filter((m) => m.type === ServerMessageType.BroadcastChanges),
+      ).toHaveLength(1);
+    });
+
     it('should reject ChangeBatch when changes is not an array', async () => {
       const ws = new MockServerWebSocket();
       sync.handleConnection(ws as unknown as WebSocket);

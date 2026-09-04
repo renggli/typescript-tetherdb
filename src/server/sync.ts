@@ -8,6 +8,7 @@ import {
   ClientMessageType,
   type LoginClientMessage,
   type LogoutClientMessage,
+  OperationType,
   PROTOCOL_VERSION,
   type RegisterClientMessage,
   type ServerMessage,
@@ -607,7 +608,7 @@ export class Sync {
 
       // Broadcast applied changes to other active clients who have access to the modified tables
       if (applied.length > 0) {
-        await this.broadcastChanges(webSocket, client.user, applied, newSeq);
+        await this.broadcastChanges(webSocket, applied, newSeq);
       }
     } catch (err) {
       if (err instanceof TetherServerError) {
@@ -724,7 +725,6 @@ export class Sync {
 
   private async broadcastChanges(
     senderWebSocket: WebSocket,
-    senderUser: User,
     changes: ChangeRecord[],
     seq: number,
   ): Promise<void> {
@@ -745,26 +745,47 @@ export class Sync {
           tableCache.set(change.table, table);
         }
 
-        if (
-          table?.canRead(
-            client.user,
-            senderUser.isAuthenticated
-              ? ({ userId: senderUser.userId } as InternalStoredRecord)
-              : undefined,
-          )
-        ) {
-          if (table.isPrivate) {
-            if (
-              client.user.isAuthenticated &&
-              senderUser.isAuthenticated &&
-              client.user.userId === senderUser.userId
-            ) {
-              clientChanges.push(change);
-            }
-          } else {
-            clientChanges.push(change);
+        if (!table?.canRead(client.user)) continue;
+
+        const recordUserId = (change as { userId?: string }).userId;
+
+        if (table.isPrivate) {
+          if (
+            !client.user.isAdmin &&
+            (!client.user.isAuthenticated ||
+              recordUserId !== client.user.userId)
+          ) {
+            continue;
           }
         }
+
+        const recordContext = recordUserId
+          ? ({ userId: recordUserId } as InternalStoredRecord)
+          : undefined;
+
+        if (!table.canRead(client.user, recordContext)) {
+          continue;
+        }
+
+        const publicChange: ChangeRecord = {
+          table: change.table,
+          id: change.id,
+          op: change.op,
+          version: change.version,
+          seq: change.seq,
+          timestamp: change.timestamp,
+        };
+        if (change.op !== OperationType.Delete && change.data !== undefined) {
+          publicChange.data = change.data;
+        }
+        if (change.clientId !== undefined) {
+          publicChange.clientId = change.clientId;
+        }
+        if (change.userName !== undefined) {
+          publicChange.userName = change.userName;
+        }
+
+        clientChanges.push(publicChange);
       }
 
       if (clientChanges.length > 0) {

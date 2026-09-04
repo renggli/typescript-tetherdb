@@ -81,6 +81,7 @@ export class UserResolver {
         timestamp: applied.timestamp,
         clientId: applied.clientId,
         userName,
+        ...(applied.userId !== undefined ? { userId: applied.userId } : {}),
       });
     }
     return publicApplied;
