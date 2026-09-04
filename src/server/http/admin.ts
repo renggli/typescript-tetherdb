@@ -10,6 +10,8 @@ import type { TetherLogger } from '../server.js';
 import {
   validateKeepCount,
   validateTableSettings,
+  validateUserId,
+  validateUserName,
 } from '../shared/validate.js';
 import { getServerVersion } from '../shared/version.js';
 import type { MaintenanceResult, Storage } from '../storage/storage.js';
@@ -271,7 +273,8 @@ export async function handleAdminRequest(
 
   // DELETE/PATCH /admin/users/:userId
   if (adminPath.startsWith('/users/')) {
-    const userId = decodeURIComponent(adminPath.slice('/users/'.length));
+    const rawUserId = decodeURIComponent(adminPath.slice('/users/'.length));
+    const userId = validateUserId(rawUserId);
     if (method === 'DELETE') {
       const user = await ctx.storage.getUser(userId);
       if (!user) {
@@ -292,7 +295,8 @@ export async function handleAdminRequest(
           'New username is required',
         );
       }
-      const renamed = await ctx.storage.renameUser(userId, body.userName);
+      const safeUserName = validateUserName(body.userName);
+      const renamed = await ctx.storage.renameUser(userId, safeUserName);
       sendJson(
         res,
         200,

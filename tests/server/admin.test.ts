@@ -135,6 +135,13 @@ describe('AdminTarget (LocalAdminTarget & AdminClient)', () => {
     expect(renamedUser.userId).toBe(user.userId);
     expect(renamedUser.userName).toBe('roberto');
 
+    // Username & UserID validation on rename
+    await expect(remoteTarget.renameUser(user.userId, 'ab')).rejects.toThrow();
+    await expect(remoteTarget.renameUser(user.userId, '   ')).rejects.toThrow();
+    await expect(
+      remoteTarget.renameUser('../bad-user-id', 'validname'),
+    ).rejects.toThrow();
+
     // 3. Record CRUD
     await remoteTarget.putRecord(
       'remotetasks',
