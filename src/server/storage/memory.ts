@@ -105,8 +105,12 @@ export class MemoryStorage extends Storage {
     const safeName = validateTableName(name);
     const existed = this.tables.delete(safeName);
     this.sharedState.tables.delete(safeName);
+    this.sharedState.changelog = this.sharedState.changelog.filter(
+      (c) => c.table !== safeName,
+    );
     for (const state of this.userStates.values()) {
       state.tables.delete(safeName);
+      state.changelog = state.changelog.filter((c) => c.table !== safeName);
     }
     return existed;
   }

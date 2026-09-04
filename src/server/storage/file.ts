@@ -577,6 +577,7 @@ export class FileStorage extends Storage {
         } catch {
           // Ignore
         }
+        await this.purgeTableFromSyncFiles(safeName);
       }
       return deleted;
     });
@@ -805,6 +806,55 @@ export class FileStorage extends Storage {
       return prunedCount;
     } catch {
       return 0;
+    }
+  }
+
+  private async purgeTableFromSyncFiles(tableName: string): Promise<void> {
+    const users = await this.getUsers();
+    const partitions = ['__shared__', ...users.map((u) => u.userId)];
+
+    for (const partitionId of partitions) {
+      await this.withLock(partitionId, async () => {
+        const partitionDir = this.resolvePartitionDir(partitionId);
+        await this.purgeTableSyncFile(partitionDir, tableName);
+      });
+    }
+  }
+
+  private async purgeTableSyncFile(
+    partitionDir: string,
+    tableName: string,
+  ): Promise<void> {
+    try {
+      const syncFile = path.join(partitionDir, 'sync.jsonl');
+      const content = await fs.readFile(syncFile, 'utf-8');
+      const lines = content
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
+
+      const keptLines: string[] = [];
+      let droppedCount = 0;
+      for (const line of lines) {
+        try {
+          const rec = JSON.parse(line) as { table?: string };
+          if (rec.table !== tableName) {
+            keptLines.push(line);
+          } else {
+            droppedCount++;
+          }
+        } catch {
+          keptLines.push(line);
+        }
+      }
+
+      if (droppedCount > 0) {
+        const newContent =
+          keptLines.length > 0 ? `${keptLines.join('\n')}\n` : '';
+        await writeFileAtomic(syncFile, newContent);
+      }
+    } catch {
+      // Sync file does not exist or cannot be read
     }
   }
 

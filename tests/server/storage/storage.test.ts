@@ -539,4 +539,36 @@ function runStorageTestSuite(createStorage: () => Storage) {
     expect(res.requiresSnapshot).toBe(false);
     expect(res.changes.length).toBeGreaterThan(0);
   });
+
+  it('should purge changelog entries when a table is deleted', async () => {
+    await storage.createTable('temp_purge_table');
+    const user = await storage.createUser('purge_tbl_user', 'password');
+
+    await storage.applyChanges(user, [
+      {
+        table: 'temp_purge_table',
+        id: 'row1',
+        op: OperationType.Put,
+        data: { text: 'delete me later' },
+        timestamp: 1000,
+        clientId: 'c1',
+      },
+    ]);
+
+    // Raw changes should initially contain the row
+    const beforeDelete = await storage.getRawChangesSince(0, user);
+    expect(
+      beforeDelete.rawChanges.some((c) => c.table === 'temp_purge_table'),
+    ).toBe(true);
+
+    // Delete the table
+    const deleted = await storage.deleteTable('temp_purge_table');
+    expect(deleted).toBe(true);
+
+    // Raw changes should no longer contain entries for the deleted table
+    const afterDelete = await storage.getRawChangesSince(0, user);
+    expect(
+      afterDelete.rawChanges.some((c) => c.table === 'temp_purge_table'),
+    ).toBe(false);
+  });
 }
