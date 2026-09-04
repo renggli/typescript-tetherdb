@@ -606,6 +606,71 @@ export class Sync {
         appliedSeq: newSeq,
       });
 
+      // If some changes were skipped due to LWW conflict, reconcile the sender with the current winning state
+      if (applied.length < sanitizedChanges.length) {
+        const appliedKeys = new Set(applied.map((a) => `${a.table}:${a.id}`));
+        const skippedChanges = sanitizedChanges.filter(
+          (c) => !appliedKeys.has(`${c.table}:${c.id}`),
+        );
+        const reconciliations: ChangeRecord[] = [];
+        const resolver = new UserResolver(this.storage);
+
+        for (const skipped of skippedChanges) {
+          const table = await this.storage.getTable(skipped.table);
+          if (!table) continue;
+
+          const partition =
+            table.isPrivate &&
+            client.user.isAuthenticated &&
+            !client.user.isAdmin
+              ? client.user.userId
+              : '__shared__';
+
+          const raw = await this.storage.getRawRecord(
+            skipped.table,
+            partition,
+            skipped.id,
+          );
+          if (!raw) continue;
+          if (!table.canRead(client.user, raw)) continue;
+
+          const userName = await resolver.resolveUserName(
+            raw.userId,
+            client.user,
+          );
+          const isDeleted = raw.deleted === true;
+
+          const recChange: ChangeRecord = {
+            table: skipped.table,
+            id: raw.id,
+            op: isDeleted ? OperationType.Delete : OperationType.Put,
+            version: raw.version,
+            seq: newSeq,
+            timestamp: raw.timestamp,
+          };
+          if (!isDeleted && raw.data !== undefined) {
+            recChange.data = raw.data;
+          }
+          if (raw.clientId !== undefined) {
+            recChange.clientId = raw.clientId;
+          }
+          if (userName !== undefined) {
+            recChange.userName = userName;
+          }
+
+          reconciliations.push(recChange);
+        }
+
+        if (reconciliations.length > 0) {
+          this.send(webSocket, {
+            type: ServerMessageType.SyncDiff,
+            fromSeq: newSeq,
+            toSeq: newSeq,
+            changes: reconciliations,
+          });
+        }
+      }
+
       // Broadcast applied changes to other active clients who have access to the modified tables
       if (applied.length > 0) {
         await this.broadcastChanges(webSocket, applied, newSeq);

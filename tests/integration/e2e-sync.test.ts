@@ -362,5 +362,49 @@ describe.each(storageDescriptors)(
 
       await client.close();
     });
+
+    it('should converge client local state when an outbox mutation loses LWW conflict on server', async () => {
+      const user = await storageContext.storage.getUserByUserName('testuser');
+      expect(user).toBeDefined();
+      if (!user) throw new Error('testuser not found');
+
+      const client = createClient('client-conflict', {
+        autoConnect: false,
+      });
+
+      // Write locally while disconnected (queued in outbox)
+      const todos = client.table<{ title: string }>('todos');
+      await todos.put('conflict-todo', { title: 'Losing client value' });
+
+      // Server has a winning version with a higher timestamp
+      await storageContext.storage.applyChanges(user, [
+        {
+          table: 'todos',
+          id: 'conflict-todo',
+          op: OperationType.Put,
+          data: { title: 'Winning server value' },
+          timestamp: Date.now() + 100000,
+        },
+      ]);
+
+      // Verify local state before connect has the losing value
+      const beforeConnect = await todos.get('conflict-todo');
+      expect(beforeConnect?.title).toBe('Losing client value');
+
+      // Now connect and login
+      await client.login({ userName: 'testuser', password: 'password123' });
+      await waitForCondition(() => client.syncStatus === SyncStatus.Connected);
+
+      // Client outbox should be processed and local store must converge to server winner
+      await waitForCondition(async () => {
+        const rec = await todos.get('conflict-todo');
+        return rec?.title === 'Winning server value';
+      });
+
+      const afterSync = await todos.get('conflict-todo');
+      expect(afterSync?.title).toBe('Winning server value');
+
+      await client.close();
+    });
   },
 );

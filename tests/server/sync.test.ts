@@ -591,6 +591,68 @@ describe.each(storageDescriptors)('Sync ($name)', ({ createBackend }) => {
       ).toHaveLength(1);
     });
 
+    it('sends SyncDiff with winning state when incoming change is skipped due to LWW conflict', async () => {
+      // 1. Pre-populate server with a newer record (timestamp = 2000)
+      const user = await storage.getUser(testUserId);
+      expect(user).toBeDefined();
+      if (!user) throw new Error('user not found');
+      await storage.applyChanges(user, [
+        {
+          table: 'todos',
+          id: 'conflict-item',
+          op: OperationType.Put,
+          data: { title: 'Winning server value' },
+          timestamp: 2000,
+        },
+      ]);
+
+      // 2. Client connects and authenticates
+      const { ws } = await connectAndAuth(sync, validToken, {
+        clientId: 'client-1',
+        lastSyncSeq: 0,
+        expectedMessages: 2, // AuthSuccess + initial SyncDiff
+      });
+
+      // 3. Client sends a ChangeBatch with an older record (timestamp = 1000)
+      ws.emitClientMessage({
+        type: ClientMessageType.ChangeBatch,
+        batchId: 'stale-batch',
+        changes: [
+          {
+            table: 'todos',
+            id: 'conflict-item',
+            op: OperationType.Put,
+            data: { title: 'Losing client value' },
+            timestamp: 1000,
+          },
+        ],
+      });
+
+      // Client must receive ChangeAck AND a SyncDiff containing the winning record
+      await ws.waitForMessages(4); // 2 auth + ChangeAck + SyncDiff
+      const messages = ws.getParsedMessages();
+
+      const ackMsg = messages.find(
+        (m) => m.type === ServerMessageType.ChangeAck,
+      );
+      expect(ackMsg).toBeDefined();
+
+      const diffMsgs = messages.filter(
+        (m) => m.type === ServerMessageType.SyncDiff,
+      );
+      expect(diffMsgs).toHaveLength(1);
+      const reconcileDiff = diffMsgs[0] as {
+        type: ServerMessageType.SyncDiff;
+        changes: ChangeRecord[];
+      };
+      expect(reconcileDiff.changes).toHaveLength(1);
+      expect(reconcileDiff.changes[0].id).toBe('conflict-item');
+      expect(reconcileDiff.changes[0].data).toEqual({
+        title: 'Winning server value',
+      });
+      expect(reconcileDiff.changes[0].timestamp).toBe(2000);
+    });
+
     it('should reject ChangeBatch when changes is not an array', async () => {
       const ws = new MockServerWebSocket();
       sync.handleConnection(ws as unknown as WebSocket);
