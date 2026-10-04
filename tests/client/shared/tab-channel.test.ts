@@ -1,179 +1,171 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { TabChannel } from '../../../src/client/shared/tab-channel.js';
 import { TETHER_PREFIX } from '../../../src/client/storage/utils.js';
+import { delay, randomDbName, waitForCondition } from '../../helpers.js';
 
 describe('TabChannel', () => {
+  let dbName: string;
   let channel: TabChannel;
-
-  afterEach(() => {
-    channel.destroy();
-  });
 
   describe('when BroadcastChannel is available', () => {
     beforeEach(() => {
-      channel = new TabChannel('test-db');
+      dbName = randomDbName('tab-test');
+      channel = new TabChannel(dbName);
     });
 
-    it('registers and invokes message handlers for table changes', () => {
+    afterEach(() => {
+      channel.destroy();
+    });
+
+    it('registers and invokes message handlers for table changes', async () => {
       const received: unknown[] = [];
       channel.onMessage.register((msg) => received.push(msg));
 
-      const bc = new BroadcastChannel(`${TETHER_PREFIX}test-db`);
-      bc.postMessage({
-        type: 'change',
-        table: 'todos',
-        events: [{ id: 'a', op: 'put' }],
-      });
-      bc.close();
-
-      return new Promise<void>((resolve) => {
-        setTimeout(() => {
-          expect(received).toHaveLength(1);
-          expect(received[0]).toMatchObject({ type: 'change', table: 'todos' });
-          resolve();
-        }, 0);
-      });
+      const bc = new BroadcastChannel(`${TETHER_PREFIX}${dbName}`);
+      try {
+        bc.postMessage({
+          type: 'change',
+          table: 'todos',
+          events: [{ id: 'a', op: 'put' }],
+        });
+        await waitForCondition(() => received.length === 1);
+        expect(received[0]).toMatchObject({ type: 'change', table: 'todos' });
+      } finally {
+        bc.close();
+      }
     });
 
-    it('registers and invokes message handlers for auth sign-in events', () => {
+    it('registers and invokes message handlers for auth sign-in events', async () => {
       const received: unknown[] = [];
       channel.onMessage.register((msg) => received.push(msg));
 
-      const bc = new BroadcastChannel(`${TETHER_PREFIX}test-db`);
-      bc.postMessage({
-        type: 'auth',
-        status: 'signedIn',
-        userName: 'alice',
-        token: 'token-123',
-      });
-      bc.close();
-
-      return new Promise<void>((resolve) => {
-        setTimeout(() => {
-          expect(received).toHaveLength(1);
-          expect(received[0]).toEqual({
-            type: 'auth',
-            status: 'signedIn',
-            userName: 'alice',
-            token: 'token-123',
-          });
-          resolve();
-        }, 0);
-      });
+      const bc = new BroadcastChannel(`${TETHER_PREFIX}${dbName}`);
+      try {
+        bc.postMessage({
+          type: 'auth',
+          status: 'signedIn',
+          userName: 'alice',
+          token: 'token-123',
+        });
+        await waitForCondition(() => received.length === 1);
+        expect(received[0]).toEqual({
+          type: 'auth',
+          status: 'signedIn',
+          userName: 'alice',
+          token: 'token-123',
+        });
+      } finally {
+        bc.close();
+      }
     });
 
-    it('registers and invokes message handlers for auth sign-out events', () => {
+    it('registers and invokes message handlers for auth sign-out events', async () => {
       const received: unknown[] = [];
       channel.onMessage.register((msg) => received.push(msg));
 
-      const bc = new BroadcastChannel(`${TETHER_PREFIX}test-db`);
-      bc.postMessage({
-        type: 'auth',
-        status: 'signedOut',
-      });
-      bc.close();
-
-      return new Promise<void>((resolve) => {
-        setTimeout(() => {
-          expect(received).toHaveLength(1);
-          expect(received[0]).toEqual({
-            type: 'auth',
-            status: 'signedOut',
-          });
-          resolve();
-        }, 0);
-      });
+      const bc = new BroadcastChannel(`${TETHER_PREFIX}${dbName}`);
+      try {
+        bc.postMessage({
+          type: 'auth',
+          status: 'signedOut',
+        });
+        await waitForCondition(() => received.length === 1);
+        expect(received[0]).toEqual({
+          type: 'auth',
+          status: 'signedOut',
+        });
+      } finally {
+        bc.close();
+      }
     });
 
-    it('unsubscribes a handler via the returned function', () => {
+    it('unsubscribes a handler via the returned function', async () => {
       const received: unknown[] = [];
       const unsub = channel.onMessage.register((msg) => received.push(msg));
       unsub();
 
-      const bc = new BroadcastChannel(`${TETHER_PREFIX}test-db`);
-      bc.postMessage({ type: 'change', table: 'todos', events: [] });
-      bc.close();
-
-      return new Promise<void>((resolve) => {
-        setTimeout(() => {
-          expect(received).toHaveLength(0);
-          resolve();
-        }, 0);
-      });
+      const bc = new BroadcastChannel(`${TETHER_PREFIX}${dbName}`);
+      try {
+        bc.postMessage({
+          type: 'change',
+          table: 'todos',
+          events: [{ id: 'a', op: 'put' }],
+        });
+        await delay(50);
+        expect(received).toHaveLength(0);
+      } finally {
+        bc.close();
+      }
     });
 
-    it('does not broadcast change message when events array is empty', () => {
+    it('does not broadcast change message when events array is empty', async () => {
       const received: unknown[] = [];
-      const bc = new BroadcastChannel(`${TETHER_PREFIX}test-db`);
-      bc.onmessage = (e) => received.push(e.data);
-
-      channel.broadcast({ type: 'change', table: 'todos', events: [] });
-
-      return new Promise<void>((resolve) => {
-        setTimeout(() => {
-          expect(received).toHaveLength(0);
-          bc.close();
-          resolve();
-        }, 0);
-      });
+      const bc = new BroadcastChannel(`${TETHER_PREFIX}${dbName}`);
+      try {
+        bc.onmessage = (e) => received.push(e.data);
+        channel.broadcast({ type: 'change', table: 'todos', events: [] });
+        await delay(50);
+        expect(received).toHaveLength(0);
+      } finally {
+        bc.close();
+      }
     });
 
-    it('broadcasts events to sibling channels on the same database name', () => {
-      const receiver = new TabChannel('test-db');
-      const received: unknown[] = [];
-      receiver.onMessage.register((msg) => received.push(msg));
+    it('broadcasts events to sibling channels on the same database name', async () => {
+      const receiver = new TabChannel(dbName);
+      try {
+        const received: unknown[] = [];
+        receiver.onMessage.register((msg) => received.push(msg));
 
-      channel.broadcast({
-        type: 'change',
-        table: 'notes',
-        events: [{ id: '1', op: 'put', data: { text: 'hi' } }],
-      });
+        channel.broadcast({
+          type: 'change',
+          table: 'notes',
+          events: [{ id: '1', op: 'put', data: { text: 'hi' } }],
+        });
 
-      return new Promise<void>((resolve) => {
-        setTimeout(() => {
-          expect(received).toHaveLength(1);
-          expect(received[0]).toMatchObject({ type: 'change', table: 'notes' });
-          receiver.destroy();
-          resolve();
-        }, 0);
-      });
+        await waitForCondition(() => received.length === 1);
+        expect(received[0]).toMatchObject({ type: 'change', table: 'notes' });
+      } finally {
+        receiver.destroy();
+      }
     });
 
-    it('does not receive messages from a channel with a different database name', () => {
-      const other = new TabChannel('other-db');
-      const received: unknown[] = [];
-      channel.onMessage.register((msg) => received.push(msg));
+    it('does not receive messages from a channel with a different database name', async () => {
+      const other = new TabChannel(randomDbName('other-db'));
+      try {
+        const received: unknown[] = [];
+        channel.onMessage.register((msg) => received.push(msg));
 
-      other.broadcast({
-        type: 'change',
-        table: 'todos',
-        events: [{ id: '1', op: 'delete' }],
-      });
+        other.broadcast({
+          type: 'change',
+          table: 'todos',
+          events: [{ id: '1', op: 'delete' }],
+        });
 
-      return new Promise<void>((resolve) => {
-        setTimeout(() => {
-          expect(received).toHaveLength(0);
-          other.destroy();
-          resolve();
-        }, 0);
-      });
+        await delay(50);
+        expect(received).toHaveLength(0);
+      } finally {
+        other.destroy();
+      }
     });
 
-    it('stops receiving messages after destroy()', () => {
+    it('stops receiving messages after destroy()', async () => {
       const received: unknown[] = [];
       channel.onMessage.register((msg) => received.push(msg));
       channel.destroy();
 
-      const bc = new BroadcastChannel(`${TETHER_PREFIX}test-db`);
-      bc.postMessage({ type: 'change', table: 'todos', events: [] });
-      bc.close();
-
-      return new Promise<void>((resolve) => {
-        setTimeout(() => {
-          expect(received).toHaveLength(0);
-          resolve();
-        }, 0);
-      });
+      const bc = new BroadcastChannel(`${TETHER_PREFIX}${dbName}`);
+      try {
+        bc.postMessage({
+          type: 'change',
+          table: 'todos',
+          events: [{ id: '1', op: 'put' }],
+        });
+        await delay(50);
+        expect(received).toHaveLength(0);
+      } finally {
+        bc.close();
+      }
     });
 
     it('broadcast is a no-op after destroy()', () => {
@@ -195,11 +187,12 @@ describe('TabChannel', () => {
       originalBroadcastChannel = globalThis.BroadcastChannel;
       // @ts-expect-error — simulating missing API
       globalThis.BroadcastChannel = undefined;
-      channel = new TabChannel('test-db');
+      channel = new TabChannel(randomDbName('tab-test'));
     });
 
     afterEach(() => {
       globalThis.BroadcastChannel = originalBroadcastChannel;
+      channel.destroy();
     });
 
     it('is created without errors', () => {
